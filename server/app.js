@@ -21,8 +21,10 @@ import { listAudit } from './services/audit.js'
 import * as alerts from './services/alerts.js'
 import { onEvent } from './services/events.js'
 import * as conns from './integrations/connections.js'
-import { sendThrough, slackChannels } from './integrations/actions.js'
+import { sendThrough, slackChannels, slackUsers } from './integrations/actions.js'
 import * as auto from './automations/engine.js'
+import * as intake from './automations/intake.js'
+import * as contextFlows from './automations/context-flows.js'
 import * as v from './validate.js'
 import { now } from './db.js'
 
@@ -50,6 +52,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   const unsubscribe = listen ? [
     onEvent((e) => alerts.handleEvent(db, e)),
     onEvent((e) => (e.type === 'task.assigned' ? auto.runNewTaskNotification(db, vs, { ...e, appUrl: cfg.appUrl }) : null)),
+    onEvent((e) => contextFlows.onTaskEvent(db, vs, e, cfg.appUrl)),
     onEvent(() => alerts.processDeliveries(db, m91)),
     onEvent((e) => alerts.closeResolvedAlerts(db, m91, e))
   ] : []
@@ -78,7 +81,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   // cookie is SameSite=Lax. Token-authenticated machine endpoints are exempt.
   app.use('/api', (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store')
-    const machine = req.path.startsWith('/inbound/') || req.path.startsWith('/webhooks/')
+    const machine = req.path.startsWith('/inbound/') || req.path.startsWith('/webhooks/') || req.path.startsWith('/viasocket/events/')
     if (!machine && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.get('x-requested-with') !== 'TeamPulse') {
       return next(new AppError(403, 'csrf', 'Missing request header.'))
     }
@@ -346,10 +349,37 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   app.get('/api/viasocket/connections', h((req) => conns.listConnections(db, vs, member(req))))
   app.post('/api/viasocket/connections', h((req) => conns.saveConnection(db, vs, member(req), req.body)))
   app.get('/api/viasocket/connections/:id/reconnect', h((req) => conns.reconnectDetails(db, vs, member(req), req.params.id)))
-  app.get('/api/viasocket/connections/:id/slack-channels', h((req) => slackChannels(db, vs, member(req), req.params.id)))
+  app.get('/api/viasocket/connections/:id/slack-channels', h((req) => slackChannels(db, vs, member(req), req.params.id, { search: typeof req.query.search === 'string' ? req.query.search.slice(0, 80) : undefined })))
+  app.get('/api/viasocket/connections/:id/slack-users', h((req) => slackUsers(db, vs, member(req), req.params.id, { search: typeof req.query.search === 'string' ? req.query.search.slice(0, 80) : undefined })))
+
+  // A1: my own notifications, on my own connection.
+  app.get('/api/notifications/prefs', h((req) => auto.getNotificationPrefs(db, member(req))))
+  app.put('/api/notifications/prefs', h((req) => auto.saveNotificationPrefs(db, member(req), vs, req.body)))
+  // A real message, only to the person pressing the button (their own DM / own email / a channel they chose).
+  app.post('/api/automations/test-send', h((req) => auto.sendTestToSelf(db, member(req), vs, req.body)))
+
+  // C: Gmail / Slack intake.
+  app.get('/api/intakes', h((req) => intake.listIntakes(db, member(req))))
+  app.get('/api/intakes/targets', h((req) => intake.intakeTargets(db, vs, member(req), String(req.query.app || ''), String(req.query.connectionId || ''), { search: typeof req.query.search === 'string' ? req.query.search.slice(0, 80) : undefined })))
+  app.post('/api/intakes/sample', h((req) => intake.sampleIntake(db, vs, member(req), req.body)))
+  app.post('/api/intakes', h((req, res) => { res.status(201); return intake.createIntake(db, vs, member(req), req.body, { appUrl: cfg.appUrl }) }))
+  app.post('/api/intakes/:id/status', h((req) => intake.setIntakeStatus(db, vs, member(req), req.params.id, req.body)))
+  // Called by the subscription's handler on viaSocket, with that subscription's own bearer token.
+  app.post('/api/viasocket/events/:id', h((req) => {
+    const auth = req.get('authorization') || ''
+    return intake.receiveIntakeEvent(db, req.params.id, auth.startsWith('Bearer ') ? auth.slice(7).trim() : null, req.body)
+  }))
+
+  // D: the restricted builder for one TeamPulse context.
+  app.get('/api/viasocket/context/:key', h((req) => contextFlows.contextEmbed(vs, member(req), req.params.key, { app: typeof req.query.app === 'string' ? req.query.app : undefined })))
   app.delete('/api/viasocket/connections/:id', h((req) => conns.disconnect(db, vs, member(req), req.params.id)))
   app.get('/api/viasocket/embed-flows', h((req) => conns.listEmbedFlows(db, member(req))))
-  app.post('/api/viasocket/embed-flows/:flowId/sync', h((req) => conns.syncEmbedFlow(db, vs, member(req), req.params.flowId)))
+  app.post('/api/viasocket/embed-flows/:flowId/sync', h((req) => {
+    const ctx = member(req)
+    const context = req.body?.context ? (contextFlows.requireContext(ctx, String(req.body.context)), String(req.body.context)) : null
+    const appSlug = typeof req.body?.app === 'string' && /^[a-z0-9-]{2,40}$/.test(req.body.app) ? req.body.app : null
+    return conns.syncEmbedFlow(db, vs, ctx, req.params.flowId, { context, app: appSlug })
+  }))
   app.get('/vendor/viasocket-apps-browser.js', (req, res) => res.type('text/javascript').sendFile(VIASOCKET_BROWSER))
 
   // ---------- scheduled jobs (Embarko schedules call these with CRON_SECRET) ----------

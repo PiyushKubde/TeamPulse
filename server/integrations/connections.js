@@ -88,6 +88,8 @@ export async function disconnect(db, vs, ctx, id) {
     stillThere = live.some((c) => c.id === row.auth_id)
     if (stillThere) {
       for (const { script_id } of db.prepare('SELECT script_id FROM enabled_apps WHERE user_id = ? AND auth_id = ?').all(ctx.user.id, row.auth_id)) await vs.setFlowStatus(ctx.user.id, script_id, 2)
+      // Intake subscriptions on this account are paused first: a flow on a revoked connection fails on its next run.
+      for (const { script_id } of db.prepare(`SELECT script_id FROM intake_subscriptions WHERE owner_id = ? AND connection_id = ? AND status = 'ACTIVE' AND script_id IS NOT NULL`).all(ctx.user.id, row.id)) await vs.setFlowStatus(ctx.user.id, script_id, 2)
       await vs.revokeConnection(ctx.user.id, row.auth_id)
     }
   } catch (error) {
@@ -95,6 +97,8 @@ export async function disconnect(db, vs, ctx, id) {
   }
   transaction(db, () => {
     db.prepare('DELETE FROM enabled_apps WHERE user_id = ? AND auth_id = ?').run(ctx.user.id, row.auth_id)
+    db.prepare(`UPDATE intake_subscriptions SET status = 'PAUSED', last_error = 'The connected account was disconnected.', updated_at = ? WHERE connection_id = ? AND status = 'ACTIVE'`).run(now(), row.id)
+    db.prepare(`UPDATE notification_prefs SET channel = 'none', connection_id = NULL, updated_at = ? WHERE connection_id = ?`).run(now(), row.id)
     db.prepare('DELETE FROM app_connections WHERE id = ?').run(row.id)
     for (const w of db.prepare(`SELECT * FROM automation_workflows WHERE org_id = ? AND owner_id = ?`).all(ctx.orgId, ctx.user.id)) {
       const cfg = JSON.parse(w.config || '{}')
@@ -106,7 +110,7 @@ export async function disconnect(db, vs, ctx, id) {
 
 // ---------- Embed builder flows (prebuilt UI) ----------
 /** Records a flow the user published/paused/deleted in the embed, read back from viaSocket (never trusted from the browser). */
-export async function syncEmbedFlow(db, vs, ctx, flowId) {
+export async function syncEmbedFlow(db, vs, ctx, flowId, { context = null, app = null } = {}) {
   requireViasocket(vs)
   if (typeof flowId !== 'string' || !/^[A-Za-z0-9_-]{3,80}$/.test(flowId)) throw new AppError(400, 'validation_failed', 'Not a valid flow id.')
   let flows
@@ -117,13 +121,16 @@ export async function syncEmbedFlow(db, vs, ctx, flowId) {
     db.prepare('DELETE FROM embed_flows WHERE user_id = ? AND flow_id = ?').run(ctx.user.id, flowId)
     return { flowId, status: 'deleted' }
   }
-  db.prepare(`INSERT INTO embed_flows (org_id, user_id, flow_id, title, status, last_action, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-              ON CONFLICT (user_id, flow_id) DO UPDATE SET title = excluded.title, status = excluded.status, last_action = excluded.last_action, updated_at = excluded.updated_at`)
-    .run(ctx.orgId, ctx.user.id, flowId, String(flow.title || flow.name || '').slice(0, 200) || null, String(flow.status || 'unknown'), 'sync', ts)
-  return { flowId, status: flow.status, title: flow.title || null }
+  // The flow's URL comes from viaSocket's own flow list (never from the browser) and stays on the server.
+  const webhook = typeof flow.webhook === 'string' && /^https:\/\/flow\.sokt\.io\/func\/[A-Za-z0-9_-]+$/.test(flow.webhook) ? flow.webhook : null
+  db.prepare(`INSERT INTO embed_flows (org_id, user_id, flow_id, title, status, last_action, context, app, webhook_url, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT (user_id, flow_id) DO UPDATE SET title = excluded.title, status = excluded.status, last_action = excluded.last_action,
+                context = COALESCE(excluded.context, embed_flows.context), app = COALESCE(excluded.app, embed_flows.app), webhook_url = excluded.webhook_url, updated_at = excluded.updated_at`)
+    .run(ctx.orgId, ctx.user.id, flowId, String(flow.title || flow.name || '').slice(0, 200) || null, String(flow.status || 'unknown'), 'sync', context, app, webhook, ts)
+  return { flowId, status: flow.status, title: flow.title || null, context }
 }
 
 export function listEmbedFlows(db, ctx) {
-  return db.prepare('SELECT flow_id, title, status, updated_at FROM embed_flows WHERE user_id = ? AND org_id = ? ORDER BY updated_at DESC').all(ctx.user.id, ctx.orgId)
-    .map((f) => ({ flowId: f.flow_id, title: f.title, status: f.status, updatedAt: f.updated_at }))
+  return db.prepare('SELECT flow_id, title, status, context, updated_at FROM embed_flows WHERE user_id = ? AND org_id = ? ORDER BY updated_at DESC').all(ctx.user.id, ctx.orgId)
+    .map((f) => ({ flowId: f.flow_id, title: f.title, status: f.status, context: f.context, updatedAt: f.updated_at }))
 }

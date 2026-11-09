@@ -32,10 +32,22 @@ export function migrate(db, { log = () => {} } = {}) {
   for (const f of files) {
     if (applied.has(f)) continue
     const sql = readFileSync(join(MIGRATIONS_DIR, f), 'utf8')
-    transaction(db, () => {
-      db.exec(sql)
-      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(f, now())
-    })
+    // A migration that rebuilds a table (SQLite's documented 12-step procedure) starts with "-- foreign_keys: off":
+    // foreign keys are switched off around its transaction, then checked before they are switched back on.
+    const rebuild = sql.startsWith('-- foreign_keys: off')
+    if (rebuild) db.exec('PRAGMA foreign_keys = OFF')
+    try {
+      transaction(db, () => {
+        db.exec(sql)
+        if (rebuild) {
+          const broken = db.prepare('PRAGMA foreign_key_check').all()
+          if (broken.length) throw new Error(`Migration ${f} would break ${broken.length} foreign key(s); rolled back.`)
+        }
+        db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(f, now())
+      })
+    } finally {
+      if (rebuild) db.exec('PRAGMA foreign_keys = ON')
+    }
     log(`[migrate] applied ${f}`)
     ran.push(f)
   }
