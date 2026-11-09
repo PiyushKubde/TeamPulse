@@ -1,0 +1,29 @@
+{
+  "name": "teampulse",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TeamPulse - team task management and impact tracking. Value over task count.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning --watch server/index.js",
+    "migrate": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning server/migrate.js",
+    "seed:demo": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/seed-demo.js",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\"",
+    "lint": "eslint .",
+    "check": "node --check server/index.js && npm run lint",
+    "test:e2e": "node --disable-warning=ExperimentalWarning scripts/e2e.mjs"
+  },
+  "dependencies": {
+    "express": "^5.3.0",
+    "viasocket-apps": "^0.7.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "globals": "^16.5.0"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://embarko.ai/schema/embarko.json",
+  "schedules": [
+    {
+      "cron": "*/15 * * * *",
+      "path": "/tasks/alerts",
+      "timezone": "Asia/Kolkata",
+      "name": "TeamPulse alerts, M91 delivery and automation retries"
+    },
+    {
+      "cron": "5 9 * * 1",
+      "path": "/tasks/weekly-report",
+      "timezone": "Asia/Kolkata",
+      "name": "TeamPulse weekly team report"
+    }
+  ]
+}
