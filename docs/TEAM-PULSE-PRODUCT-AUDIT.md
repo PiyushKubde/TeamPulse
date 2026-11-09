@@ -431,3 +431,56 @@ A bug found by the browser run and fixed: "added a regression test" was read as 
 1. An `ANTHROPIC_API_KEY` (with `AI_PROVIDER=anthropic`) and one supervised live smoke test on a real task.
 2. Owner approval to deploy (backup is taken by the scheduled job; migration 007 is additive).
 3. Phase 2 candidates: role-specific rubrics, reading evidence contents, normalized GitHub/Slack/Gmail/Calendar/Sheets evidence through ViaSocket, period-level summaries, evaluation set for prompt changes.
+
+
+# Phase 1.1 — Live-AI readiness and evaluation (2026-11-09, feature branch, not deployed, no live API call)
+
+## Audit findings (and what was done)
+
+| # | Finding | Severity | Action |
+|---|---|---|---|
+| 1 | The SDK client inherited environment behaviour: `ANTHROPIC_LOG=debug` could log requests; `ANTHROPIC_OPEN_TELEMETRY_*` could switch on trace content capture | Medium (data leakage) | Client now pinned: explicit key + base URL, `logLevel: 'warn'`, `openTelemetry: false` (tested) |
+| 2 | Fallback answers were recorded only as `model`; no requested model or hops | Medium (transparency) | Served model, requested model and hops are stored on the run and assessment and shown as a badge |
+| 3 | Error messages for 401/403/404/400 were generic | Low | Specific, actionable messages (key / workspace / AI_MODEL / API reason); never include the key (tested) |
+| 4 | Automatic analysis on submit/approve would start sending every task to the provider the moment a key is set | High (consent / supervision) | `AI_MODE` with **supervised** as the default for a real provider: selected tasks only, owner check, admins only, no automatic runs, no events/notifications |
+| 5 | Re-analysis could hide a manager's adjustment (it lives on the superseded assessment) | Medium (audit visibility) | Earlier analyses now carry their human responses on the card |
+| 6 | Complexity corroboration was judged by item kind, so the employee's own comment, or a bare "approved" review, counted as corroboration; L3 needed none at all | High (fairness) | Corroboration is judged by author and content; L3+ needs it (else L2). Found by the evaluation dataset's "inflated self-description" case |
+| 7 | Ratings could cite only the task description | Medium | Treated as no evidence |
+| 8 | Problem-solving / collaboration 4–5 could rest on self-description only | Medium | Capped at 3 without corroboration (ownership exempt) |
+| 9 | The number check used `includes` on the whole JSON pack: ids and timestamps could "contain" an invented number | Medium (unsupported claims) | Checked against human-written text with number boundaries (tested with a timestamp-only number) |
+| 10 | Keyword quality detection flagged "no regressions", "fixed the failing tests"; missed "test failures", "CI is red" | Medium | Narrow detector with negation/fix handling and a phrase table test; structured signals (reopen, changes requested) remain primary. No structured test results exist yet — not invented |
+| 11 | Confidence is model-reported and uncalibrated, but was shown as plain "confidence" | Low | Labelled "model-reported"; capped at 0.6 when only self-reported evidence supports it |
+| 12 | Guardrail changes were not versioned or part of the dedupe hash | Medium (reproducibility) | `GUARDRAIL_VERSION` (now v4) and prompt `v2` in the hash and stored per run/assessment |
+| 13 | Audit rows for assessments had no actor | Low | The requester is recorded |
+| — | Verified correct, unchanged: schema (structured-output compatible: no numeric/length constraints, `additionalProperties:false` everywhere), validator, insufficient-evidence gate, dedupe, async runs, retries/recovery, persistence and history, employee/manager flows, rate limit (30 analyses/hour/user) | — | — |
+
+## Provider readiness (no live call)
+
+- **Model:** `claude-opus-5-5` is a current model in the Claude API reference and in the installed SDK's `Model` type (SDK 1.3.0).
+- **Request shape:** the real provider was run against a local fake Messages API. It sends `model`, `max_tokens` 16000, `output_config: {effort: 'medium', format: {type: 'json_schema', schema}}` and `fallbacks: 'default'` with the `server-side-fallback-2026-07-01` beta header. It sends no thinking or sampling parameters. The SDK sends the key as a bearer credential with API version `2026-10-21`.
+- **Behaviour checked:**
+  - Thinking blocks are ignored and the text is parsed.
+  - Usage is recorded, including cache fields.
+  - A 401 is not retried and gives a clear error.
+  - 500, 529 and 429 are retried by the SDK.
+  - Timeouts surface as retryable.
+  - Refusals, truncation and non-JSON answers are rejected.
+- **Through the app:** a rejected key fails the run with a clear message and creates no assessment or notification. A fallback answer is shown with the model that actually answered.
+
+## Evaluation
+
+- **Dataset:** `eval/dataset.json` has 14 fictional cases: the 12 required work types plus inflated self-description and prompt injection. Reference answers are **draft, not human-reviewed**.
+- **Runner:** `scripts/eval-measurement.mjs` replays the cases into an in-memory TeamPulse with the production code. It scores schema, citations, complexity, dimensions, unsupported claims, missing information, impact attribution and basis, guardrail fixed/broke counts, and consistency.
+- **Simulated run (harness check only, says nothing about a real model):**
+  - Schema validity 1.0 and citation validity 1.0.
+  - Guardrails fixed 8 checks and broke 0.
+  - Agreement with draft expectations: 52/76 raw, 72/88 after guardrails.
+
+## Tests
+
+| Suite | Result |
+|---|---|
+| `npm test` | **94/94** (78 earlier + 6 provider-readiness + 6 guardrail/supervised + 4 eval-runner) |
+| `npm run test:e2e`, `test:e2e:auth`, `test:e2e:measurement` | pass |
+| `npm run eval:measurement -- --dry-run` | 14/14 cases replay; insufficient-evidence routing as expected |
+| Live AI | **not run** — needs the owner's key and approval (docs/supervised-ai-validation.md) |

@@ -50,13 +50,17 @@ evidence of value.
 
 ### Guardrails (deterministic, after the model)
 
-1. Citations must exist in the pack; invented references are removed. A rating left without a valid citation becomes "not enough evidence".
-2. L3+ needs evidence from the work itself (a title/priority is not enough → capped at L2); L4 needs corroboration beyond the employee's own words (evidence, a review, a blocker, an outcome record → else L3).
-3. Quality: a reopening, a regression or failing tests not followed by an approval → at most 2 (set by rules even if the model ignored it); changes requested before approval → at most 4; above 3 needs an approved review or validation evidence. ("Added a regression test" is validation, not a regression.)
-4. Work not delivered because of a blocker outside the person's control: impact and quality are **not applicable**, with "not counted against them".
-5. Impact above 3 needs a manager-verified outcome. Shared outcomes are labelled as shared and counted once at team level.
-6. Estimated outcomes containing numbers that do not appear in the evidence are dropped.
-7. Too little evidence at all (no description, a one-line note such as "Done.", no evidence, no outcome record): **no model call**; every dimension is "not enough evidence", with what is missing.
+Version `guardrails-2026-11-v4` (stored with every run and assessment, part of the dedupe hash).
+
+1. Citations must exist in the pack; invented references are removed. A rating left without a valid citation, or citing only the task description (which describes the request, not the work), becomes "not enough evidence".
+2. Complexity L3+ needs corroboration beyond the employee's own account — an artefact (link/file), a blocker, a verified or evidenced outcome record, a review *with a comment*, a recorded event, or someone else's words — else it is capped at L2. A title, a priority, or the employee describing the work as "extremely complex" is not enough.
+3. Problem-solving and collaboration above 3 need the same kind of corroboration (ownership is exempt: the employee's own updates and blocker reports are evidence of ownership).
+4. Quality: structured signals first — a reopening after completion, "changes requested" review decisions. Text is a narrow secondary signal (failing tests, CI red, regression, rollback) that ignores negations and fixes ("no regressions", "fixed the failing tests", "added a regression test"). An unresolved problem (after the last approval, or a reopening) → at most 2, set by rules even if the model ignored it; rework before approval → at most 4; above 3 needs an approved review or validation evidence. TeamPulse has no structured test results yet.
+5. Confidence is reported by the model and not calibrated; it is capped at 0.6 where only the employee's own account supports a rating, and at 0.5 where a rule changed the level.
+6. Work not delivered because of a blocker outside the person's control: impact and quality are **not applicable**, with "not counted against them".
+7. Impact above 3 needs a manager-verified outcome; the impact basis (verified / evidence-supported / claimed / none) is decided from records and shown. Shared outcomes are labelled as shared and counted once at team level.
+8. Estimated outcomes containing numbers that do not appear in the human-written text of the evidence (ids and timestamps excluded) are dropped.
+9. Too little evidence at all (no description, a one-line note such as "Done.", no evidence, no outcome record): **no model call**; every dimension is "not enough evidence", with what is missing.
 
 Every adjustment is listed under "Rules TeamPulse applied" on the card.
 
@@ -69,13 +73,21 @@ Every adjustment is listed under "Rules TeamPulse applied" on the card.
 | `AI_MODEL` | Default `claude-opus-5-5` |
 | `AI_EFFORT` | `low` · `medium` (default) · `high` |
 | `AI_TIMEOUT_MS` | Default 120000 |
-| `AI_FALLBACKS` | Server-side fallback to another model if the primary declines a request on safety grounds (on by default; `off` to disable). The model that actually answered is recorded per run |
+| `AI_FALLBACKS` | Server-side fallback to another model if the primary declines a request on safety grounds (on by default; `off` to disable). The model that actually answered, the requested model and the hops are recorded per run and shown on the card |
+| `AI_MODE` | `off` · `supervised` (default with a real provider: only `AI_SUPERVISED_TASKS`, admins only, no automatic runs, no notifications) · `on` (automatic on submit/approve) |
+| `AI_SUPERVISED_TASKS` | `taskId:owner-email,…` — see [supervised-ai-validation.md](supervised-ai-validation.md) |
 
-Calls use the official SDK (`@anthropic-ai/sdk`, pinned) with structured outputs (`output_config.format` +
+Calls use the official SDK (`@anthropic-ai/sdk` 1.3.0, pinned; it sends the key as a bearer credential and API
+version `2026-10-21`; no sampling or thinking-budget parameters are sent — Claude Opus 5.5 always uses adaptive
+thinking). The client is built with an explicit key, base URL, `logLevel: 'warn'` and OpenTelemetry off, so
+environment variables cannot redirect, log or trace evaluation data. Structured outputs (`output_config.format` +
 JSON Schema), an explicit base URL, a timeout, and the SDK's retries for 429/5xx/connection errors. The engine retries
 an answer that fails validation once, re-queues retryable failures (max 3 attempts, also after a restart via the
 15-minute scheduled job) and records model, prompt version, rubric version, token usage, latency and the exact input
 for every run.
+
+Evaluation: `eval/` (dataset of 14 fictional cases, runner, metrics) — see [eval/README.md](../eval/README.md).
+`GET /api/tasks/:id/assessment/preview` shows exactly what would be sent (no call, no write).
 
 Without a provider, the app says so: "Analyse" returns a clear 503, the card explains it, and nothing is pretended.
 The insufficient-evidence rule still works without AI.
