@@ -393,3 +393,41 @@ environment keys; value never read).
 **Verified locally only [LOCAL]/[SIMULATED]:** all signed-in product logic (roles, isolation, tasks, permissions, requests, blockers, reviews, impact, reports, dashboards) — 53/53 tests, browser e2e, 162-screen crawl; alert de-duplication; outbox replay after a crash; automation and intake rules with stand-ins.
 
 **Awaiting real accounts:** signed-in admin/manager/employee journeys and session persistence in production (owner's Google accounts); Slack/Gmail notifications (A), weekly report delivery (B), Gmail/Slack intake (C), events reaching user-built flows (D) — owner's connected test accounts and approval per send; M91 — an API key.
+
+
+# Phase 1 — AI Work Measurement Engine (2026-11-09, feature branch, not deployed)
+
+Design and configuration: [docs/ai-work-measurement.md](ai-work-measurement.md).
+
+## Already present before this phase (reused, not duplicated)
+
+Impact records with measured / estimated / no value, manager verification, shared outcome keys and contributors (team totals count a shared outcome once); completion review separate from impact; blockers with external flag and "not counted against the person"; append-only task events; audit log; event outbox; dashboards deliberately without scores. **Missing:** any AI layer, complexity, quality/ownership/problem-solving/collaboration assessment, employee confirmation, disputes, assessment history.
+
+## Added
+
+| Area | Result |
+| --- | --- |
+| Provider abstraction | `server/ai/provider.js`: Anthropic (official SDK 1.3.0, pinned; structured outputs; timeout; retries; typed error mapping; server-side refusal fallback; explicit base URL) · simulated dev provider (refused in production, labelled everywhere) · not configured (clear 503) |
+| Engine | Deterministic evidence pack, insufficient-evidence gate (no model call), SHA-256 input dedupe, async runs with status, validation + one retry, re-queue up to 3 attempts, recovery from the scheduled job, model/prompt/rubric versions and usage recorded per run |
+| Guardrails | Invented citations removed; no rating without evidence; complexity not raised by labels or self-description alone; quality capped by regressions / failing tests / rework; external blockers → not applicable, never a fault; impact > 3 only with verified outcome; shared outcomes labelled and counted once; invented numbers dropped |
+| Employee UX | Task card: "Analyse my work", what TeamPulse understood, complexity + 5 dimensions with reasons/confidence/evidence links, claimed / estimated / evidence-supported / verified impact, context, missing information, rules applied; confirm, suggest correction, add context (re-analyses), dispute; own profile |
+| Manager UX | Same card with approve / adjust (reason required) / dispute and the employee's proposal side by side; team overview (alphabetical, no ranking) on its page and the dashboard; person profile with narrative, complexity mix, per-dimension highlights with reasons, verified vs estimated outcomes, blocker context |
+| Data | Migration 007 — five new tables, nothing altered; verified on a copy of a seeded 006 database: existing schema and rows unchanged, integrity ok, 0 FK violations, previous build runs on the migrated database |
+
+## Tests executed (actual)
+
+| Suite | Result |
+| --- | --- |
+| `npm test` (all existing + 12 new measurement tests: scenarios 1–10, dedupe, failures, not configured, schema, migration additivity, production refusal of the simulator) | **78/78 pass** (66 existing + 12 new) |
+| `npm run test:e2e` (existing journeys) | pass |
+| `npm run test:e2e:auth` | pass |
+| `npm run test:e2e:measurement` (employee + manager, phone width) — **simulated analyser** | pass |
+| Live AI provider smoke test | **Not run: no AI credentials are configured for this app.** All AI behaviour is proven with deterministic scripted providers only |
+
+A bug found by the browser run and fixed: "added a regression test" was read as a regression and capped quality; the rule now treats regression tests as validation (test added).
+
+## Remaining before production
+
+1. An `ANTHROPIC_API_KEY` (with `AI_PROVIDER=anthropic`) and one supervised live smoke test on a real task.
+2. Owner approval to deploy (backup is taken by the scheduled job; migration 007 is additive).
+3. Phase 2 candidates: role-specific rubrics, reading evidence contents, normalized GitHub/Slack/Gmail/Calendar/Sheets evidence through ViaSocket, period-level summaries, evaluation set for prompt changes.

@@ -21,7 +21,9 @@ organizations ─┬─ teams (manager_id → users)
                ├─ automation_workflows (per org per use case) ── automation_execution_logs (dedupe_key UNIQUE)
                ├─ weekly_reports (org, team, week UNIQUE)
                └─ audit_log
-users (google_sub UNIQUE, email, email_verified, name, picture_url, phone)
+users (google_sub UNIQUE nullable, email, email_verified, name, picture_url, phone, password_hash …) ── auth_tokens (006)
+AI work measurement (007, additive): evaluation_rubrics · ai_evaluation_runs ── contribution_assessments ─┬─ assessment_dimensions (ai/rules/manager rows)
+                                                                                                         └─ assessment_feedback (append-only history)
 sessions (token_hash), oauth_states (state_hash, nonce, PKCE verifier)
 automation_use_cases (catalog), app_state (scheduler lease)
 ```

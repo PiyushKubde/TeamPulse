@@ -35,6 +35,7 @@ Embarko sets `PORT`, `DATA_DIR`, `APP_NAME` and `CRON_SECRET` itself — do not 
 | `ALLOW_ORG_CREATION` | `true` for the first admin to create the org; then `false` if only invitations/join codes should be used |
 | `VIASOCKET_ORG_ID`, `VIASOCKET_PROJECT_ID`, `VIASOCKET_EMBED_SECRET` | optional, enables the Automation Center |
 | `M91_API_KEY`, `M91_CALLBACK_TOKEN` | optional, M91 phone alerts (see docs/integrations.md) |
+| `AI_PROVIDER`, `ANTHROPIC_API_KEY` (optional `AI_MODEL`, `AI_EFFORT`, `AI_TIMEOUT_MS`, `AI_FALLBACKS`) | optional, AI contribution analysis (see docs/ai-work-measurement.md). Never set `AI_PROVIDER=mock` here (it is ignored in production) |
 | `MAIL_PROVIDER`, `MAIL_FROM`, `MAIL_FROM_NAME`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` | optional, email/password sign-in (see docs/email-auth.md); test real delivery before relying on it |
 
 Never set `DEV_LOGIN` on Embarko (it is ignored there anyway).
