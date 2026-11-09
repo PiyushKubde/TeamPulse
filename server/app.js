@@ -19,7 +19,8 @@ import { dashboard } from './services/dashboard.js'
 import { listNotifications, markRead } from './services/notify.js'
 import { listAudit } from './services/audit.js'
 import * as alerts from './services/alerts.js'
-import { onEvent } from './services/events.js'
+import { onEvent, recoverOutbox, useOutbox } from './services/events.js'
+import { backupIfDue, lastBackup } from './services/backups.js'
 import * as conns from './integrations/connections.js'
 import { sendThrough, slackChannels, slackUsers } from './integrations/actions.js'
 import * as auto from './automations/engine.js'
@@ -49,6 +50,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   auto.seedUseCases(db)
 
   // Event listeners: alerts/notifications, and the New Task Notification automation.
+  if (listen) useOutbox(db)
   const unsubscribe = listen ? [
     onEvent((e) => alerts.handleEvent(db, e)),
     onEvent((e) => (e.type === 'task.assigned' ? auto.runNewTaskNotification(db, vs, { ...e, appUrl: cfg.appUrl }) : null)),
@@ -57,6 +59,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     onEvent((e) => alerts.closeResolvedAlerts(db, m91, e))
   ] : []
   app.locals.stopListening = () => unsubscribe.forEach((fn) => fn())
+  app.locals.events = { recoverOutbox }
 
   const limitAuth = rateLimiter({ windowMs: 60000, max: 30 })
   const limitApi = rateLimiter({ windowMs: 60000, max: 600 })
@@ -157,7 +160,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     return { ok: true }
   }))
   app.get('/api/session', h((req) => {
-    const base = { googleConfigured: cfg.google.configured, devLogin: cfg.devLogin, ...(cfg.google.configured ? {} : { googleCallbackUrl: cfg.google.redirectUri || null }) }
+    const base = { googleConfigured: cfg.google.configured, devLogin: cfg.devLogin, integrations: { viasocket: vs.configured }, ...(cfg.google.configured ? {} : { googleCallbackUrl: cfg.google.redirectUri || null }) }
     if (!req.user) return { ...base, user: null }
     const c = req.ctx
     return {
@@ -371,9 +374,11 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   }))
 
   // D: the restricted builder for one TeamPulse context.
+  app.get('/api/viasocket/contexts', h((req) => contextFlows.listContexts(member(req), typeof req.query.app === 'string' ? req.query.app : undefined)))
   app.get('/api/viasocket/context/:key', h((req) => contextFlows.contextEmbed(vs, member(req), req.params.key, { app: typeof req.query.app === 'string' ? req.query.app : undefined })))
   app.delete('/api/viasocket/connections/:id', h((req) => conns.disconnect(db, vs, member(req), req.params.id)))
   app.get('/api/viasocket/embed-flows', h((req) => conns.listEmbedFlows(db, member(req))))
+  app.get('/api/viasocket/embed-flows/:flowId/runs', h((req) => conns.embedFlowRuns(db, vs, member(req), req.params.flowId)))
   app.post('/api/viasocket/embed-flows/:flowId/sync', h((req) => {
     const ctx = member(req)
     const context = req.body?.context ? (contextFlows.requireContext(ctx, String(req.body.context)), String(req.body.context)) : null
@@ -395,7 +400,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   app.get('/tasks/weekly-report', h(async (req, res) => {
     cronOk(req)
     const out = await auto.runWeeklyReports(db, vs, { appUrl: cfg.appUrl })
-    res.type('text/plain').send(`Weekly reports for week starting ${out.weekStart}: ${out.results.length} organization(s); delivered ${out.results.filter((r) => r.delivered).length}`)
+    res.type('text/plain').send(`Weekly reports for the week of ${out.weekStart}: ${out.results.length} manager/admin report(s); delivered by Slack/Gmail ${out.results.filter((r) => r.delivered).length}`)
   }))
 
   app.use('/api', (req, res, next) => next(new AppError(404, 'not_found', 'No such API route.')))
@@ -424,11 +429,19 @@ export async function runAlertJob({ db, vs, m91, cfg }) {
     .run(new Date(Date.now() + 4 * 60000).toISOString(), now(), now()).changes
   if (!lease) return { text: 'Skipped: another run is in progress.' }
   try {
+    const replayed = recoverOutbox()
     const raised = alerts.scanAlerts(db)
     const sent = await alerts.processDeliveries(db, m91)
     const retried = await auto.retryFailedRuns(db, vs, { appUrl: cfg.appUrl })
     db.prepare(`INSERT INTO app_state (key, value, updated_at) VALUES ('alert_job_last', ?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(now(), now())
-    return { raised, sent, retried, text: `Alerts raised ${raised}; M91 sent ${sent.sent}, retrying ${sent.retrying}, failed ${sent.failed}, not configured ${sent.notConfigured}; automation retries ${retried.retried}` }
+    let backup = null
+    try { backup = await backupIfDue(db, cfg.dataDir) } catch (error) { console.error('[backup] failed:', error.message); backup = { error: error.message } }
+    const last = lastBackup(db)
+    // Row counts (no data) let the operator confirm the database persisted across restarts from the schedule history.
+    const count = (t) => db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n
+    const stats = `db: ${count('organizations')} org(s), ${count('users')} user(s), ${count('tasks')} task(s), ${count('task_requests')} request(s), ${count('impact_records')} impact record(s)`
+    const backupText = backup?.error ? `backup FAILED (${backup.error})` : backup ? `backup made (off-host ${backup.offsite})` : last ? `last backup ${last.at} (off-host ${last.offsite})` : 'no backup yet'
+    return { raised, sent, retried, replayed, text: `Alerts raised ${raised}; M91 sent ${sent.sent}, retrying ${sent.retrying}, failed ${sent.failed}, not configured ${sent.notConfigured}; automation retries ${retried.retried}; outbox replayed ${replayed}; ${backupText}; ${stats}` }
   } finally {
     db.prepare(`UPDATE app_state SET value = ?, updated_at = ? WHERE key = 'alert_job_lease'`).run(new Date(0).toISOString(), now())
   }

@@ -20,6 +20,8 @@ console.log(`[config] M91: ${m91.status().state} — ${m91.status().message}`)
 console.log(`[config] Scheduled jobs: ${cfg.cronSecret ? 'CRON_SECRET set' : 'no CRON_SECRET (scheduled routes refuse all calls)'}${cfg.localScheduler ? '; local scheduler on' : ''}`)
 if (cfg.devLogin) console.log('[config] DEV_LOGIN is on: anyone can sign in by email. Local development only.')
 
+// Events left PENDING by a previous process (crash, restart, redeploy) are replayed now; their handlers are idempotent.
+setTimeout(() => { try { const { recoverOutbox } = app.locals.events; recoverOutbox({ olderThanMs: 0 }) } catch (e) { console.error('[events] recovery failed:', e.message) } }, 2000).unref()
 const server = app.listen(cfg.port, cfg.host, () => console.log(`TeamPulse listening on http://${cfg.host}:${cfg.port}`))
 
 // Local development only: Embarko runs the jobs through embarko.json schedules, never an in-process timer.
