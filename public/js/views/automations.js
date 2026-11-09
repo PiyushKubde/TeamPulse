@@ -39,9 +39,19 @@ function renderApps(body, conns, reload) {
         ${c.status === 'expired' ? html`<button class="btn small" data-reconnect="${c.id}">Reconnect</button>` : ''}<button class="btn small ghost" data-disconnect="${c.id}" data-name="${a.name}">Disconnect</button></li>`)}</ul>` : ''}
       <div class="row" style="margin-top:10px">
         <button class="btn small" data-connect="${a.slug}" ${!conns.configured || !a.serviceId ? raw('disabled') : ''}>${byApp(a.slug).length ? 'Connect another' : `Connect ${a.name}`}</button>
-        ${!a.runsInTeamPulse ? html`<a class="btn small ghost" href="#/automations?tab=builder&app=${a.slug}">Build with ${a.name}</a>` : ''}
+        <button class="btn small ghost" data-build="${a.slug}" data-name="${a.name}" ${!conns.configured ? raw('disabled') : ''}>Build with ${a.name}</button>
       </div></div></div></article>`)}</div>
     <p class="small muted" style="margin-top:12px">You sign in on each app’s own page in a ViaSocket popup. ViaSocket keeps the access; TeamPulse stores only a reference to your connection, on the server.</p>`
+  // Restricted builder: only this app, only its curated actions, started from a TeamPulse event this person may use.
+  body.querySelectorAll('[data-build]').forEach((b) => b.addEventListener('click', async () => {
+    let contexts
+    try { contexts = await api(`/api/viasocket/contexts?app=${b.dataset.build}`) } catch (e) { toast(errorText(e), { error: true }); return }
+    if (!contexts.length) { toast(`${b.dataset.name} automations here are for managers.`, { error: true }); return }
+    if (contexts.length === 1) return openContextBuilder(contexts[0].key, b.dataset.build)
+    const pick = await modal(html`<h2 id="modal-title">Build with ${b.dataset.name}</h2><p class="muted">What should start it?</p><div class="stack">${contexts.map((c) => html`<button class="btn ghost" data-ctx="${c.key}" style="justify-content:flex-start">${c.label}</button>`)}</div><div class="row end" style="margin-top:12px"><button class="btn ghost" data-close>Cancel</button></div>`.toString(),
+      (el, close) => el.querySelectorAll('[data-ctx]').forEach((x) => x.addEventListener('click', () => close(x.dataset.ctx))))
+    if (pick) openContextBuilder(pick, b.dataset.build)
+  }))
   if (!conns.configured) return
   // Token and SDK are fetched on page load so the popup can open straight from the click (browsers block it otherwise).
   const ready = Promise.all([api(`/api/viasocket/token?apps=${conns.apps.map((a) => a.slug).join(',')}`), loadSdk()])
@@ -261,9 +271,9 @@ async function addIntake(conns, done) {
 }
 
 // D: the restricted builder for one TeamPulse context, in a modal. Used by My Tasks, Reports and Team Tasks.
-export async function openContextBuilder(context) {
+export async function openContextBuilder(context, appSlug) {
   let cfg
-  try { cfg = await api(`/api/viasocket/context/${context}`) } catch (e) { toast(errorText(e), { error: true }); return }
+  try { cfg = await api(`/api/viasocket/context/${context}${appSlug ? `?app=${encodeURIComponent(appSlug)}` : ''}`) } catch (e) { toast(errorText(e), { error: true }); return }
   const names = { 'google-sheets': 'Google Sheets', slack: 'Slack', gmail: 'Gmail', 'google-calendar': 'Google Calendar', github: 'GitHub' }
   await modal(html`<h2 id="modal-title">Automate: ${cfg.label}</h2><p class="small muted">Pick an app (${Object.keys(cfg.serviceIds).map((s) => names[s] || s).join(', ')}) and publish. TeamPulse then sends your own events here.</p>
     <div id="ctx-box" style="height:560px;border:1px solid var(--border);border-radius:8px"><div class="loading">Loading…</div></div>
@@ -272,7 +282,7 @@ export async function openContextBuilder(context) {
     const listener = (event) => {
       if (event.origin !== EMBED_ORIGIN) return
       const flow = event.data
-      if (flow?.id && ['published', 'updated', 'paused', 'deleted'].includes(flow.action)) api(`/api/viasocket/embed-flows/${encodeURIComponent(flow.id)}/sync`, { method: 'POST', body: { context } }).then(() => toast(`Flow ${flow.action}.`)).catch(() => {})
+      if (flow?.id && ['published', 'updated', 'paused', 'deleted'].includes(flow.action)) api(`/api/viasocket/embed-flows/${encodeURIComponent(flow.id)}/sync`, { method: 'POST', body: { context, app: appSlug } }).then(() => toast(`Flow ${flow.action}.`)).catch(() => {})
     }
     window.addEventListener('message', listener)
     dlg.addEventListener('close', () => { window.removeEventListener('message', listener); dlg.style.width = '' }, { once: true })
@@ -292,7 +302,16 @@ async function renderBuilder(body, conns, appSlug) {
   body.innerHTML = html`
     <p class="muted" style="margin-bottom:10px">${focus ? html`Building with <b>${focus.name}</b>. <a href="#/automations?tab=builder">Show all apps</a>` : 'Build your own automations across 2,300+ apps. Each person’s flows are their own.'}</p>
     ${conns.configured ? html`<div id="embed-box" aria-label="ViaSocket automation builder"><div class="loading">Loading the builder…</div></div>` : html`<div class="card">${empty('Builder unavailable', 'ViaSocket is not configured on this server.')}</div>`}
-    ${flows.length ? html`<h2 style="margin:18px 0 8px">Your published flows</h2><ul class="list card">${flows.map((f) => html`<li><div class="grow"><b>${f.title || f.flowId}</b><div class="small muted">${f.context ? `${({ task_assigned_to_me: 'When a task is assigned to me', weekly_report_ready: 'When my weekly report is ready', task_completed_in_my_team: 'When a task in my team is completed' })[f.context] || f.context} · ` : ''}updated ${ago(f.updatedAt)}</div></div><span class="badge ${f.status === 'active' ? 'ok' : 'outline'}">${f.status}</span></li>`)}</ul>` : ''}`
+    ${flows.length ? html`<h2 style="margin:18px 0 8px">Your published flows</h2><ul class="list card">${flows.map((f) => html`<li><div class="grow"><b>${f.title || f.flowId}</b><div class="small muted">${f.context ? `${({ task_assigned_to_me: 'When a task is assigned to me', weekly_report_ready: 'When my weekly report is ready', task_completed_in_my_team: 'When a task in my team is completed' })[f.context] || f.context} · ` : ''}updated ${ago(f.updatedAt)}</div></div><span class="badge ${f.status === 'active' ? 'ok' : 'outline'}">${f.status}</span><button class="btn small ghost" data-runs="${f.flowId}" data-title="${f.title || f.flowId}">Runs</button></li>`)}</ul>` : ''}`
+  body.querySelectorAll('[data-runs]').forEach((b) => b.addEventListener('click', async () => {
+    modal(html`<h2 id="modal-title">Runs: ${b.dataset.title}</h2><div id="runs">${loading('Reading runs from ViaSocket…')}</div><div class="row end" style="margin-top:12px"><button class="btn" data-close>Close</button></div>`.toString(), async (el) => {
+      try {
+        const runs = await api(`/api/viasocket/embed-flows/${encodeURIComponent(b.dataset.runs)}/runs`)
+        el.querySelector('#runs').innerHTML = runs.length ? html`<div class="table-wrap"><table><thead><tr><th>When</th><th>Status</th><th>Error</th></tr></thead><tbody>${runs.map((r) => html`<tr><td class="nowrap">${r.at ? ago(r.at) : '—'}</td><td><span class="badge ${r.status === 'failed' ? 'bad' : /success|ok|complete/.test(r.status) ? 'ok' : 'outline'}">${r.status}</span></td><td class="small">${r.error || ''}</td></tr>`)}</tbody></table></div><p class="small muted">Last 30 days, from ViaSocket.</p>`.toString()
+          : empty('No runs yet', 'Runs appear here once TeamPulse sends an event to this flow.').toString()
+      } catch (e) { el.querySelector('#runs').innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString() }
+    })
+  }))
   if (!conns.configured) return
   try {
     const { token, serviceIds } = await api(`/api/viasocket/token${focus ? `?apps=${focus.slug}` : ''}`)

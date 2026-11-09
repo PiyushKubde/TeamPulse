@@ -119,6 +119,13 @@ async function route() {
   const main = document.getElementById('main')
   main.innerHTML = loading().toString()
   if (!hit) { main.innerHTML = html`<div class="empty"><h3>Page not found</h3><p><a href="#/dashboard">Go to the dashboard</a></p></div>`.toString(); return }
+  // Manager-only screens: a clear message instead of an error (the server refuses the data anyway).
+  if (['team-tasks', 'reports'].includes(key) && !app.isManager && !path.startsWith('#/tasks/')) {
+    main.innerHTML = html`<div class="card" style="max-width:640px;margin-top:24px"><h1>${key === 'reports' ? 'Reports are for managers' : 'Team Tasks is for managers'}</h1>
+      <p class="muted">${key === 'reports' ? 'Reports cover a whole team, so only managers and admins can open them.' : 'Team Tasks shows a whole team’s work, so only managers and admins can open it.'} Your own work is always in My Tasks and on your dashboard.</p>
+      <div class="row"><a class="btn" href="#/my-tasks">Go to My Tasks</a><a class="btn ghost" href="#/dashboard">Dashboard</a></div></div>`.toString()
+    return
+  }
   try {
     await hit.view(main, q)
   } catch (e) {

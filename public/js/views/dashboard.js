@@ -77,6 +77,11 @@ function managerSection(m) {
           : empty('No activity yet', 'Create a task to get started.')}
       </section>
     </div>
+    <section class="card" style="margin-top:16px" aria-labelledby="nh-h"><div class="card-head"><div><h2 id="nh-h">People who may need help</h2><p>Signals per person — overdue, blocked, stalled or overloaded work. Not a performance ranking: blocked and external dependencies are reasons, not faults.</p></div></div>
+      ${m.needsHelp.length ? html`<ul class="list">${m.needsHelp.map((p) => html`<li>${avatar(p.name, p.pictureUrl)}<div class="grow"><a href="#/team-tasks?assigneeId=${p.userId}"><b>${p.name}</b></a> <span class="small muted">${p.teamName || ''} · ${p.active} active</span>
+        <div class="row" style="margin-top:4px">${p.reasons.map((r) => html`<span class="badge ${r.severity >= 3 ? 'bad' : r.severity === 2 ? 'warn' : 'outline'}">${r.text}</span>`)}</div></div></li>`)}</ul>`
+        : empty('Nobody looks stuck', 'No one has overdue, blocked, stalled or unusually heavy work right now.')}
+    </section>
     <div class="grid two" style="margin-top:16px">
       <section class="card" aria-labelledby="wl-h"><div class="card-head"><div><h2 id="wl-h">Team workload</h2><p>Open work per person — a planning view, not a performance measure</p></div></div>
         ${m.workload.length ? html`<div class="table-wrap"><table><thead><tr><th>Person</th><th class="num">Active</th><th class="num">Blocked</th><th class="num">Due ≤3d</th><th class="num">Overdue</th><th class="num hide-sm">Review</th></tr></thead><tbody>
@@ -102,6 +107,7 @@ function personalSection(p, solo) {
       ${stat('Due in 3 days', c.dueSoon, { tone: 'warn' })}
       ${stat('Overdue', c.overdue, { tone: 'bad', href: '#/my-tasks?condition=overdue' })}
       ${stat('In review', c.inReview, { href: '#/my-tasks?status=SUBMITTED_FOR_REVIEW' })}
+      ${stat('Completed', c.completed, { tone: 'ok', href: '#/my-tasks?status=COMPLETED' })}
     </div>
     <div class="grid two">
       <section class="card"><div class="card-head"><h2>Awaiting my action</h2></div>
@@ -115,6 +121,10 @@ function personalSection(p, solo) {
       </section>
       <section class="card"><div class="card-head"><h2>Blocked and in review</h2></div>
         ${p.blocked.length || p.inReview.length ? html`<ul class="list">${[...p.blocked, ...p.inReview].map((t) => taskLine(t, t.blockedHours !== null ? html`<span>· blocked ${t.blockedHours}h</span>` : ''))}</ul>` : empty('Nothing blocked or in review', '')}
+      </section>
+      <section class="card"><div class="card-head"><h2>Recently completed</h2><a class="btn small ghost" href="#/my-tasks?status=COMPLETED">All completed</a></div>
+        ${p.completed.length ? html`<ul class="list">${p.completed.map((t) => html`<li><div class="grow"><a href="#/tasks/${t.id}"><b>${t.title}</b></a><div class="small muted">completed ${ago(t.completedAt)}</div></div><a class="btn small ghost" href="#/impact?new=1&taskId=${t.id}" title="Completion is not impact: record what changed">Record outcome</a></li>`)}</ul>`
+          : empty('Nothing completed yet', 'Tasks you finish and your manager approves appear here.')}
       </section>
       <section class="card"><div class="card-head"><h2>Recent feedback</h2></div>
         ${p.feedback.length ? html`<ul class="list">${p.feedback.map((f) => html`<li><div class="grow"><a href="${f.impactId ? `#/impact/${f.impactId}` : `#/tasks/${f.taskId}`}"><b>${f.title}</b></a>
