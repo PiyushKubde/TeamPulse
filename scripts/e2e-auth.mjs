@@ -112,7 +112,7 @@ try {
   await page.click('#cpf button[type=submit]'); await page.waitForSelector('text=Password changed')
 
   step = 'logout + wrong password'
-  await page.click('#logout'); await page.waitForSelector('#pw-login')
+  await page.click('#profile-btn'); await page.click('#logout'); await page.waitForSelector('#pw-login')
   await page.fill('#li-email', EMAIL); await page.fill('#li-pw', PW); await page.click('#pw-login button[type=submit]')
   await page.waitForSelector('text=Email or password is incorrect')
 

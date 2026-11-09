@@ -82,7 +82,7 @@ try {
 
   step = 'employee: evidence workspace'
   const e = await session('priya@demo.teampulse')
-  await e.click('nav >> text=My Evidence')
+  await e.click('nav >> text=My Work Evidence')
   await e.waitForSelector('h1:has-text("My work evidence")')
   ok(await e.isVisible('text=Collecting'), 'source status shown')
   ok(await e.isVisible(`text=${ref} Cache catalog lookups`), 'PR suggested for confirmation')
@@ -120,7 +120,7 @@ try {
   await shot(m, 'ev5-review')
 
   step = 'employee: AI Work Assistant'
-  await e.click('nav >> text=AI Work Assistant')
+  await e.click('nav >> text=Analyse My Day')
   await e.waitForSelector('h1:has-text("AI Work Assistant")')
   await e.click('#analyse-day')
   await e.waitForSelector('h2:has-text("Your day")')
@@ -138,7 +138,7 @@ try {
   await shot(e, 'ev7-assistant')
 
   step = 'employee: contribution journey'
-  await e.click('nav >> text=Contributions')
+  await e.click('nav >> text=Contribution Journeys')
   await e.waitForSelector('h1:has-text("My contributions")')
   await e.click('a.journey-card:has-text("Cut checkout API p95")')
   await e.waitForSelector('.stage-strip')
@@ -162,7 +162,7 @@ try {
   await m.click('#cf-ok')
   await m.waitForSelector('text=Dismissed.')
   await shot(m, 'ev10-reviews')
-  await m.click('nav >> text=Team Dashboard')
+  await m.click('nav >> text=Overview')
   await m.waitForSelector('h2:has-text("Where to intervene")')
 
   step = 'phone width'

@@ -1,7 +1,7 @@
 // The AI Work Assistant (employees, and managers for their own work), the Manager Copilot panel, and the signal list
 // used on dashboards and reviews. Answers come from TeamPulse records and say so; the AI only writes an optional
 // summary, when the server allows it.
-import { api, html, raw, toast, errorText, empty, loading, confirmDialog } from '../ui.js'
+import { api, html, raw, toast, errorText, empty, loading, confirmDialog, icon } from '../ui.js'
 import { app } from '../app.js'
 
 const tz = () => -new Date().getTimezoneOffset()
@@ -37,22 +37,32 @@ export function questionBox(box, { team = false, suggestions = [] }) {
   })
 }
 
-/** Signals as a list with dismiss / resolve. */
-export async function renderSignals(box, { scope = 'mine', limit = 8, title = null } = {}) {
+/** Signals as a list with dismiss / resolve. Restrained: only "important" ones carry a colour label. */
+export async function renderSignals(box, { scope = 'mine', limit = 8, title = null, subtitle = null } = {}) {
   let rows
   try { rows = await api(`/api/signals?scope=${scope}`) } catch (e) { box.innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString(); return }
   const shown = rows.slice(0, limit)
-  box.innerHTML = html`${title ? html`<div class="card-head"><div><h2>${title}</h2><p>Detected from your records by fixed rules — help to act, never a penalty.</p></div></div>` : ''}
-    ${shown.length ? html`<ul class="list">${shown.map((s) => html`<li data-signal="${s.id}"><div class="grow" style="min-width:0"><div class="row" style="gap:6px"><span class="badge ${SEV[s.severity][1]}">${SEV[s.severity][0]}</span><b>${s.kindLabel}</b>${s.personName && scope === 'team' ? html`<span class="small muted">${s.personName}</span>` : ''}</div>
-      <div>${s.task ? html`<a href="#/tasks/${s.task.id}">${s.task.title}</a> — ` : ''}${s.reason}</div><div class="small muted">Next: ${s.action}</div></div>
-      <div class="row" style="gap:6px"><button class="btn small ghost" data-sig-act="RESOLVE">Done</button><button class="btn small link" data-sig-act="DISMISS">Dismiss</button></div></li>`)}</ul>${rows.length > limit ? html`<p class="small"><a href="${scope === 'team' ? '#/reviews' : '#/assistant'}">All ${rows.length} →</a></p>` : ''}`
-      : empty('Nothing needs attention', scope === 'team' ? 'No stalled work, risky deadlines, long blockers or waiting reviews in your teams.' : 'No stalled work, risky deadlines or missing evidence.')}`.toString()
+  box.innerHTML = html`${title ? html`<div class="card-head"><div><h2><span class="card-icon warn">${icon('target')}</span>${title}</h2><p>${subtitle || 'Detected from your records by fixed rules — to help you act, never as a penalty.'}</p></div>${rows.length > limit ? html`<a class="btn small subtle" href="${scope === 'team' ? '#/reviews' : '#/assistant'}">All ${rows.length}${icon('arrowRight', 'sm')}</a>` : ''}</div>` : ''}
+    ${shown.length ? html`<ul class="signal-list">${shown.map((s) => html`<li class="signal sev-${s.severity}" data-signal="${s.id}"><span class="sev" aria-hidden="true"></span>
+      <div class="body"><div class="title"><span>${s.kindLabel}</span>${s.severity === 'high' ? html`<span class="badge bad">${SEV.high[0]}</span>` : s.severity === 'low' ? html`<span class="badge outline">${SEV.low[0]}</span>` : html`<span class="sr">${SEV.medium[0]}</span>`}${s.personName && scope === 'team' ? html`<span class="small muted">${s.personName}</span>` : ''}</div>
+        <div class="why">${s.task ? html`<a href="#/tasks/${s.task.id}">${s.task.title}</a> — ` : ''}${s.reason}</div>
+        <div class="next">${icon('arrowRight')}<span>${s.action}</span></div>
+        <div class="actions"><button class="btn small ghost" data-sig-act="RESOLVE">${icon('check')}Done</button><button class="btn small subtle" data-sig-act="DISMISS">Dismiss</button></div></div></li>`)}</ul>`
+      : empty('Nothing needs attention', scope === 'team' ? 'No stalled work, risky deadlines, long blockers or waiting reviews in your teams.' : 'No stalled work, risky deadlines or missing evidence.', '', 'checkCircle')}`.toString()
   box.querySelectorAll('[data-sig-act]').forEach((b) => b.addEventListener('click', async () => {
     const id = b.closest('[data-signal]').dataset.signal
     let reason
     if (b.dataset.sigAct === 'DISMISS') { const r = await confirmDialog({ title: 'Dismiss this signal?', body: 'It stays dismissed even if the condition continues. Your reason is kept in its history.', confirm: 'Dismiss', reason: { label: 'Why?', required: true } }); if (!r?.ok) return; reason = r.reason }
-    try { await api(`/api/signals/${id}`, { method: 'POST', body: { action: b.dataset.sigAct, reason } }); toast(b.dataset.sigAct === 'DISMISS' ? 'Dismissed.' : 'Marked done.'); renderSignals(box, { scope, limit, title }) } catch (e) { toast(errorText(e), { error: true }) }
+    try { await api(`/api/signals/${id}`, { method: 'POST', body: { action: b.dataset.sigAct, reason } }); toast(b.dataset.sigAct === 'DISMISS' ? 'Dismissed.' : 'Marked done.'); renderSignals(box, { scope, limit, title, subtitle }) } catch (e) { toast(errorText(e), { error: true }) }
   }))
+}
+
+/** Manager Copilot: questions about the team, answered from records with links. */
+export async function renderCopilot(main) {
+  const sugg = await api('/api/assistant/suggestions')
+  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('copilot', 'xs')}Manager Copilot</div><h1>Ask about your team</h1><p>Answers come from your team’s tasks, reviews, signals and linked evidence — each item links to its record. Nothing is ranked or scored.</p></div></div>
+    <section class="card"><div id="copilot"></div></section>`.toString()
+  questionBox(main.querySelector('#copilot'), { team: true, suggestions: sugg.team })
 }
 
 function digestBlock(d) {
