@@ -36,6 +36,15 @@ export function loadConfig(overrides = {}) {
       secret: env.VIASOCKET_EMBED_SECRET || ''
     },
     localScheduler: env.LOCAL_SCHEDULER === '1',
+    // Transactional email for verification and password reset (see server/auth/mailer.js).
+    legal: { termsUrl: env.TERMS_URL || null, privacyUrl: env.PRIVACY_URL || null },
+    mail: {
+      provider: (env.MAIL_PROVIDER || '').toLowerCase(),
+      from: env.MAIL_FROM || '',
+      fromName: env.MAIL_FROM_NAME || 'TeamPulse',
+      smtp: { host: env.SMTP_HOST || '', port: Number(env.SMTP_PORT) || 587, secure: env.SMTP_SECURE === 'true', user: env.SMTP_USER || '', pass: env.SMTP_PASS || '' },
+      viasocket: { userId: env.MAIL_VIASOCKET_USER_ID || '', connectionId: env.MAIL_VIASOCKET_CONNECTION_ID || '' }
+    },
     ...overrides
   }
   // The callback defaults to APP_URL + /auth/google/callback, so production only needs the client id and secret.

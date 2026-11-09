@@ -15,10 +15,13 @@
     "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\"",
     "lint": "eslint .",
     "check": "node --check server/index.js && npm run lint",
-    "test:e2e": "node --disable-warning=ExperimentalWarning scripts/e2e.mjs"
+    "test:e2e": "node --disable-warning=ExperimentalWarning scripts/e2e.mjs",
+    "test:e2e:auth": "node --disable-warning=ExperimentalWarning scripts/e2e-auth.mjs"
   },
   "dependencies": {
     "express": "^5.3.0",
+    "hash-wasm": "4.13.0",
+    "nodemailer": "10.4.0",
     "viasocket-apps": "0.19.0"
   },
   "devDependencies": {

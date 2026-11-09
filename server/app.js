@@ -7,6 +7,8 @@ import { AppError, forbidden } from './errors.js'
 import { assignableUserIds, loadContext, isAdmin, isManager } from './access.js'
 import { COOKIE, cookieHeader, createSession, destroySession, readCookie, sessionUser } from './auth/sessions.js'
 import { finishGoogleLogin, googleTransport, startGoogleLogin, upsertGoogleUser } from './auth/google.js'
+import * as accounts from './auth/accounts.js'
+import { createMailer } from './auth/mailer.js'
 import * as orgs from './services/orgs.js'
 import * as perms from './services/permissions.js'
 import * as tasks from './services/tasks.js'
@@ -43,7 +45,8 @@ export function rateLimiter({ windowMs, max }) {
   }
 }
 
-export function createApp({ db, cfg, vs = { configured: false }, m91, google = googleTransport(), listen = true }) {
+export function createApp({ db, cfg, vs = { configured: false }, m91, google = googleTransport(), listen = true, mailer = null }) {
+  mailer ||= createMailer(cfg.mail || {}, { db, vs })
   const app = express()
   app.disable('x-powered-by')
   app.set('trust proxy', 1)
@@ -62,6 +65,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   app.locals.events = { recoverOutbox }
 
   const limitAuth = rateLimiter({ windowMs: 60000, max: 30 })
+  const limitLogin = rateLimiter({ windowMs: 60000, max: 10 })
   const limitApi = rateLimiter({ windowMs: 60000, max: 600 })
   const limitInbound = rateLimiter({ windowMs: 60000, max: 60 })
   const ip = (req) => req.ip || 'unknown'
@@ -124,7 +128,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   // ---------- health ----------
   app.get('/api/health', h(() => {
     db.prepare('SELECT 1').get()
-    return { ok: true, database: 'ok', google: cfg.google.configured ? 'configured' : 'not_configured', viasocket: vs.configured ? 'configured' : 'not_configured', m91: m91.status().state, time: now() }
+    return { ok: true, database: 'ok', google: cfg.google.configured ? 'configured' : 'not_configured', email: mailer.configured ? 'configured' : 'not_configured', viasocket: vs.configured ? 'configured' : 'not_configured', m91: m91.status().state, time: now() }
   }))
 
   // ---------- authentication ----------
@@ -154,18 +158,39 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     setSession(res, user.id, req)
     return { ok: true }
   }))
+  // ---------- email and password ----------
+  const authPost = (path, fn) => app.post(path, h(async (req, res) => {
+    limitAuth(ip(req))
+    if (req.get('x-requested-with') !== 'TeamPulse') throw new AppError(403, 'csrf', 'Missing request header.')
+    return fn(req, res)
+  }))
+  authPost('/auth/register', (req) => accounts.register(db, mailer, cfg, req.body))
+  authPost('/auth/email/resend', (req) => accounts.resendVerification(db, mailer, cfg, req.body))
+  authPost('/auth/email/verify', async (req, res) => { const user = await accounts.verifyEmail(db, req.body); setSession(res, user.id, req); return { ok: true } })
+  authPost('/auth/login', async (req, res) => {
+    limitLogin(ip(req))
+    const user = await accounts.login(db, mailer, cfg, req.body)
+    setSession(res, user.id, req)
+    return { ok: true }
+  })
+  authPost('/auth/password/forgot', (req) => accounts.forgotPassword(db, mailer, cfg, req.body))
+  authPost('/auth/password/check', (req) => accounts.describeToken(db, req.body))
+  authPost('/auth/password/reset', async (req, res) => { const user = await accounts.resetPassword(db, req.body); setSession(res, user.id, req); return { ok: true } })
+  app.post('/api/account/password', h((req) => accounts.changePassword(db, signedIn(req), req.body, readCookie(req))))
+  app.post('/api/account/password-link', h((req) => { limitAuth(ip(req)); return accounts.requestPasswordLink(db, mailer, cfg, signedIn(req)) }))
+
   app.post('/api/session/logout', h((req, res) => {
     destroySession(db, readCookie(req))
     res.setHeader('Set-Cookie', cookieHeader(COOKIE, '', { maxAgeSeconds: 0, secure: cfg.production }))
     return { ok: true }
   }))
   app.get('/api/session', h((req) => {
-    const base = { googleConfigured: cfg.google.configured, devLogin: cfg.devLogin, integrations: { viasocket: vs.configured }, ...(cfg.google.configured ? {} : { googleCallbackUrl: cfg.google.redirectUri || null }) }
+    const base = { googleConfigured: cfg.google.configured, devLogin: cfg.devLogin, emailAuth: { available: mailer.configured }, legal: cfg.legal || {}, integrations: { viasocket: vs.configured }, ...(cfg.google.configured ? {} : { googleCallbackUrl: cfg.google.redirectUri || null }) }
     if (!req.user) return { ...base, user: null }
     const c = req.ctx
     return {
       ...base,
-      user: { id: req.user.id, name: req.user.name, email: req.user.email, emailVerified: Boolean(req.user.email_verified), pictureUrl: req.user.picture_url, phone: req.user.phone },
+      user: { id: req.user.id, name: req.user.name, email: req.user.email, emailVerified: Boolean(req.user.email_verified), pictureUrl: req.user.picture_url, phone: req.user.phone, signIn: accounts.signInMethods(req.user) },
       membership: c?.membership ? { orgId: c.orgId, orgName: c.orgName, role: c.role, teamId: c.teamId, managedTeamIds: c.managedTeamIds, permissions: c.permissions, creationMode: perms.creationMode(c) } : null,
       deactivated: Boolean(c?.deactivated)
     }
