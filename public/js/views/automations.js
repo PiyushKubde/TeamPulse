@@ -1,6 +1,6 @@
 // Automation Center: (1) Connected Apps — curated ViaSocket apps in context, (2) Ready-made TeamPulse automations,
 // (3) Advanced Builder — the full ViaSocket Embed. The browser only ever holds the per-user embed token.
-import { api, html, raw, esc, modal, bindForm, toast, errorText, ago, empty, confirmDialog } from '../ui.js'
+import { api, html, raw, esc, modal, bindForm, toast, errorText, ago, empty, confirmDialog, loading } from '../ui.js'
 import { app } from '../app.js'
 
 const EMBED_SCRIPT = 'https://embed.viasocket.com/prod-embedcomponent.js'
@@ -74,22 +74,82 @@ function renderApps(body, conns, reload) {
 }
 
 // ---------- 2. Ready-made automations ----------
+const DELIVERY_TARGETS = {
+  new_task_notification: { slack: [['channel', 'Post in a team channel'], ['me', 'Message me in Slack']], gmail: [['assignee', 'Email the assignee'], ['me', 'Email me']] },
+  weekly_team_report: { slack: [['channel', 'Post in a channel'], ['me', 'Message me in Slack']], gmail: [['recipients', 'Email these recipients'], ['me', 'Email me']] }
+}
+const deliveryText = (c) => !c?.channel ? '' : c.channel === 'slack'
+  ? (c.slackUserId ? `Slack direct message to ${c.slackChannelLabel || 'you'}` : `Slack ${c.slackChannelLabel || 'channel'}`)
+  : (c.target === 'assignee' ? 'Gmail, to each assignee' : c.target === 'recipients' ? `Gmail, to ${c.emailTo}` : 'Gmail, to you')
+
+/**
+ * The delivery form shared by team notifications, the weekly report and personal notifications: account → where.
+ * Slack targets come from the user's own workspace (live pickers), never a typed id. Calls onSubmit(body).
+ */
+export function deliveryForm({ title, intro = '', conns, targets, current = {}, submitLabel = 'Save and activate', onSubmit, allowTest = true }) {
+  const slack = conns.connections.filter((c) => c.app === 'slack' && c.status !== 'missing')
+  const gmail = conns.connections.filter((c) => c.app === 'gmail' && c.status !== 'missing')
+  if (!slack.length && !gmail.length) return modal(html`<h2 id="modal-title">Connect Slack or Gmail first</h2><p>This sends through your own Slack or Gmail account.</p><div class="row end"><button class="btn ghost" data-close>Close</button><a class="btn" href="#/automations?tab=apps">Connect an app</a></div>`.toString(), (el, close) => el.querySelector('a').addEventListener('click', () => close()))
+  return modal(html`<h2 id="modal-title">${title}</h2>${intro ? html`<p class="small muted">${intro}</p>` : ''}<form id="f"><div class="form-error"></div>
+    <div class="field"><label for="c-ch">Deliver through</label><select id="c-ch" name="channel">${slack.length ? html`<option value="slack" ${current.channel === 'slack' ? raw('selected') : ''}>Slack</option>` : ''}${gmail.length ? html`<option value="gmail" ${current.channel === 'gmail' ? raw('selected') : ''}>Gmail</option>` : ''}</select></div>
+    <div class="field"><label for="c-conn">Your account</label><select id="c-conn" name="connectionId"></select></div>
+    <div class="field" id="t-wrap"><label for="c-target">Send to</label><select id="c-target" name="target"></select></div>
+    <div class="field" id="pick-wrap"><label for="c-pick" id="c-pick-label">Channel</label><select id="c-pick" name="pick"><option value="">Loading…</option></select></div>
+    <div class="field" id="mail-to" hidden><label for="c-to">Recipients</label><input id="c-to" name="emailTo" type="email" value="${current.emailTo || app.me.email}"></div>
+    <p class="small muted">Runs on your own connected account. Messages only inform — they never change tasks or approvals.</p>
+    <div class="row end">${allowTest ? html`<button class="btn ghost" type="button" id="c-test">Send me a test</button>` : ''}<button class="btn ghost" data-close>Cancel</button><button class="btn" type="submit">${submitLabel}</button></div></form>`.toString(), (el, close) => {
+    const $ = (s) => el.querySelector(s)
+    const fillConn = () => { const list = $('#c-ch').value === 'slack' ? slack : gmail; $('#c-conn').innerHTML = list.map((c) => `<option value="${esc(c.id)}" ${current.connectionId === c.id ? 'selected' : ''}>${esc(c.label || $('#c-ch').value)}</option>`).join('') }
+    const fillTargets = () => { $('#c-target').innerHTML = targets[$('#c-ch').value].map(([v, l]) => `<option value="${v}" ${current.target === v ? 'selected' : ''}>${esc(l)}</option>`).join(''); $('#t-wrap').hidden = targets[$('#c-ch').value].length < 2 }
+    const fillPick = async () => {
+      const ch = $('#c-ch').value; const t = $('#c-target').value
+      $('#mail-to').hidden = !(ch === 'gmail' && t === 'recipients')
+      $('#pick-wrap').hidden = ch !== 'slack'
+      if (ch !== 'slack') return
+      const dm = t === 'me'
+      $('#c-pick-label').textContent = dm ? 'Which Slack user are you?' : 'Channel'
+      $('#c-pick').innerHTML = '<option value="">Loading…</option>'
+      try {
+        const list = await api(`/api/viasocket/connections/${$('#c-conn').value}/${dm ? 'slack-users' : 'slack-channels'}`)
+        const sel = dm ? current.slackUserId : current.slackChannelId
+        $('#c-pick').innerHTML = list.map((o) => `<option value="${esc(o.value)}" ${sel === o.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('') || '<option value="">Nothing found</option>'
+      } catch (e) { $('#c-pick').innerHTML = '<option value="">Could not load</option>'; $('.form-error').innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString() }
+    }
+    const sync = () => { fillConn(); fillTargets(); fillPick() }
+    $('#c-ch').addEventListener('change', sync); $('#c-conn').addEventListener('change', fillPick); $('#c-target').addEventListener('change', fillPick); sync()
+    const read = () => {
+      const ch = $('#c-ch').value; const t = $('#c-target').value; const pick = $('#c-pick').value
+      return { channel: ch, connectionId: $('#c-conn').value, target: t, ...(ch === 'slack' ? (t === 'me' ? { slackUserId: pick, slackMode: 'user' } : { slackChannelId: pick, slackMode: 'channel' }) : {}), ...(t === 'recipients' ? { emailTo: $('#c-to').value.trim() } : {}) }
+    }
+    $('#c-test')?.addEventListener('click', async () => {
+      const b = read()
+      const where = b.channel === 'gmail' ? `an email to ${app.me.email}` : b.target === 'me' ? 'a Slack direct message to the user you picked' : `a message in ${$('#c-pick').selectedOptions[0]?.text || 'the channel'}`
+      const ok = await confirmDialog({ title: 'Send a real test message?', body: `This sends ${where}, from your own ${b.channel === 'gmail' ? 'Gmail' : 'Slack'}, now.`, confirm: 'Send test' })
+      if (!ok?.ok) return
+      try { const out = await api('/api/automations/test-send', { method: 'POST', body: { ...b, target: b.channel === 'gmail' ? 'me' : b.target } }); toast(out.status === 'SUCCEEDED' ? out.summary : `Not confirmed: ${out.error}`, { error: out.status !== 'SUCCEEDED' }) } catch (e) { toast(errorText(e), { error: true }) }
+    })
+    bindForm($('#f'), () => onSubmit(read()), { onSuccess: () => close(true) })
+  })
+}
+
 function renderReady(body, autos, conns, reload) {
   const canConfigure = autos.canConfigure
   body.innerHTML = html`
-    ${!canConfigure ? html`<div class="notice">Managers and admins configure these automations for the organization. You can see what is active.</div>` : ''}
-    <div class="stack">${autos.automations.map((a) => html`<article class="card"><div class="row between"><div><h3>${a.name}</h3><p class="small muted" style="max-width:75ch">${a.description}</p></div>
-      ${!a.available ? html`<span class="badge outline">Coming next</span>` : a.workflow ? html`<span class="badge ${STATUS_BADGE[a.workflow.status]}">${a.workflow.status.replace('_', ' ').toLowerCase()}</span>` : html`<span class="badge outline">Not set up</span>`}</div>
-      ${a.workflow ? html`<div class="small muted" style="margin-top:6px">Set up by ${a.workflow.ownerName}${a.workflow.config.channel ? ` · via ${a.workflow.config.channel === 'slack' ? `Slack ${a.workflow.config.slackChannelLabel || ''}` : `Gmail${a.workflow.config.emailTo ? ` to ${a.workflow.config.emailTo}` : ' to each assignee'}`}` : ''}${a.workflow.lastRunAt ? ` · last run ${ago(a.workflow.lastRunAt)}` : ''}</div>
+    <div class="notice">Your own notifications are in <a href="#/settings/profile">Settings → Profile</a>. ${canConfigure ? 'These are yours as a manager: each runs on your own connected account and covers only your teams.' : 'Managers set these up for their teams.'}</div>
+    <div class="stack">${autos.automations.map((a) => html`<article class="card" id="auto-${a.key}"><div class="row between"><div><h3>${a.name}</h3><p class="small muted" style="max-width:75ch">${a.description}</p></div>
+      ${a.key === 'gmail_slack_intake' ? '' : a.workflow ? html`<span class="badge ${STATUS_BADGE[a.workflow.status]}">${a.workflow.status.replace('_', ' ').toLowerCase()}</span>` : html`<span class="badge outline">Not set up</span>`}</div>
+      ${a.workflow && a.key !== 'external_request_intake' ? html`<div class="small muted" style="margin-top:6px">${deliveryText(a.workflow.config)}${a.workflow.lastRunAt ? ` · last run ${ago(a.workflow.lastRunAt)}` : ''}</div>
         ${a.workflow.lastError ? html`<div class="notice err small" style="margin:8px 0 0">Last error: ${a.workflow.lastError}</div>` : ''}` : ''}
-      ${a.available && canConfigure ? html`<div class="row" style="margin-top:10px">
+      ${a.othersRunning?.length ? html`<div class="small muted" style="margin-top:4px">Also set up by: ${a.othersRunning.map((o) => `${o.name} (${o.status.toLowerCase()})`).join(', ')}</div>` : ''}
+      ${a.key === 'gmail_slack_intake' ? html`<div id="intakes" style="margin-top:10px">${canConfigure ? loading('Loading your intakes…') : ''}</div>` : ''}
+      ${canConfigure && a.key !== 'gmail_slack_intake' ? html`<div class="row" style="margin-top:10px">
         ${a.key === 'external_request_intake' ? html`<button class="btn small" data-intake>${a.tokenIssued ? 'Rotate intake token' : 'Create intake token'}</button><button class="btn small ghost" data-config="${a.key}">Default team</button>` : html`<button class="btn small" data-config="${a.key}" ${!autos.viasocketConfigured ? raw('disabled title="ViaSocket is not configured"') : ''}>${a.workflow ? 'Change setup' : 'Set up'}</button>`}
         ${a.workflow && ['ACTIVE', 'FAILED'].includes(a.workflow.status) ? html`<button class="btn small ghost" data-status="${a.key}" data-to="PAUSED">Pause</button>` : ''}
         ${a.workflow && a.workflow.status === 'PAUSED' ? html`<button class="btn small ghost" data-status="${a.key}" data-to="ACTIVE">Resume</button>` : ''}
         ${a.key === 'weekly_team_report' ? html`<button class="btn small ghost" data-preview>Preview this week</button>` : ''}
       </div>` : ''}
       ${a.key === 'external_request_intake' && canConfigure ? html`<details style="margin-top:10px"><summary class="small">How to send requests</summary><div class="small" style="margin-top:6px">
-        <p>Point any ViaSocket flow (for example a Gmail “new email with label” or Slack “new message” trigger, built in the Advanced builder) at this endpoint with an HTTP step. Every request becomes a <b>pending task request</b> for manager approval — never an assigned task.</p>
+        <p>Any system can post here with an HTTP step. Every request becomes a <b>pending task request</b> for manager approval — never an assigned task.</p>
         <pre class="mono" style="white-space:pre-wrap;background:var(--surface-2);padding:10px;border-radius:6px">POST ${location.origin}/api/inbound/task-requests
 Authorization: Bearer &lt;intake token&gt;
 Content-Type: application/json
@@ -102,7 +162,7 @@ Content-Type: application/json
           <td>${r.status === 'FAILED' && r.useCase === 'new_task_notification' ? html`<button class="btn small ghost" data-retry="${r.id}">Retry</button>` : ''}</td></tr>`)}</tbody></table></div></details>` : ''}
     </article>`)}</div>`
 
-  const conn = (slug) => conns.connections.filter((c) => c.app === slug && c.status !== 'missing')
+  if (canConfigure) renderIntakes(body.querySelector('#intakes'), conns, autos.viasocketConfigured)
   body.querySelectorAll('[data-config]').forEach((b) => b.addEventListener('click', async () => {
     const a = autos.automations.find((x) => x.key === b.dataset.config)
     if (a.key === 'external_request_intake') {
@@ -110,27 +170,8 @@ Content-Type: application/json
       return modal(html`<h2 id="modal-title">External requests: default team</h2><form id="f"><div class="form-error"></div><div class="field"><label for="x-t">Requests go to</label><select id="x-t" name="defaultTeamId"><option value="">(admins decide)</option>${teams.map((t) => html`<option value="${t.id}" ${a.workflow?.config.defaultTeamId === t.id ? raw('selected') : ''}>${t.name}</option>`)}</select></div>
         <div class="row end"><button class="btn ghost" data-close>Cancel</button><button class="btn" type="submit">Save</button></div></form>`.toString(), (el, close) => bindForm(el.querySelector('#f'), (d) => api(`/api/automations/${a.key}`, { method: 'PUT', body: { defaultTeamId: d.defaultTeamId || null } }), { onSuccess: () => { close(); toast('Saved.'); reload() } }))
     }
-    const slack = conn('slack')
-    const gmail = conn('gmail')
-    if (!slack.length && !gmail.length) return modal(html`<h2 id="modal-title">Connect Slack or Gmail first</h2><p>This automation sends through your own Slack or Gmail account.</p><div class="row end"><button class="btn ghost" data-close>Close</button><a class="btn" href="#/automations?tab=apps">Connect an app</a></div>`.toString(), (el, close) => el.querySelector('a').addEventListener('click', () => close()))
-    modal(html`<h2 id="modal-title">${a.name}</h2><form id="f"><div class="form-error"></div>
-      <div class="field"><label for="c-ch">Deliver through</label><select id="c-ch" name="channel">${slack.length ? html`<option value="slack" ${a.workflow?.config.channel === 'slack' ? raw('selected') : ''}>Slack</option>` : ''}${gmail.length ? html`<option value="gmail" ${a.workflow?.config.channel === 'gmail' ? raw('selected') : ''}>Gmail</option>` : ''}</select></div>
-      <div class="field"><label for="c-conn">Account</label><select id="c-conn" name="connectionId"></select></div>
-      <div class="field" id="slack-ch"><label for="c-sl">Slack channel</label><select id="c-sl" name="slackChannelId"><option value="">Loading…</option></select></div>
-      ${a.key === 'weekly_team_report' ? html`<div class="field" id="mail-to"><label for="c-to">Send the report to</label><input id="c-to" name="emailTo" type="email" value="${a.workflow?.config.emailTo || app.me.email}"></div>` : html`<p class="small muted" id="mail-note">With Gmail, each assignee gets an email from your Gmail account.</p>`}
-      <p class="small muted">Runs use your own connected account. Messages only inform — they never change tasks or approvals.</p>
-      <div class="row end"><button class="btn ghost" data-close>Cancel</button><button class="btn" type="submit">Save and activate</button></div></form>`.toString(), (el, close) => {
-      const chSel = el.querySelector('#c-ch'); const connSel = el.querySelector('#c-conn'); const slSel = el.querySelector('#c-sl')
-      const fillConn = () => { const list = chSel.value === 'slack' ? slack : gmail; connSel.innerHTML = list.map((c) => `<option value="${esc(c.id)}">${esc(c.label || chSel.value)}</option>`).join('') }
-      const fillChannels = async () => {
-        if (chSel.value !== 'slack') return
-        slSel.innerHTML = '<option value="">Loading…</option>'
-        try { const ch = await api(`/api/viasocket/connections/${connSel.value}/slack-channels`); slSel.innerHTML = ch.map((c) => `<option value="${esc(c.value)}" ${a.workflow?.config.slackChannelId === c.value ? 'selected' : ''}>${esc(c.label)}</option>`).join('') } catch (e) { slSel.innerHTML = '<option value="">Could not load</option>'; el.querySelector('.form-error').innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString() }
-      }
-      const sync = () => { el.querySelector('#slack-ch').style.display = chSel.value === 'slack' ? '' : 'none'; const m = el.querySelector('#mail-to, #mail-note'); if (m) m.style.display = chSel.value === 'gmail' ? '' : 'none'; fillConn(); fillChannels() }
-      chSel.addEventListener('change', sync); connSel.addEventListener('change', fillChannels); sync()
-      bindForm(el.querySelector('#f'), (d) => api(`/api/automations/${a.key}`, { method: 'PUT', body: { channel: d.channel, connectionId: d.connectionId, slackChannelId: d.channel === 'slack' ? d.slackChannelId : undefined, emailTo: d.emailTo } }), { onSuccess: () => { close(); toast(`${a.name} is active.`); reload() } })
-    })
+    const done = await deliveryForm({ title: a.name, conns, targets: DELIVERY_TARGETS[a.key], current: a.workflow?.config || {}, onSubmit: (body) => api(`/api/automations/${a.key}`, { method: 'PUT', body }) })
+    if (done) { toast(`${a.name} is active.`); reload() }
   }))
   body.querySelectorAll('[data-status]').forEach((b) => b.addEventListener('click', async () => {
     try { await api(`/api/automations/${b.dataset.status}/status`, { method: 'POST', body: { status: b.dataset.to } }); toast(b.dataset.to === 'PAUSED' ? 'Paused.' : 'Resumed.'); reload() } catch (e) { toast(errorText(e), { error: true }) }
@@ -141,15 +182,106 @@ Content-Type: application/json
   }))
   body.querySelector('[data-intake]')?.addEventListener('click', async () => {
     const a = autos.automations.find((x) => x.key === 'external_request_intake')
-    if (a.tokenIssued) { const r = await confirmDialog({ title: 'Rotate the intake token?', body: 'Flows using the old token stop working until you update them with the new one.', confirm: 'Rotate', danger: true }); if (!r?.ok) return }
+    if (a.tokenIssued) { const r = await confirmDialog({ title: 'Rotate the intake token?', body: 'Systems using the old token stop working until you update them with the new one.', confirm: 'Rotate', danger: true }); if (!r?.ok) return }
     try {
       const { token } = await api('/api/automations/external_request_intake/token', { method: 'POST' })
-      modal(html`<h2 id="modal-title">Intake token</h2><div class="notice warn">Copy it now — it is shown only once. Store it as a secret in your ViaSocket flow.</div><input type="text" readonly value="${token}" id="tok" class="mono" onclick="this.select()"><div class="row end" style="margin-top:12px"><button class="btn" data-close>Done</button></div>`.toString())
+      modal(html`<h2 id="modal-title">Intake token</h2><div class="notice warn">Copy it now — it is shown only once.</div><input type="text" readonly value="${token}" id="tok" class="mono" onclick="this.select()"><div class="row end" style="margin-top:12px"><button class="btn" data-close>Done</button></div>`.toString())
       reload()
     } catch (e) { toast(errorText(e), { error: true }) }
   })
   body.querySelector('[data-preview]')?.addEventListener('click', async () => {
     try { const { text } = await api('/api/automations/weekly_team_report/preview', { method: 'POST', body: {} }); modal(html`<h2 id="modal-title">Weekly report preview</h2><pre class="pre small" style="background:var(--surface-2);padding:12px;border-radius:8px">${text}</pre><div class="row end"><button class="btn" data-close>Close</button></div>`.toString()) } catch (e) { toast(errorText(e), { error: true }) }
+  })
+}
+
+// C: the manager's Gmail / Slack intakes.
+async function renderIntakes(box, conns, configured) {
+  if (!box) return
+  const draw = async () => {
+    let list = []
+    try { list = await api('/api/intakes') } catch (e) { box.innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString(); return }
+    box.innerHTML = html`${list.length ? html`<ul class="list">${list.map((i) => html`<li><div class="grow"><b>${i.app === 'gmail' ? 'Gmail label' : 'Slack'} “${i.target}”</b> → ${i.teamName || 'admins'}
+        <div class="small muted">${i.mine ? '' : `${i.ownerName} · `}${i.eventsReceived} message(s) received${i.lastEventAt ? `, last ${ago(i.lastEventAt)}` : ''}</div>${i.lastError ? html`<div class="small" style="color:var(--bad)">${i.lastError}</div>` : ''}</div>
+        <span class="badge ${STATUS_BADGE[i.status] || 'outline'}">${i.status.toLowerCase()}</span>
+        ${i.status === 'ACTIVE' ? html`<button class="btn small ghost" data-i="${i.id}" data-to="PAUSED">Pause</button>` : i.mine ? html`<button class="btn small ghost" data-i="${i.id}" data-to="ACTIVE">Resume</button>` : ''}
+        ${i.mine ? html`<button class="btn small ghost" data-i="${i.id}" data-to="DELETED">Remove</button>` : ''}</li>`)}</ul>`
+      : html`<p class="small muted">No intakes yet.</p>`}
+      <div class="row" style="margin-top:8px"><button class="btn small" id="add-intake" ${!configured ? raw('disabled title="ViaSocket is not configured"') : ''}>Add Gmail or Slack intake</button></div>`.toString()
+    box.querySelectorAll('[data-i]').forEach((b) => b.addEventListener('click', async () => {
+      if (b.dataset.to === 'DELETED') { const r = await confirmDialog({ title: 'Remove this intake?', body: 'New messages stop becoming requests. Requests already created stay.', confirm: 'Remove', danger: true }); if (!r?.ok) return }
+      try { await api(`/api/intakes/${b.dataset.i}/status`, { method: 'POST', body: { status: b.dataset.to } }); draw() } catch (e) { toast(errorText(e), { error: true }) }
+    }))
+    box.querySelector('#add-intake')?.addEventListener('click', () => addIntake(conns, draw))
+  }
+  draw()
+}
+
+async function addIntake(conns, done) {
+  const g = conns.connections.filter((c) => c.app === 'gmail' && c.status !== 'missing')
+  const s = conns.connections.filter((c) => c.app === 'slack' && c.status !== 'missing')
+  if (!g.length && !s.length) return modal(html`<h2 id="modal-title">Connect Gmail or Slack first</h2><p>Intake listens on your own Gmail or Slack account.</p><div class="row end"><button class="btn ghost" data-close>Close</button><a class="btn" href="#/automations?tab=apps">Connect an app</a></div>`.toString(), (el, close) => el.querySelector('a').addEventListener('click', () => close()))
+  const teams = (await api('/api/teams')).filter((t) => app.isAdmin || t.managedByMe)
+  modal(html`<h2 id="modal-title">Gmail / Slack intake</h2><p class="small muted">Each new email with the label, or each new message in the channel, becomes a <b>pending</b> task request for your team. Nothing is assigned or approved automatically. Use a dedicated label or channel.</p>
+    <form id="f"><div class="form-error"></div>
+    <div class="field"><label for="i-app">Listen on</label><select id="i-app" name="app">${g.length ? html`<option value="gmail">Gmail (a label)</option>` : ''}${s.length ? html`<option value="slack">Slack (a channel)</option>` : ''}</select></div>
+    <div class="field"><label for="i-conn">Your account</label><select id="i-conn" name="connectionId"></select></div>
+    <div class="field"><label for="i-target" id="i-target-label">Label</label><select id="i-target" name="target"><option value="">Loading…</option></select><div class="hint" id="i-hint"></div></div>
+    <div class="field"><label for="i-team">Requests go to</label><select id="i-team" name="teamId">${teams.map((t) => html`<option value="${t.id}">${t.name}</option>`)}</select></div>
+    <div id="i-preview"></div>
+    <div class="row end"><button class="btn ghost" type="button" id="i-sample">Preview a real message</button><button class="btn ghost" data-close>Cancel</button><button class="btn" type="submit">Switch on</button></div></form>`.toString(), (el, close) => {
+    const $ = (q) => el.querySelector(q)
+    const fill = async () => {
+      const isG = $('#i-app').value === 'gmail'
+      $('#i-conn').innerHTML = (isG ? g : s).map((c) => `<option value="${esc(c.id)}">${esc(c.label || $('#i-app').value)}</option>`).join('')
+      $('#i-target-label').textContent = isG ? 'Gmail label' : 'Slack channel'
+      $('#i-hint').textContent = isG ? 'Create a label such as “TeamPulse” in Gmail and apply it to emails that should become requests.' : 'Use a channel only for requests — not one TeamPulse posts notifications or reports to.'
+      await fillTargets()
+    }
+    const fillTargets = async () => {
+      $('#i-target').innerHTML = '<option value="">Loading…</option>'
+      try {
+        const out = await api(`/api/intakes/targets?app=${$('#i-app').value}&connectionId=${encodeURIComponent($('#i-conn').value)}`)
+        $('#i-target').innerHTML = out.options.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('') || '<option value="">Nothing found</option>'
+        if (out.message) $('#i-hint').textContent = out.message
+      } catch (e) { $('#i-target').innerHTML = '<option value="">Could not load</option>'; $('.form-error').innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString() }
+    }
+    $('#i-app').addEventListener('change', fill); $('#i-conn').addEventListener('change', fillTargets); fill()
+    const read = () => ({ app: $('#i-app').value, connectionId: $('#i-conn').value, target: $('#i-target').value, teamId: $('#i-team').value || undefined })
+    $('#i-sample').addEventListener('click', async () => {
+      $('#i-preview').innerHTML = loading('Reading a recent message…').toString()
+      try {
+        const out = await api('/api/intakes/sample', { method: 'POST', body: read() })
+        $('#i-preview').innerHTML = out.found && out.preview?.title
+          ? html`<div class="notice ok small"><b>A request would look like:</b><br>Title: ${out.preview.title}<br>From: ${out.preview.requester || '—'}${out.preview.ignore ? html`<br><i>This one would be ignored: ${out.preview.ignore}</i>` : ''}</div>`.toString()
+          : html`<div class="notice warn small">No recent message found there yet. Send one, then preview again.</div>`.toString()
+      } catch (e) { $('#i-preview').innerHTML = html`<div class="notice err small">${errorText(e)}</div>`.toString() }
+    })
+    bindForm($('#f'), () => api('/api/intakes', { method: 'POST', body: read() }), { onSuccess: () => { close(); toast('Intake is on. New messages become pending requests.'); done() } })
+  })
+}
+
+// D: the restricted builder for one TeamPulse context, in a modal. Used by My Tasks, Reports and Team Tasks.
+export async function openContextBuilder(context) {
+  let cfg
+  try { cfg = await api(`/api/viasocket/context/${context}`) } catch (e) { toast(errorText(e), { error: true }); return }
+  const names = { 'google-sheets': 'Google Sheets', slack: 'Slack', gmail: 'Gmail', 'google-calendar': 'Google Calendar', github: 'GitHub' }
+  await modal(html`<h2 id="modal-title">Automate: ${cfg.label}</h2><p class="small muted">Pick an app (${Object.keys(cfg.serviceIds).map((s) => names[s] || s).join(', ')}) and publish. TeamPulse then sends your own events here.</p>
+    <div id="ctx-box" style="height:560px;border:1px solid var(--border);border-radius:8px"><div class="loading">Loading…</div></div>
+    <div class="row end" style="margin-top:10px"><button class="btn" data-close>Done</button></div>`.toString(), async (el) => {
+    const dlg = document.getElementById('modal'); dlg.style.width = 'min(1100px, calc(100vw - 32px))'
+    const listener = (event) => {
+      if (event.origin !== EMBED_ORIGIN) return
+      const flow = event.data
+      if (flow?.id && ['published', 'updated', 'paused', 'deleted'].includes(flow.action)) api(`/api/viasocket/embed-flows/${encodeURIComponent(flow.id)}/sync`, { method: 'POST', body: { context } }).then(() => toast(`Flow ${flow.action}.`)).catch(() => {})
+    }
+    window.addEventListener('message', listener)
+    dlg.addEventListener('close', () => { window.removeEventListener('message', listener); dlg.style.width = '' }, { once: true })
+    try {
+      await loadScript(EMBED_SCRIPT)
+      el.querySelector('#ctx-box').innerHTML = ''
+      const embed = window.viaSocket.mount({ embedToken: cfg.token, parent: '#ctx-box', config: { pageheading: 'Automation', pagesubheading: cfg.label, filteredServices: cfg.filteredServices, showEnabled: false, hideWebhook: true, hideApi: true, hideFunction: true, themeJson: { '--primary-color': '#4338ca' } }, open: { dummy_payload: cfg.dummyPayload, meta: cfg.meta } })
+      dlg.addEventListener('close', () => { try { embed.destroy?.() } catch { /* gone */ } }, { once: true })
+    } catch (e) { el.querySelector('#ctx-box').innerHTML = html`<div class="notice err" style="margin:12px">${errorText(e)}</div>`.toString() }
   })
 }
 
@@ -160,7 +292,7 @@ async function renderBuilder(body, conns, appSlug) {
   body.innerHTML = html`
     <p class="muted" style="margin-bottom:10px">${focus ? html`Building with <b>${focus.name}</b>. <a href="#/automations?tab=builder">Show all apps</a>` : 'Build your own automations across 2,300+ apps. Each person’s flows are their own.'}</p>
     ${conns.configured ? html`<div id="embed-box" aria-label="ViaSocket automation builder"><div class="loading">Loading the builder…</div></div>` : html`<div class="card">${empty('Builder unavailable', 'ViaSocket is not configured on this server.')}</div>`}
-    ${flows.length ? html`<h2 style="margin:18px 0 8px">Your published flows</h2><ul class="list card">${flows.map((f) => html`<li><div class="grow"><b>${f.title || f.flowId}</b><div class="small muted">updated ${ago(f.updatedAt)}</div></div><span class="badge ${f.status === 'active' ? 'ok' : 'outline'}">${f.status}</span></li>`)}</ul>` : ''}`
+    ${flows.length ? html`<h2 style="margin:18px 0 8px">Your published flows</h2><ul class="list card">${flows.map((f) => html`<li><div class="grow"><b>${f.title || f.flowId}</b><div class="small muted">${f.context ? `${({ task_assigned_to_me: 'When a task is assigned to me', weekly_report_ready: 'When my weekly report is ready', task_completed_in_my_team: 'When a task in my team is completed' })[f.context] || f.context} · ` : ''}updated ${ago(f.updatedAt)}</div></div><span class="badge ${f.status === 'active' ? 'ok' : 'outline'}">${f.status}</span></li>`)}</ul>` : ''}`
   if (!conns.configured) return
   try {
     const { token, serviceIds } = await api(`/api/viasocket/token${focus ? `?apps=${focus.slug}` : ''}`)

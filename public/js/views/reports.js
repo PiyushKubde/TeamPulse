@@ -1,4 +1,5 @@
 import { api, html, raw, empty, d } from '../ui.js'
+import { openContextBuilder } from './automations.js'
 
 const REPORTS = [['weekly', 'Weekly team summary'], ['workload', 'Team workload'], ['status', 'Task status distribution'], ['overdue', 'Overdue tasks'], ['blockers', 'Blocker history'], ['contributions', 'Employee contributions'], ['impact', 'Verified impact']]
 const LABELS = { person: 'Person', active: 'Active', assigned: 'Not started', inProgress: 'In progress', blocked: 'Blocked', inReview: 'In review', overdue: 'Overdue', atRisk: 'At risk', critical: 'Critical', status: 'Status', tasks: 'Tasks', task: 'Task', assignee: 'Owner', priority: 'Priority', dueAt: 'Due', hoursOverdue: 'Hours overdue', openBlockers: 'Open blockers', description: 'Description', dependency: 'Dependency', reportedAt: 'Reported', hoursOpen: 'Hours open', resolution: 'Resolution', verified: 'Verified', pending: 'Pending', rejected: 'Not verified', prevention: 'Prevention', learning: 'Learning', reusable: 'Reusable', quality: 'Quality', categories: 'Categories', title: 'Title', category: 'Category', outcomeType: 'Kind', result: 'Result', value: 'Value', unit: 'Unit', valueKind: 'Measured / estimate', verifiedAt: 'Verified' }
@@ -11,7 +12,7 @@ export async function renderReports(main, q) {
   for (const k of ['from', 'to', 'userId', 'weekStart']) if (q.get(k)) params.set(k, q.get(k))
   const report = await api(`/api/reports/${type}?${params}`)
   main.innerHTML = html`<div class="page-head"><div><h1>Reports</h1><p>Operational views and evidence of contribution. No report ranks people by how many tasks they closed.</p></div>
-    ${type !== 'weekly' ? html`<a class="btn ghost" href="/api/reports/${type}.csv?${params}" download>Export CSV</a>` : ''}</div>
+    <div class="row">${type === 'weekly' ? html`<button class="btn ghost" id="automate" title="When my weekly report is ready…">Send each report to Google Sheets, Slack or Gmail</button>` : html`<a class="btn ghost" href="/api/reports/${type}.csv?${params}" download>Export CSV</a>`}</div></div>
     <form class="filters" id="rf">
       <select name="type" aria-label="Report">${REPORTS.map(([k, l]) => html`<option value="${k}" ${k === type ? raw('selected') : ''}>${l}</option>`)}</select>
       ${type === 'weekly' ? html`<label class="small" for="ws" style="margin:0">Week of</label><input id="ws" type="date" name="weekStart" value="${report.weekStart}">`
@@ -25,6 +26,7 @@ export async function renderReports(main, q) {
     for (const el of e.target.elements) if (el.name && el.value) p.set(el.name, el.value)
     location.hash = `#/reports?${p}`
   })
+  main.querySelector('#automate')?.addEventListener('click', () => openContextBuilder('weekly_report_ready'))
   main.querySelector('select[name=type]').addEventListener('change', (e) => { location.hash = `#/reports?type=${e.target.value}` })
   const rb = main.querySelector('#rb')
   if (type === 'weekly') return renderWeekly(rb, report)

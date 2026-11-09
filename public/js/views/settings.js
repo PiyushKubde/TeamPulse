@@ -1,5 +1,6 @@
 import { api, html, raw, modal, bindForm, toast, errorText, ago, dt, empty, confirmDialog } from '../ui.js'
 import { app, reloadSession } from '../app.js'
+import { deliveryForm } from './automations.js'
 
 const TABS = () => [['profile', 'Profile'], ['organization', 'Organization', app.isManager], ['members', 'Teams & members', app.isManager], ['permissions', 'Employee permissions', app.isManager], ['alerts', 'Alert settings', app.isAdmin], ['audit', 'Audit history', app.isManager]].filter((t) => t[2] !== false)
 const PERMS = [['can_create_tasks', 'Can create tasks', 'Without this, the employee can only suggest tasks.'], ['can_create_directly', 'Can create directly', 'Create official tasks without approval (needs approval to be off).'], ['approval_required', 'Approval required', 'New tasks go to you as requests first.'], ['can_self_assign', 'Can self-assign', 'Assign tasks to themselves.'], ['can_assign_others', 'Can assign others', 'Assign tasks to people in their own team.']]
@@ -20,7 +21,9 @@ async function profile(sb) {
     <dt>Organization</dt><dd>${s.membership.orgName}</dd><dt>Role</dt><dd style="text-transform:capitalize">${s.membership.role}</dd></dl>
     <p class="small muted" style="margin-top:8px">Name, email and picture come from your Google account and refresh each time you sign in.</p>
     <form id="pf" style="margin-top:14px"><div class="form-error"></div><div class="field"><label for="ph">Phone for urgent alerts (optional)</label><input id="ph" name="phone" type="tel" value="${s.user.phone || ''}" placeholder="+919876543210"><div class="hint">Used only for important alerts through M91 when your admin turns them on.</div></div><button class="btn" type="submit">Save</button></form>
+    <h3 style="margin:18px 0 6px">My notifications</h3><div id="my-notif">${raw('<div class="loading">Loading…</div>')}</div>
     ${app.role === 'employee' ? html`<h3 style="margin:18px 0 8px">My task permissions</h3><ul class="list">${PERMS.map(([k, l]) => html`<li><span class="badge ${s.membership.permissions[k] ? 'ok' : 'outline'}">${s.membership.permissions[k] ? 'Yes' : 'No'}</span><div class="grow">${l}</div></li>`)}</ul>` : ''}</section>`
+  renderMyNotifications(sb.querySelector('#my-notif'))
   bindForm(sb.querySelector('#pf'), (d) => api('/api/profile', { method: 'PATCH', body: { phone: d.phone || null } }), { onSuccess: (out) => {
     const M = { reachable: 'Saved. M91 can reach this phone.', invited: 'Saved. Accept the TeamPulse invitation in the M91 app to receive urgent alerts.', invite_failed: `Saved, but the M91 invitation failed: ${out.m91Error || ''}` }
     toast(M[out.m91] || 'Saved.'); reloadSession()
@@ -134,4 +137,25 @@ async function audit(sb) {
   const rows = await api('/api/audit')
   sb.innerHTML = html`<p class="muted">${app.isAdmin ? 'Sensitive changes across the organization.' : 'Permission changes in your teams.'}</p>
     ${rows.length ? html`<div class="table-wrap"><table><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Change</th></tr></thead><tbody>${rows.map((a) => html`<tr><td class="nowrap small">${dt(a.createdAt)}</td><td>${a.actor || 'System'}</td><td class="mono">${a.action}</td><td class="small mono" style="max-width:420px;word-break:break-word">${a.before ? `${JSON.stringify(a.before)} → ` : ''}${a.after ? JSON.stringify(a.after) : ''}</td></tr>`)}</tbody></table></div>` : html`<div class="card">${empty('Nothing recorded yet', '')}</div>`}`
+}
+
+// A1: the person's own task notifications, through their own Slack or Gmail.
+async function renderMyNotifications(box) {
+  let prefs, conns
+  try { [prefs, conns] = await Promise.all([api('/api/notifications/prefs'), api('/api/viasocket/connections')]) } catch (e) { box.innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString(); return }
+  const on = prefs.channel !== 'none'
+  const where = !on ? 'Off — you get in-app notifications only.' : prefs.channel === 'gmail' ? `By email to ${app.me.email}, from your own Gmail.` : prefs.slackMode === 'user' ? `As a Slack direct message to ${prefs.slackLabel || 'you'}.` : `In Slack ${prefs.slackLabel || 'channel'}.`
+  box.innerHTML = html`<p class="small">When a task is assigned to you: <b>${where}</b></p>
+    ${!conns.configured ? html`<div class="notice warn small">ViaSocket is not configured on this server.</div>` : html`<div class="row"><button class="btn small" id="n-set">${on ? 'Change' : 'Turn on Slack or Gmail notifications'}</button>${on ? html`<button class="btn small ghost" id="n-off">Turn off</button>` : ''}
+      ${!conns.connections.some((c) => ['slack', 'gmail'].includes(c.app)) ? html`<a class="btn small ghost" href="#/automations?tab=apps">Connect Slack or Gmail</a>` : ''}</div>`}`.toString()
+  box.querySelector('#n-set')?.addEventListener('click', async () => {
+    const done = await deliveryForm({
+      title: 'My task notifications', intro: 'Sent from your own connected account when a task is assigned to you.', conns, submitLabel: 'Save',
+      targets: { slack: [['me', 'Message me in Slack'], ['channel', 'Post in a channel']], gmail: [['me', 'Email me']] },
+      current: { channel: prefs.channel === 'none' ? undefined : prefs.channel, connectionId: prefs.connectionId, target: prefs.slackMode === 'channel' ? 'channel' : 'me', slackUserId: prefs.slackMode === 'user' ? prefs.slackTarget : null, slackChannelId: prefs.slackMode === 'channel' ? prefs.slackTarget : null },
+      onSubmit: (b) => api('/api/notifications/prefs', { method: 'PUT', body: b })
+    })
+    if (done) { toast('Notifications saved.'); renderMyNotifications(box) }
+  })
+  box.querySelector('#n-off')?.addEventListener('click', async () => { await api('/api/notifications/prefs', { method: 'PUT', body: { channel: 'none' } }); toast('Turned off.'); renderMyNotifications(box) })
 }

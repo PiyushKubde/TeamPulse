@@ -1,6 +1,7 @@
 import { api, html, raw, esc, modal, bindForm, toast, errorText, confirmDialog, ago, dt, statusBadge, prioBadge, conditionBadges, progressBar, empty, toLocalInput, fromLocalInput, STATUS_LABEL } from '../ui.js'
 import { app } from '../app.js'
 import { eventText } from './dashboard.js'
+import { openContextBuilder } from './automations.js'
 
 let assignableCache = null
 async function assignable() {
@@ -23,7 +24,7 @@ export async function renderTaskList(main, { view, q }) {
   const sel = (name, opts, label) => html`<label class="sr" style="position:absolute;left:-999px" for="f-${name}">${label}</label><select id="f-${name}" name="${name}"><option value="">${label}</option>${opts.map(([v, l]) => html`<option value="${v}" ${q.get(name) === v ? raw('selected') : ''}>${l}</option>`)}</select>`
   main.innerHTML = html`
     <div class="page-head"><div><h1>${isTeam ? 'Team tasks' : 'My tasks'}</h1><p>${isTeam ? 'Everything your teams are working on. Overdue and at-risk are calculated from deadlines and progress.' : 'Tasks assigned to you.'}</p></div>
-      <div class="row"><button class="btn" id="new-task">${app.session.membership.creationMode === 'direct' ? 'New task' : 'Suggest a task'}</button></div></div>
+      <div class="row"><button class="btn ghost" id="automate" title="${isTeam ? 'When a task in my team is completed…' : 'When a task is assigned to me…'}">Automate</button><button class="btn" id="new-task">${app.session.membership.creationMode === 'direct' ? 'New task' : 'Suggest a task'}</button></div></div>
     <form class="filters" id="filters" role="search">
       <input type="search" name="q" value="${q.get('q') || ''}" placeholder="Search title or description" aria-label="Search tasks">
       ${sel('status', Object.entries(STATUS_LABEL).filter(([k]) => k !== 'SUGGESTED'), 'Any status')}
@@ -43,6 +44,7 @@ export async function renderTaskList(main, { view, q }) {
         <td class="nowrap">${t.dueAt ? html`<span title="${dt(t.dueAt)}">${ago(t.dueAt)}</span>` : html`<span class="muted">—</span>`}</td><td class="hide-sm" style="width:110px">${progressBar(t.progress)}<div class="small muted">${t.progress}%</div></td></tr>`)}
     </tbody></table></div>` : empty(isTeam ? 'No tasks match' : 'No tasks here', isTeam ? 'Try other filters, or create a task.' : 'When someone assigns you a task it appears here. You can also suggest one.')}`
   document.getElementById('new-task').addEventListener('click', () => openTaskForm())
+  document.getElementById('automate').addEventListener('click', () => openContextBuilder(isTeam ? 'task_completed_in_my_team' : 'task_assigned_to_me'))
   document.getElementById('filters').addEventListener('submit', (e) => {
     e.preventDefault()
     const p = new URLSearchParams()
