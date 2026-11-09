@@ -21,7 +21,10 @@ async function profile(sb) {
     <p class="small muted" style="margin-top:8px">Name, email and picture come from your Google account and refresh each time you sign in.</p>
     <form id="pf" style="margin-top:14px"><div class="form-error"></div><div class="field"><label for="ph">Phone for urgent alerts (optional)</label><input id="ph" name="phone" type="tel" value="${s.user.phone || ''}" placeholder="+919876543210"><div class="hint">Used only for important alerts through M91 when your admin turns them on.</div></div><button class="btn" type="submit">Save</button></form>
     ${app.role === 'employee' ? html`<h3 style="margin:18px 0 8px">My task permissions</h3><ul class="list">${PERMS.map(([k, l]) => html`<li><span class="badge ${s.membership.permissions[k] ? 'ok' : 'outline'}">${s.membership.permissions[k] ? 'Yes' : 'No'}</span><div class="grow">${l}</div></li>`)}</ul>` : ''}</section>`
-  bindForm(sb.querySelector('#pf'), (d) => api('/api/profile', { method: 'PATCH', body: { phone: d.phone || null } }), { onSuccess: () => { toast('Saved.'); reloadSession() } })
+  bindForm(sb.querySelector('#pf'), (d) => api('/api/profile', { method: 'PATCH', body: { phone: d.phone || null } }), { onSuccess: (out) => {
+    const M = { reachable: 'Saved. M91 can reach this phone.', invited: 'Saved. Accept the TeamPulse invitation in the M91 app to receive urgent alerts.', invite_failed: `Saved, but the M91 invitation failed: ${out.m91Error || ''}` }
+    toast(M[out.m91] || 'Saved.'); reloadSession()
+  } })
 }
 
 async function organization(sb, reload) {

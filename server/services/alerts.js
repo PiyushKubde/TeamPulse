@@ -29,9 +29,9 @@ export function raiseAlert(db, { orgId, rule, userIds, taskId = null, title, bod
     if (settings.m91Enabled && settings.rules[rule]?.m91) {
       const user = db.prepare('SELECT email, phone FROM users WHERE id = ?').get(userId)
       const ts = now()
-      db.prepare(`INSERT INTO alert_deliveries (id, org_id, notification_id, user_id, rule, provider, recipient, status, attempts, next_attempt_at, dedupe_key, created_at, updated_at)
-                  VALUES (?, ?, ?, ?, ?, 'm91', ?, 'QUEUED', 0, ?, ?, ?, ?) ON CONFLICT (dedupe_key) DO NOTHING`)
-        .run(uuid(), orgId, notificationId, userId, rule, user?.phone || user?.email || null, ts, `m91:${dedupeKey}`, ts, ts)
+      db.prepare(`INSERT INTO alert_deliveries (id, org_id, notification_id, user_id, task_id, rule, provider, recipient, status, attempts, next_attempt_at, dedupe_key, created_at, updated_at)
+                  VALUES (?, ?, ?, ?, ?, ?, 'm91', ?, 'QUEUED', 0, ?, ?, ?, ?) ON CONFLICT (dedupe_key) DO NOTHING`)
+        .run(uuid(), orgId, notificationId, userId, taskId, rule, user?.phone || null, ts, `m91:${dedupeKey}`, ts, ts)
     }
   }
   return created
@@ -134,10 +134,16 @@ export function scanAlerts(db, at = Date.now()) {
   return raised
 }
 
-/** Sends queued M91 deliveries: claim → send → SENT, retry with backoff, or FAILED / NOT_CONFIGURED. */
+/** How hard M91 chases each alert (it decides re-rings and phone calls, so CRITICAL is never used automatically). */
+export const RULE_SEVERITY = { deadline_missed: 'HIGH', critical_blocked: 'HIGH', blocker_unresolved: 'MEDIUM', deadline_approaching: 'MEDIUM', no_progress: 'MEDIUM', unassigned: 'MEDIUM', not_started: 'LOW', task_assigned: 'LOW', submitted_for_review: 'LOW' }
+
+/** The M91 customId for a delivery: stable per condition and person, at most 200 characters. */
+export const m91CustomId = (dedupeKey) => `tp-${createHash('sha256').update(String(dedupeKey)).digest('hex').slice(0, 40)}`
+
+/** Sends queued M91 deliveries: claim → send → SENT, retry with backoff, or FAILED / SKIPPED / NOT_CONFIGURED. */
 export async function processDeliveries(db, transport, { limit = 50 } = {}) {
   const due = db.prepare(`SELECT * FROM alert_deliveries WHERE status = 'QUEUED' AND (next_attempt_at IS NULL OR next_attempt_at <= ?) ORDER BY created_at LIMIT ?`).all(now(), limit)
-  const result = { sent: 0, failed: 0, retrying: 0, notConfigured: 0 }
+  const result = { sent: 0, failed: 0, retrying: 0, notConfigured: 0, skipped: 0 }
   for (const d of due) {
     // Atomic claim: a concurrent run cannot send the same delivery twice.
     const claimed = db.prepare(`UPDATE alert_deliveries SET status = 'SENDING', attempts = attempts + 1, updated_at = ? WHERE id = ? AND status = 'QUEUED'`).run(now(), d.id).changes
@@ -145,8 +151,9 @@ export async function processDeliveries(db, transport, { limit = 50 } = {}) {
     const n = d.notification_id ? db.prepare('SELECT * FROM notifications WHERE id = ?').get(d.notification_id) : null
     const user = d.user_id ? db.prepare('SELECT name, email, phone FROM users WHERE id = ?').get(d.user_id) : null
     try {
-      const out = await transport.send({ title: n?.title || d.rule, body: n?.body || null, link: n?.link || null, recipient: user, idempotencyKey: d.dedupe_key })
-      db.prepare(`UPDATE alert_deliveries SET status = 'SENT', provider_message_id = ?, last_error = NULL, updated_at = ? WHERE id = ?`).run(out?.providerMessageId ? String(out.providerMessageId).slice(0, 200) : null, now(), d.id)
+      const out = await transport.send({ title: n?.title || d.rule, body: n?.body || null, link: null, recipient: user, idempotencyKey: m91CustomId(d.dedupe_key), severity: RULE_SEVERITY[d.rule] || 'MEDIUM' })
+      db.prepare(`UPDATE alert_deliveries SET status = 'SENT', provider_message_id = ?, recipient = ?, last_error = NULL, updated_at = ? WHERE id = ?`)
+        .run(out?.providerMessageId ? String(out.providerMessageId).slice(0, 200) : null, user?.phone || null, now(), d.id)
       result.sent++
     } catch (error) {
       const attempts = d.attempts + 1
@@ -154,16 +161,47 @@ export async function processDeliveries(db, transport, { limit = 50 } = {}) {
       if (error?.notConfigured) {
         db.prepare(`UPDATE alert_deliveries SET status = 'NOT_CONFIGURED', last_error = ?, updated_at = ? WHERE id = ?`).run(msg, now(), d.id)
         result.notConfigured++
-      } else if (error?.retryable !== false && attempts < MAX_ATTEMPTS) {
+      } else if (error?.code === 'NO_PHONE') {
+        db.prepare(`UPDATE alert_deliveries SET status = 'SKIPPED', last_error = ?, updated_at = ? WHERE id = ?`).run(msg, now(), d.id)
+        result.skipped++
+      } else if (error?.retryable === true && attempts < MAX_ATTEMPTS) {
         db.prepare(`UPDATE alert_deliveries SET status = 'QUEUED', last_error = ?, next_attempt_at = ?, updated_at = ? WHERE id = ?`).run(msg, new Date(Date.now() + backoffMs(attempts)).toISOString(), now(), d.id)
         result.retrying++
       } else {
+        console.log(`[m91] delivery ${d.id} (${d.rule}) failed: ${msg}`)
         db.prepare(`UPDATE alert_deliveries SET status = 'FAILED', last_error = ?, updated_at = ? WHERE id = ?`).run(msg, now(), d.id)
         result.failed++
       }
     }
   }
   return result
+}
+
+/**
+ * Closes the M91 alerts whose condition is over: everything for a completed or cancelled task, and blocker alerts
+ * once its blockers are resolved. A person is never left being rung about something already handled.
+ */
+export async function closeResolvedAlerts(db, transport, event) {
+  if (!transport.ready || !event.taskId) return 0
+  let rules = null
+  if (event.type === 'blocker.resolved') rules = ['critical_blocked', 'blocker_unresolved']
+  else if (event.type === 'task.reviewed' && event.decision === 'APPROVED') rules = 'all'
+  else if (event.type === 'task.status_changed' && ['COMPLETED', 'CANCELLED'].includes(event.to)) rules = 'all'
+  else if (event.type === 'task.assigned') rules = ['unassigned']
+  if (!rules) return 0
+  const open = db.prepare(`SELECT * FROM alert_deliveries WHERE task_id = ? AND closed_at IS NULL AND status IN ('SENT','DELIVERED') AND provider_message_id IS NOT NULL`).all(event.taskId)
+    .filter((d) => rules === 'all' || rules.includes(d.rule))
+  let closed = 0
+  for (const d of open) {
+    try {
+      await transport.close({ phone: d.recipient, alertId: d.provider_message_id })
+      db.prepare('UPDATE alert_deliveries SET closed_at = ?, updated_at = ? WHERE id = ?').run(now(), now(), d.id)
+      closed++
+    } catch (error) {
+      console.log(`[m91] could not close alert for delivery ${d.id}: ${String(error?.message || error).slice(0, 200)}`)
+    }
+  }
+  return closed
 }
 
 const safeEqual = (a, b) => {
@@ -173,39 +211,52 @@ const safeEqual = (a, b) => {
 }
 
 /**
- * A delivery callback. Authenticated by the shared M91_CALLBACK_TOKEN; stored once per idempotency key (the
- * Idempotency-Key header or a hash of the raw body), so a provider retry never applies twice.
+ * An M91 callback ("answered" or "closed"). Authenticated by M91_CALLBACK_TOKEN in the URL; stored once per
+ * idempotencyKey (M91 retries). The body is only a signal: M91's callback signature cannot be verified yet, so the
+ * alert is read back from M91 and only what M91 returns is recorded.
  */
-export function handleCallback(db, transport, { token, expectedToken, rawBody, idempotencyHeader }) {
+export async function handleCallback(db, transport, { token, expectedToken, rawBody, idempotencyHeader }) {
   if (!expectedToken) return { status: 503, body: { error: 'callbacks_not_configured' } }
   if (!token || !safeEqual(token, expectedToken)) return { status: 401, body: { error: 'unauthorized' } }
   const raw = Buffer.isBuffer(rawBody) ? rawBody.toString('utf8') : String(rawBody || '')
   if (raw.length > 64 * 1024) return { status: 413, body: { error: 'too_large' } }
   let payload
   try { payload = raw ? JSON.parse(raw) : {} } catch { return { status: 400, body: { error: 'invalid_json' } } }
-  const key = idempotencyHeader ? `h:${String(idempotencyHeader).slice(0, 200)}` : `b:${createHash('sha256').update(raw).digest('hex')}`
-  return transaction(db, () => {
-    const inserted = db.prepare(`INSERT INTO alert_callbacks (id, provider, idempotency_key, payload, received_at) VALUES (?, 'm91', ?, ?, ?) ON CONFLICT (idempotency_key) DO NOTHING`)
-      .run(uuid(), key, raw.slice(0, 64 * 1024), now()).changes
-    if (!inserted) return { status: 200, body: { ok: true, duplicate: true } }
-    const parsed = transport.parseCallback(payload)
-    if (!parsed?.providerMessageId) return { status: 202, body: { ok: true, matched: false } }
-    const d = db.prepare(`SELECT * FROM alert_deliveries WHERE provider = 'm91' AND provider_message_id = ?`).get(String(parsed.providerMessageId))
-    if (!d) return { status: 202, body: { ok: true, matched: false } }
-    db.prepare('UPDATE alert_callbacks SET delivery_id = ? WHERE idempotency_key = ?').run(d.id, key)
-    const status = parsed.status === 'FAILED' ? 'FAILED' : 'DELIVERED'
-    // Never move a delivery backwards (e.g. a late "delivered" after a "failed" stays failed only if it really failed).
-    if (d.status !== 'DELIVERED') db.prepare(`UPDATE alert_deliveries SET status = ?, last_error = ?, updated_at = ? WHERE id = ?`).run(status, status === 'FAILED' ? String(parsed.response || 'Provider reported failure').slice(0, 300) : null, now(), d.id)
-    if (parsed.response && d.user_id && d.notification_id) {
-      const n = db.prepare('SELECT * FROM notifications WHERE id = ?').get(d.notification_id)
-      if (n?.task_id) {
-        const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(n.task_id)
-        if (task) db.prepare('INSERT INTO task_events (id, org_id, task_id, actor_id, type, data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-          .run(uuid(), task.org_id, task.id, d.user_id, 'alert_response', JSON.stringify({ rule: d.rule, response: String(parsed.response).slice(0, 500) }), now())
-      }
+  const keySource = payload?.idempotencyKey || idempotencyHeader
+  const key = keySource ? `k:${String(keySource).slice(0, 200)}` : `b:${createHash('sha256').update(raw).digest('hex')}`
+  const inserted = db.prepare(`INSERT INTO alert_callbacks (id, provider, idempotency_key, payload, received_at) VALUES (?, 'm91', ?, ?, ?) ON CONFLICT (idempotency_key) DO NOTHING`)
+    .run(uuid(), key, raw.slice(0, 64 * 1024), now()).changes
+  if (!inserted) return { status: 200, body: { ok: true, duplicate: true } }
+  const alertId = typeof payload?.alert?.id === 'string' ? payload.alert.id.slice(0, 100) : null
+  const d = alertId ? db.prepare(`SELECT * FROM alert_deliveries WHERE provider = 'm91' AND provider_message_id = ?`).get(alertId) : null
+  if (!d) return { status: 202, body: { ok: true, matched: false } }
+  db.prepare('UPDATE alert_callbacks SET delivery_id = ? WHERE idempotency_key = ?').run(d.id, key)
+  let alert
+  try {
+    alert = await transport.getAlert(alertId, d.recipient)
+  } catch (error) {
+    // Not acknowledged as processed: allow M91's retry to try again.
+    db.prepare('DELETE FROM alert_callbacks WHERE idempotency_key = ?').run(key)
+    console.log(`[m91] could not read alert back: ${String(error?.message || error).slice(0, 200)}`)
+    return { status: 503, body: { error: 'read_back_failed' } }
+  }
+  const responses = Array.isArray(alert?.responses) ? alert.responses : []
+  const answer = alert?.decision || responses.at(-1) || null
+  const ts = now()
+  transaction(db, () => {
+    if (answer && !d.responded_at) {
+      const note = responses.find((r) => r.label === answer.label)?.note ?? null
+      db.prepare(`UPDATE alert_deliveries SET status = 'DELIVERED', response_label = ?, response_effect = ?, response_note = ?, responded_by = ?, responded_at = ?, updated_at = ? WHERE id = ?`)
+        .run(String(answer.label || '').slice(0, 100), answer.effect || null, note ? String(note).slice(0, 1000) : null, typeof answer.by === 'string' ? answer.by.slice(0, 100) : null, answer.at || ts, ts, d.id)
+      const task = d.task_id ? db.prepare('SELECT * FROM tasks WHERE id = ?').get(d.task_id) : null
+      if (task) db.prepare('INSERT INTO task_events (id, org_id, task_id, actor_id, type, data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(uuid(), task.org_id, task.id, d.user_id, 'alert_response', JSON.stringify({ rule: d.rule, response: [answer.label, note].filter(Boolean).join(' — ').slice(0, 500) }), ts)
+    } else if (d.status === 'SENT') {
+      db.prepare(`UPDATE alert_deliveries SET status = 'DELIVERED', updated_at = ? WHERE id = ?`).run(ts, d.id)
     }
-    return { status: 200, body: { ok: true, matched: true } }
+    if (alert?.status && alert.status !== 'OPEN' && !d.closed_at) db.prepare('UPDATE alert_deliveries SET closed_at = ?, updated_at = ? WHERE id = ?').run(alert.resolvedAt || ts, ts, d.id)
   })
+  return { status: 200, body: { ok: true, matched: true } }
 }
 
 // ---------- settings and history (admin) ----------
@@ -250,7 +301,8 @@ export function alertHistory(db, ctx, { limit = 100 } = {}) {
   const rows = ctx.role === 'admin'
     ? db.prepare(`SELECT d.*, u.name FROM alert_deliveries d LEFT JOIN users u ON u.id = d.user_id WHERE d.org_id = ? ORDER BY d.created_at DESC LIMIT ?`).all(ctx.orgId, limit)
     : db.prepare(`SELECT d.*, u.name FROM alert_deliveries d LEFT JOIN users u ON u.id = d.user_id WHERE d.org_id = ? AND d.user_id = ? ORDER BY d.created_at DESC LIMIT ?`).all(ctx.orgId, ctx.user.id, limit)
-  return rows.map((d) => ({ id: d.id, rule: d.rule, ruleLabel: ALERT_RULES[d.rule]?.label || d.rule, recipientName: d.name, status: d.status, attempts: d.attempts, lastError: d.last_error, createdAt: d.created_at, updatedAt: d.updated_at }))
+  return rows.map((d) => ({ id: d.id, rule: d.rule, ruleLabel: ALERT_RULES[d.rule]?.label || d.rule, recipientName: d.name, status: d.status, attempts: d.attempts, lastError: d.last_error,
+    response: d.response_label ? { label: d.response_label, note: d.response_note, at: d.responded_at } : null, closedAt: d.closed_at, taskId: d.task_id, createdAt: d.created_at, updatedAt: d.updated_at }))
 }
 
 export function retryDelivery(db, ctx, id) {

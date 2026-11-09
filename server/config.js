@@ -13,7 +13,8 @@ export function loadConfig(overrides = {}) {
     // Embarko sets PORT and DATA_DIR. Locally the app keeps its data in ./data and listens on 127.0.0.1 only.
     host: env.PORT && env.DATA_DIR ? '0.0.0.0' : (env.HOST || '127.0.0.1'),
     dataDir: env.DATA_DIR || join(process.cwd(), 'data'),
-    appUrl: (env.APP_URL || '').replace(/\/+$/, ''),
+    // The public address. On Embarko it defaults to https://<APP_NAME>.embarko.app.
+    appUrl: (env.APP_URL || (env.APP_NAME && env.DATA_DIR ? `https://${env.APP_NAME}.embarko.app` : '')).replace(/\/+$/, ''),
     google: {
       clientId: env.GOOGLE_CLIENT_ID || '',
       clientSecret: env.GOOGLE_CLIENT_SECRET || '',
@@ -26,7 +27,7 @@ export function loadConfig(overrides = {}) {
     sessionDays: Number(env.SESSION_DAYS) || 14,
     uploadMaxBytes: Number(env.UPLOAD_MAX_BYTES) || 5 * 1024 * 1024,
     m91: {
-      authKey: env.M91_AUTH_KEY || '',
+      apiKey: env.M91_API_KEY || '',
       callbackToken: env.M91_CALLBACK_TOKEN || ''
     },
     viasocket: {
@@ -37,6 +38,10 @@ export function loadConfig(overrides = {}) {
     localScheduler: env.LOCAL_SCHEDULER === '1',
     ...overrides
   }
+  // The callback defaults to APP_URL + /auth/google/callback, so production only needs the client id and secret.
+  if (!cfg.google.redirectUri && cfg.appUrl) cfg.google.redirectUri = `${cfg.appUrl}/auth/google/callback`
   cfg.google.configured = Boolean(cfg.google.clientId && cfg.google.clientSecret && cfg.google.redirectUri)
+  // M91 posts answers here (https only); the token authenticates the callback.
+  cfg.m91.callbackUrl = cfg.appUrl.startsWith('https://') && cfg.m91.callbackToken ? `${cfg.appUrl}/api/webhooks/m91?token=${encodeURIComponent(cfg.m91.callbackToken)}` : ''
   return cfg
 }

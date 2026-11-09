@@ -12,11 +12,13 @@ function fakeM91({ failTimes = 0, retryable = true } = {}) {
   return Object.assign(m, {
     name: 'm91', configured: true, ready: true,
     status: () => ({ state: 'ready', message: 'fake' }),
+    closed: [],
     async send(msg) {
       if (m.fails > 0) { m.fails--; const e = new Error('provider 503'); e.retryable = retryable; throw e }
       m.sent.push(msg); return { providerMessageId: `msg-${m.sent.length}` }
     },
-    parseCallback: (b) => (b?.id ? { providerMessageId: b.id, status: b.status, response: b.response } : null)
+    async getAlert(id) { return { _id: id, status: 'RESOLVED', decision: { label: 'I’m on it', effect: 'SHARED', by: 'u1', at: new Date().toISOString() }, responses: [{ label: 'I’m on it', effect: 'SHARED', note: 'restarting it' }], resolvedAt: new Date().toISOString() } },
+    async close(args) { m.closed.push(args); return { closed: true } }
   })
 }
 
@@ -111,11 +113,11 @@ test('M91: queued per rule, retried with backoff, history kept; not-configured t
     t2.db.prepare('UPDATE tasks SET due_at = ? WHERE id = ?').run(iso(Date.now() - H), c.body.task.id)
     scanAlerts(t2.db)
     const { createM91Transport } = await import('../server/integrations/m91.js')
-    const out = await processDeliveries(t2.db, createM91Transport({ authKey: 'k' }))
+    const out = await processDeliveries(t2.db, createM91Transport({}))
     assert.equal(out.notConfigured, 2)
     assert.equal(t2.db.prepare(`SELECT COUNT(*) AS n FROM notifications WHERE kind = 'deadline_missed'`).get().n, 2)
     const settings = await t2.call('/api/alerts/settings', { as: s.admin })
-    assert.equal(settings.body.m91.state, 'pending_api')
+    assert.equal(settings.body.m91.state, 'not_configured')
     assert.equal((await t2.call('/api/alerts/settings', { method: 'PATCH', as: s.manager, body: { m91Enabled: false } })).status, 403)
     assert.equal((await t2.call('/api/alerts/settings', { method: 'PATCH', as: s.admin, body: { thresholds: { noProgressHours: 1 } } })).status, 400)
   } finally { await t2.close() }
@@ -131,7 +133,7 @@ test('M91 callbacks: token required, idempotent, matched to the delivery', async
     t.db.prepare('UPDATE tasks SET due_at = ? WHERE id = ?').run(iso(Date.now() - H), c.body.task.id)
     scanAlerts(t.db)
     await processDeliveries(t.db, m91)
-    const body = JSON.stringify({ id: 'msg-1', status: 'DELIVERED', response: 'On it' })
+    const body = JSON.stringify({ event: 'answered', alert: { id: 'msg-1' }, response: { label: 'I’m on it' }, idempotencyKey: 'msg-1-r0' })
     assert.equal((await t.call('/api/webhooks/m91', { method: 'POST', raw: body, headers: { 'Content-Type': 'application/json' } })).status, 401)
     const ok = await t.call('/api/webhooks/m91?token=cb-secret-123', { method: 'POST', raw: body, headers: { 'Content-Type': 'application/json' } })
     assert.equal(ok.status, 200)
@@ -141,7 +143,11 @@ test('M91 callbacks: token required, idempotent, matched to the delivery', async
     assert.equal(t.db.prepare('SELECT COUNT(*) AS n FROM alert_callbacks').get().n, 1)
     assert.equal(t.db.prepare(`SELECT status FROM alert_deliveries WHERE provider_message_id = 'msg-1'`).get().status, 'DELIVERED')
     assert.ok(t.db.prepare(`SELECT 1 FROM task_events WHERE type = 'alert_response'`).get(), 'the person’s answer is returned to the task')
-    const unknown = handleCallback(t.db, m91, { token: 'cb-secret-123', expectedToken: 'cb-secret-123', rawBody: Buffer.from('{"other":1}') })
+    const d = t.db.prepare(`SELECT * FROM alert_deliveries WHERE provider_message_id = 'msg-1'`).get()
+    assert.equal(d.response_label, 'I’m on it', 'the answer read back from M91 is recorded')
+    assert.equal(d.response_note, 'restarting it')
+    assert.ok(d.closed_at, 'a resolved alert is marked closed')
+    const unknown = await handleCallback(t.db, m91, { token: 'cb-secret-123', expectedToken: 'cb-secret-123', rawBody: Buffer.from('{"other":1}') })
     assert.equal(unknown.body.matched, false)
   } finally { await t.close() }
 })
@@ -160,5 +166,24 @@ test('scheduled routes need CRON_SECRET; a run reports what it did', async () =>
     const w2 = await t.call('/tasks/weekly-report', { headers: { Authorization: 'Bearer test-cron-secret' } })
     assert.equal(w2.status, 200)
     assert.equal(t.db.prepare('SELECT COUNT(*) AS n FROM weekly_reports').get().n, 2, 'one per organization, not duplicated by a second run')
+  } finally { await t.close() }
+})
+
+test('M91: alerts are closed when the task is completed (resolution)', async () => {
+  const m91 = fakeM91()
+  const t = await startApp({ m91 })
+  try {
+    const s = seedOrg(t.db)
+    await enableM91(t, s)
+    const c = await t.call('/api/tasks', { method: 'POST', as: s.manager, body: { title: 'Ship', assigneeId: s.employee.id } })
+    t.db.prepare('UPDATE tasks SET due_at = ? WHERE id = ?').run(iso(Date.now() - H), c.body.task.id)
+    t.db.prepare(`UPDATE users SET phone = '+919876543210'`).run()
+    scanAlerts(t.db)
+    await processDeliveries(t.db, m91)
+    assert.equal(t.db.prepare(`SELECT COUNT(*) AS n FROM alert_deliveries WHERE status = 'SENT'`).get().n, 2)
+    await t.call(`/api/tasks/${c.body.task.id}/status`, { method: 'POST', as: s.manager, body: { status: 'CANCELLED', reason: 'Descoped' } })
+    await t.settled()
+    assert.equal(m91.closed.length, 2)
+    assert.equal(t.db.prepare(`SELECT COUNT(*) AS n FROM alert_deliveries WHERE closed_at IS NOT NULL`).get().n, 2)
   } finally { await t.close() }
 })

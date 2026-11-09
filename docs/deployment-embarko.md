@@ -28,13 +28,13 @@ Embarko sets `PORT`, `DATA_DIR`, `APP_NAME` and `CRON_SECRET` itself — do not 
 
 | Variable | Value |
 | --- | --- |
-| `APP_URL` | `https://teampulse.embarko.app` (or your custom domain) |
+| `APP_URL` | optional on Embarko: defaults to `https://<app-name>.embarko.app`; set it for a custom domain |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | from Google Cloud |
-| `GOOGLE_REDIRECT_URI` | `https://teampulse.embarko.app/auth/google/callback` |
+| `GOOGLE_REDIRECT_URI` | optional: defaults to `APP_URL` + `/auth/google/callback` |
 | `NODE_ENV` | `production` (also implied on Embarko) |
 | `ALLOW_ORG_CREATION` | `true` for the first admin to create the org; then `false` if only invitations/join codes should be used |
 | `VIASOCKET_ORG_ID`, `VIASOCKET_PROJECT_ID`, `VIASOCKET_EMBED_SECRET` | optional, enables the Automation Center |
-| `M91_AUTH_KEY`, `M91_CALLBACK_TOKEN` | optional, once M91 sending is implemented |
+| `M91_API_KEY`, `M91_CALLBACK_TOKEN` | optional, M91 phone alerts (see docs/integrations.md) |
 
 Never set `DEV_LOGIN` on Embarko (it is ignored there anyway).
 

@@ -35,11 +35,20 @@ Activation: get the three keys at https://flow.viasocket.com/embed-keys?name=Tea
 
 ## M91 (MSG91) alerts
 
-Concept, per MSG91's guide *How the M91 alert flow moves an alert from software to a person*: software sends a titled alert to a person, the person responds, and the answer comes back to the software.
+M91 rings a person's phone (through silent mode) until they answer, and returns the answer to the software.
+Implemented against the official contract, https://m91-api.msg91.com/api/public/api.md (Platform API, read 2026-11-09):
 
-What is built:
-- Per-rule M91 switch and thresholds (*Settings → Alert settings*); in-app notification for every alert regardless.
-- `alert_deliveries` queue: atomic claim, retry with exponential backoff (1, 2, 4, 8 min; 5 attempts), `FAILED`/`NOT_CONFIGURED` with manual retry, history page.
-- `POST /api/webhooks/m91?token=<M91_CALLBACK_TOKEN>` (or header `X-Callback-Token`): stores each callback once (by `Idempotency-Key` header or SHA-256 of the body), matches it to the delivery, and records the person's response on the task's history.
+| Step | Call | TeamPulse |
+| --- | --- | --- |
+| Invite a person | `POST /api/v1/recipients {phone, label}` | when someone saves a phone in *Settings → Profile*; they must accept in the M91 app |
+| Raise an alert | `POST /api/v1/alerts {phone, title, description, severity, responseOptions, other, isAutoClose, customId, callbackUrl}` | queued per alert rule with M91 switched on; `customId` = stable hash per condition and person, so repeats never ring twice |
+| Answer / close callback | M91 → `POST /api/webhooks/m91?token=<M91_CALLBACK_TOKEN>` | stored once per `idempotencyKey`; the alert is **read back** (`GET /api/v1/alerts/:id?phone=`) before anything is recorded, because M91's callback signature cannot be verified yet |
+| Resolve | `POST /api/v1/alerts/close {phone, alertId}` | when the task is completed/cancelled, the blockers are resolved, or an unassigned task gets an owner |
 
-**Status: M91-PENDING.** The official API documentation (https://m91.msg91.com/docs, msg91.com) was blocked by the build environment's network policy, and TeamPulse does not guess endpoints or payloads. `server/integrations/m91.js` holds the two functions to complete — `send()` and `parseCallback()` — and sets `apiImplemented = false`, so alerts are marked `NOT_CONFIGURED` and delivered in-app. To activate: implement those two functions from the official docs, set `M91_AUTH_KEY` and `M91_CALLBACK_TOKEN`, register the callback URL `https://<app>/api/webhooks/m91?token=<M91_CALLBACK_TOKEN>` with M91, and turn on M91 in Alert settings. The queue, retries and callback handling are already tested with a fake transport.
+Severity per rule: deadline missed and critical task blocked → `HIGH` (M91 phones after 3 minutes if nobody opened it); deadline approaching, no progress, unassigned, blocker unresolved → `MEDIUM`; others `LOW`. `CRITICAL` is never sent automatically.
+Buttons: "I’m on it" (`SHARED`, closes it) and "Seen" (`PERSONAL`); free-text replies on. The answer appears in *Alerts → M91 alert history* and on the task's history.
+Failure handling: 429, 5xx and network errors retry with backoff (1, 2, 4, 8 min; 5 attempts); 4xx (not invited, not accepted, validation) fail without retry and say why; people without a phone are `SKIPPED`; admins can retry from the history page.
+
+**To activate:** in the M91 app create an API key (*Settings → API keys*, `m91sk_…`), set `M91_API_KEY` and a random `M91_CALLBACK_TOKEN` (e.g. `openssl rand -hex 24`), make sure `APP_URL` is the https address, then turn on M91 in *Settings → Alert settings*. Each person adds their phone in *Settings → Profile* and accepts the invitation in the M91 app.
+
+**Status:** request/response shapes are covered by contract tests (stubbed `fetch`, `test/m91.test.js`) and the lifecycle by API tests. A live alert has not been sent: no `M91_API_KEY` was available.

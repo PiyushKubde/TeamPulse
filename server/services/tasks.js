@@ -404,6 +404,7 @@ export function resolveBlocker(db, ctx, blockerId, body) {
       resumed = true
     }
   })
+  emit({ type: 'blocker.resolved', orgId: ctx.orgId, taskId: t.id, blockerId: b.id, actorId: ctx.user.id })
   return { resolved: true, taskResumed: resumed }
 }
 

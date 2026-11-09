@@ -19,7 +19,7 @@ TeamPulse helps managers see what each person is working on, what is pending, bl
 | Impact | Impact records by category with before/work/after, measured vs **estimated** values, prevention/research/learning, shared-outcome de-duplication, manager verification with reasons. |
 | Dashboards | Manager: counts, team workload, attention required, recent activity, verified team impact. Employee: my work, awaiting me, deadlines, feedback, my impact, daily reflection. |
 | Reports | Weekly team summary, workload, status distribution, overdue, blocker history, contributions, verified impact — date and person filters, CSV export. |
-| Alerts | In-app notifications for every alert rule; configurable thresholds; M91 delivery queue with retries, history and idempotent callbacks (**M91 API call pending — see below**). |
+| Alerts | In-app notifications for every alert rule; configurable thresholds; M91 phone alerts (Platform API) with retries, history, answers read back from M91, and automatic close on resolution. |
 | Automation Center | ViaSocket: curated Connected Apps (Slack, Gmail, GitHub, Google Calendar, Google Sheets), three ready-made automations, and the full ViaSocket Embed builder. |
 
 ## Stack and decisions
@@ -83,7 +83,7 @@ Every secret comes from environment variables; see [.env.example](.env.example).
 | --- | --- | --- |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Signing in | The login page says sign-in is not configured |
 | `VIASOCKET_ORG_ID`, `VIASOCKET_PROJECT_ID`, `VIASOCKET_EMBED_SECRET` | Connected apps, Slack/Gmail delivery, builder | Automation Center shows it is not configured; external requests and in-app alerts still work |
-| `M91_AUTH_KEY`, `M91_CALLBACK_TOKEN` | M91 alerts | Alerts are in-app only |
+| `M91_API_KEY`, `M91_CALLBACK_TOKEN` | M91 phone alerts | Alerts are in-app only |
 
 ## Deploying
 

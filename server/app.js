@@ -50,7 +50,8 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   const unsubscribe = listen ? [
     onEvent((e) => alerts.handleEvent(db, e)),
     onEvent((e) => (e.type === 'task.assigned' ? auto.runNewTaskNotification(db, vs, { ...e, appUrl: cfg.appUrl }) : null)),
-    onEvent(() => alerts.processDeliveries(db, m91))
+    onEvent(() => alerts.processDeliveries(db, m91)),
+    onEvent((e) => alerts.closeResolvedAlerts(db, m91, e))
   ] : []
   app.locals.stopListening = () => unsubscribe.forEach((fn) => fn())
 
@@ -197,7 +198,17 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     if (isManager(ctx)) return listAudit(db, ctx.orgId, { entityType: 'employee_permissions' })
     throw forbidden()
   }))
-  app.patch('/api/profile', h((req) => orgs.updateProfile(db, signedIn(req), req.body)))
+  // Saving a phone invites it to M91 (when configured): the person accepts in the M91 app before alerts reach them.
+  app.patch('/api/profile', h(async (req) => {
+    const out = orgs.updateProfile(db, signedIn(req), req.body)
+    if (!out.phone || !m91.ready) return { ...out, m91: m91.ready ? null : 'not_configured' }
+    try {
+      const inv = await m91.invite(out.phone, `TeamPulse — ${req.user.name}`.slice(0, 80))
+      return { ...out, m91: inv.reachable ? 'reachable' : 'invited' }
+    } catch (error) {
+      return { ...out, m91: 'invite_failed', m91Error: String(error.message).slice(0, 200) }
+    }
+  }))
 
   // ---------- dashboard ----------
   app.get('/api/dashboard', h((req) => dashboard(db, member(req))))
@@ -297,8 +308,8 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   app.patch('/api/alerts/settings', h((req) => alerts.updateAlertSettings(db, member(req), req.body, m91)))
   app.get('/api/alerts/history', h((req) => alerts.alertHistory(db, member(req))))
   app.post('/api/alerts/deliveries/:id/retry', h(async (req) => { const out = alerts.retryDelivery(db, member(req), req.params.id); await alerts.processDeliveries(db, m91); return out }))
-  app.post('/api/webhooks/m91', h((req, res) => {
-    const out = alerts.handleCallback(db, m91, { token: req.query.token || req.get('x-callback-token'), expectedToken: cfg.m91.callbackToken, rawBody: req.body, idempotencyHeader: req.get('idempotency-key') })
+  app.post('/api/webhooks/m91', h(async (req, res) => {
+    const out = await alerts.handleCallback(db, m91, { token: req.query.token || req.get('x-callback-token'), expectedToken: cfg.m91.callbackToken, rawBody: req.body, idempotencyHeader: req.get('idempotency-key') })
     res.status(out.status)
     return out.body
   }))
