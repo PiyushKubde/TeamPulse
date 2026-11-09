@@ -69,8 +69,9 @@ Every adjustment is listed under "Rules TeamPulse applied" on the card.
 | Variable | Meaning |
 | --- | --- |
 | `AI_PROVIDER` | `viasocket` (recommended): viaSocket's built-in AI via the existing `VIASOCKET_*` keys, with Anthropic as the backup when `ANTHROPIC_API_KEY` is also set. `anthropic`: Anthropic only. `mock` = simulated keyword analyser for local development and demos — refused in production and labelled "Simulated — development only, not AI" everywhere |
+| `AI_VIASOCKET_POLICY_CONFIRMED` | `false` until viaSocket answers the open data-policy questions ([viasocket-ai-data-policy.md](viasocket-ai-data-policy.md)). While false, nothing is sent to viaSocket AI and Anthropic is **not** used in its place |
 | `AI_VIASOCKET_SERVICE`, `AI_VIASOCKET_MODEL` | Model viaSocket runs; default `anthropic` / `claude-sonnet-5-5` (viaSocket's docs say `claude-opus-5-5` ignores `json_schema` there) |
-| `ANTHROPIC_API_KEY` | Server-side key (never sent to the browser). With `AI_PROVIDER=viasocket` it is the backup: any viaSocket failure — an error, a timeout, prose instead of JSON, or an answer that fails validation — is retried once on Anthropic in the same run, and the card says "viaSocket AI failed — answered by the anthropic backup" |
+| `ANTHROPIC_API_KEY` | Server-side key (never sent to the browser). With `AI_PROVIDER=viasocket` it is the backup, used once in the same run **only** when viaSocket did not deliver a usable answer: timeout, network failure, 5xx, 429, viaSocket credentials rejected, prose/truncated/tool-call answer, or an answer that fails structured-output validation. Never for a refusal or rejected request (400/422), an error in TeamPulse's own request, an unexpected exception, or any TeamPulse authorization, permission or business rule (those are checked before any provider is called), and the card says "viaSocket AI failed — answered by the anthropic backup" |
 | `AI_MODEL` | Default `claude-opus-5-5` |
 | `AI_EFFORT` | `low` · `medium` (default) · `high` |
 | `AI_TIMEOUT_MS` | Default 120000 |
@@ -123,3 +124,15 @@ even ones who can see the task. Nobody reviews the analysis of their own work. O
 Role-specific rubrics (structure exists, one default ships), reading file/link contents, external evidence
 collection, period-level AI summaries (profiles are aggregated deterministically), and M91 alerts for assessments
 (disputes and reviews notify in-app; M91 remains the human escalation channel for task alerts).
+
+## Safety properties (tested in `test/final-checks.test.js`)
+
+- **One assessment per run.** A run is claimed atomically, and a late viaSocket answer after a timeout is discarded. Storing never replaces an assessment created after the run was requested, or one a manager reviewed after the run was requested (the run fails with "stale").
+- **Manager reviews win.** Once a manager has approved, adjusted or disputed an analysis, only a manager or admin of that person can run it again. The employee and automatic triggers cannot.
+- **Metadata on every assessment** (`aiMeta`, also on the run and in the audit log):
+  - the primary provider and requested model;
+  - the provider and model that answered, and whether the model is confirmed;
+  - whether a fallback was used, which kind, and why;
+  - the provider's request id.
+- **Credentials are redacted** (known key values, Anthropic key shapes, bearer tokens, JWTs) from every stored or logged error. Keys are never sent in the AI conversation, never returned by the API, and never stored.
+- **Guardrails are provider-independent.** The same rule-breaking answer is corrected identically whether viaSocket or the backup produced it.

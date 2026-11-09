@@ -49,7 +49,7 @@ if (!dry) {
   } else if (providerName === 'viasocket') {
     if (!args['confirm-live']) { console.error('Refusing to call viaSocket AI without --confirm-live (it sends the fictional dataset to viaSocket, which stores each call as a thread).'); process.exit(2) }
     const vs = createViasocketGateway({ orgId: process.env.VIASOCKET_ORG_ID, projectId: process.env.VIASOCKET_PROJECT_ID, secret: process.env.VIASOCKET_EMBED_SECRET })
-    provider = createAiProvider(loadConfig({ ai: { provider: 'viasocket', viasocketService: process.env.AI_VIASOCKET_SERVICE || 'anthropic', viasocketModel: process.env.AI_VIASOCKET_MODEL || 'claude-sonnet-5-5', apiKey: args['no-backup'] ? '' : process.env.ANTHROPIC_API_KEY || '', timeoutMs: Number(process.env.AI_TIMEOUT_MS) || 120000 }, production: true }), { vs })
+    provider = createAiProvider(loadConfig({ ai: { provider: 'viasocket', viasocketPolicyConfirmed: true /* fictional dataset only — never real employee data */, viasocketService: process.env.AI_VIASOCKET_SERVICE || 'anthropic', viasocketModel: process.env.AI_VIASOCKET_MODEL || 'claude-sonnet-5-5', apiKey: args['no-backup'] ? '' : process.env.ANTHROPIC_API_KEY || '', timeoutMs: Number(process.env.AI_TIMEOUT_MS) || 120000 }, production: true }), { vs })
   } else if (providerName === 'simulated') {
     provider = createAiProvider({ production: false, ai: { provider: 'mock' } })
   } else { console.error(`Unknown --provider=${providerName}`); process.exit(2) }

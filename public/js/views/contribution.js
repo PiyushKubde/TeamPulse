@@ -146,7 +146,9 @@ function bindActions(box, a, v, taskId, reload) {
       bindForm(el.querySelector('#f'), (d) => post('respond', { action, comment: d.comment, ...(f.level ? { dimension: d.dimension, level: Number(d.level) } : {}) }), {
         onSuccess: async () => {
           close()
-          if (action === 'ADD_CONTEXT') {
+          if (action === 'ADD_CONTEXT' && a.managerStatus !== 'PENDING') {
+            toast('Context saved. Your manager has reviewed this analysis, so they decide whether to run it again.')
+          } else if (action === 'ADD_CONTEXT') {
             toast('Context saved. Analysing again with it…')
             try { await api(`/api/tasks/${taskId}/assessment/analyse`, { method: 'POST' }) } catch (e) { toast(errorText(e), { error: true }) }
           } else toast('Sent to your manager.')

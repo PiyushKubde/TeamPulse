@@ -146,7 +146,9 @@ test('re-analysis never hides earlier human responses', async () => {
     await t.call(`/api/tasks/${id}/assessment/review`, { method: 'POST', as: s.manager, body: { action: 'ADJUST', dimension: 'quality', level: 3, comment: 'No validation shown.' } })
     await t.call(`/api/tasks/${id}/comments`, { method: 'POST', as: s.employee, body: { body: 'Linked the review thread with partners.' } })
     level = 'L3'
-    const { v } = await analyse(t, s.employee, id)
+    // After a manager review only a manager may re-run it (the employee is told so).
+    assert.equal((await t.call(`/api/tasks/${id}/assessment/analyse`, { method: 'POST', as: s.employee })).body.error.code, 'assessment_reviewed')
+    const { v } = await analyse(t, s.manager, id)
     const earlier = v.history[0]
     assert.ok(earlier.responses.some((x) => x.action === 'ADJUST' && x.comment === 'No validation shown.' && x.by === 'Mona Manager'))
   } finally { await t.close() }

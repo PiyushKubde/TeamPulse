@@ -484,3 +484,19 @@ A bug found by the browser run and fixed: "added a regression test" was read as 
 | `npm run test:e2e`, `test:e2e:auth`, `test:e2e:measurement` | pass |
 | `npm run eval:measurement -- --dry-run` | 14/14 cases replay; insufficient-evidence routing as expected |
 | Live AI | **not run** — needs the owner's key and approval (docs/supervised-ai-validation.md) |
+
+
+# Pre-deployment checks — viaSocket AI primary, Anthropic backup (2026-11-09, not deployed, no live AI call)
+
+| # | Check | Result | Evidence (`test/final-checks.test.js` unless noted) |
+|---|---|---|---|
+| 1 | Backup only for provider failures, timeouts, malformed answers, validation failures | **PASS after fixes.** Allowlist: timeout, network, 5xx, 429, viaSocket credentials rejected, prose/truncated/tool-call, schema validation. No backup for 400/422 refusals or rejected requests, TeamPulse's own malformed request, or unexpected exceptions. Authorization, permission, supervised-selection, owner-mismatch, cross-org, reviewed-analysis and data-policy refusals call **no** provider | 1a, 1b. Fixed: an unexpected exception and the SDK's own input errors were mapped to "network" and sent to the backup |
+| 2 | No duplicate or overwritten assessments | **PASS after fixes.** One assessment per run (atomic claim). A late viaSocket answer after a timeout is discarded. A run cannot replace a newer assessment, or one a manager reviewed while it ran. After a manager review only a manager or admin can re-run | 2a, 2b, guardrails-supervised. Added: stale-run guard, manager-review protection |
+| 3 | Credentials never in logs, responses, AI conversation, database, Git | **PASS.** Redaction of known key values and key/bearer/JWT shapes on every stored or logged error, tested with errors that echo both keys. Working tree and full Git history checked against the real `.env` secret: 0 hits. `.env` is ignored and was never committed | 3; credential scan |
+| 4 | Provider and fallback metadata on every assessment | **PASS.** `aiMeta` on every assessment (rules, simulated, viaSocket, backup): primary provider, requested model, answered by, answered model, model confirmed, fallback used, kind, reason, request id. Also on the run and in the audit log | 4 |
+| 5 | Guardrails regardless of provider | **PASS.** The same rule-breaking answer gives identical results via viaSocket or the backup | 5 |
+| 6 | Supervised mode, no automatic analysis | **PASS.** Default `supervised` for any real provider. Submit and approve trigger no call | 6, guardrails-supervised |
+| 7 | No deploy, no live AI call | **PASS** | — |
+| — | viaSocket data policy | **UNRESOLVED and enforced:** nothing goes to viaSocket AI until `AI_VIASOCKET_POLICY_CONFIRMED=true`, and Anthropic is not substituted | docs/viasocket-ai-data-policy.md, 1b |
+
+Tests: `npm test` 106/106; `test:e2e`, `test:e2e:auth`, `test:e2e:measurement` pass; eval dry run 14/14; `npm audit` 0.

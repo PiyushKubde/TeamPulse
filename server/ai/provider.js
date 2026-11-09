@@ -9,14 +9,26 @@
 //                          production, and every assessment it makes is labelled "simulated" in the UI
 //   (unset)                not configured: the app says so; no analysis is pretended
 import Anthropic from '@anthropic-ai/sdk'
+import { redact, registerSecret } from './redact.js'
 
 export class ProviderError extends Error {
-  constructor(code, message, retryable) { super(message); this.code = code; this.retryable = retryable }
+  constructor(code, message, retryable) { super(redact(message)); this.code = code; this.retryable = retryable }
 }
+
+// The only failures that may go to the backup provider: the primary provider did not deliver a usable answer.
+// Never: refusals or rejected requests (400/422), our own client-side errors, unexpected exceptions — and never
+// TeamPulse authorization/permission/business-rule errors, which are raised before any provider is called.
+export const BACKUP_ON = new Set(['timeout', 'network', 'provider_error', 'rate_limited', 'auth', 'invalid_output', 'truncated'])
 
 export function createAiProvider(cfg, { vs = null } = {}) {
   const ai = cfg.ai || {}
+  registerSecret(ai.apiKey)
+  registerSecret(cfg.viasocket?.secret)
   if (ai.provider === 'viasocket') {
+    // viaSocket stores every AI call as a thread, and its retention, deletion and training policies are unresolved
+    // (docs/viasocket-ai-data-policy.md). Until the owner confirms them, nothing is sent to viaSocket AI — and the
+    // Anthropic backup is NOT used instead: this is a policy decision, not a provider failure.
+    if (!ai.viasocketPolicyConfirmed) return notConfigured('viaSocket AI is not enabled: its conversation retention, deletion and training policies are not confirmed yet (set AI_VIASOCKET_POLICY_CONFIRMED=true only after they are; see docs/viasocket-ai-data-policy.md).')
     if (!vs?.configured || !vs.aiSend) {
       if (ai.apiKey) return withNote(anthropicProvider(ai), 'viaSocket is not configured; using the Anthropic backup.')
       return notConfigured('AI_PROVIDER=viasocket needs the viaSocket keys (VIASOCKET_ORG_ID, VIASOCKET_PROJECT_ID, VIASOCKET_EMBED_SECRET).')
@@ -76,19 +88,25 @@ function viasocketProvider(ai, vs) {
 }
 
 function mapViasocketError(error) {
+  if (error?.name === 'TimeoutError' || error?.name === 'AbortError') return new ProviderError('network', 'Could not reach viaSocket AI.', true)
+  // Anything that is not a viaSocket API/transport error is a bug on our side: rethrown as is, never sent to the backup.
+  if (!error || error.name !== 'ViaSocketError' && !('status' in error)) return error
   const status = error?.status ?? null
   const detail = String(error?.body?.data?.detail?.error || error?.message || '').slice(0, 200)
   if (status === 401 || status === 498) return new ProviderError('auth', `viaSocket rejected the request (${status}). Check the viaSocket keys.`, false)
   if (status === 400 || status === 422) return new ProviderError('bad_request', `viaSocket AI rejected the request (${status})${detail ? `: ${detail}` : ''}. Check AI_VIASOCKET_MODEL / AI_VIASOCKET_SERVICE.`, false)
   if (status === 429) return new ProviderError('rate_limited', 'viaSocket AI is rate limiting requests.', true)
   if (status && status >= 500) return new ProviderError('provider_error', `viaSocket AI failed (${status}).`, true)
+  // The SDK uses status null both for network failures and for its own input checks ("ai.send: …", our bug).
+  if (status === null && /^ai\.send:/.test(String(error?.message))) return new ProviderError('client_error', `TeamPulse built an invalid viaSocket AI request: ${String(error.message).slice(0, 160)}`, false)
   if (status === null) return new ProviderError('network', 'Could not reach viaSocket AI.', true)
   return new ProviderError('provider_error', `viaSocket AI returned ${status}.`, false)
 }
 
 /**
- * Primary + backup. Any failure of the primary — an error, or an answer that does not validate — is retried once on
- * the backup in the same run. The result says which provider answered and why the backup was used.
+ * Primary + backup. Only the failures in BACKUP_ON (timeouts, network, provider 5xx/429/credential failures,
+ * malformed or truncated answers, answers that fail structured-output validation) go to the backup, once, in the same
+ * run. Everything else is thrown as is. The result records which provider answered and why the backup was used.
  */
 function withBackup(primary, backup) {
   return {
@@ -97,14 +115,17 @@ function withBackup(primary, backup) {
       let reason
       try {
         const r = await primary.generate(args)
-        if (args.validate) args.validate(structuredClone(r.output))
+        if (args.validate) {
+          try { args.validate(structuredClone(r.output)) } catch (error) { throw new ProviderError('invalid_output', `answer failed validation: ${error.message}`, true) }
+        }
         return r
       } catch (error) {
-        reason = `${error.code || 'invalid_output'}: ${String(error.message).slice(0, 160)}`
+        if (!(error instanceof ProviderError) || !BACKUP_ON.has(error.code)) throw error
+        reason = redact(`${error.code}: ${String(error.message).slice(0, 160)}`)
         console.log(`[ai] ${primary.name} failed (${reason}); using the ${backup.name} backup`)
       }
       const r = await backup.generate(args)
-      return { ...r, provider: backup.name, fallback: { ...(r.fallback || {}), used: true, kind: 'provider_backup', requestedModel: primary.model, servedModel: r.model, primaryError: reason, hops: [{ from: primary.model, to: r.model }, ...(r.fallback?.hops || [])] } }
+      return { ...r, provider: backup.name, fallback: { ...(r.fallback || {}), used: true, kind: 'provider_backup', primaryProvider: primary.name, requestedModel: primary.model, servedModel: r.model, primaryError: reason, hops: [{ from: primary.model, to: r.model }, ...(r.fallback?.hops || [])] } }
     }
   }
 }

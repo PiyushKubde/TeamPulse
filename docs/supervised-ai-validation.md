@@ -30,6 +30,7 @@ With a real provider configured, `AI_MODE` defaults to **supervised**:
 AI_PROVIDER=viasocket                 # viaSocket built-in AI (uses the existing VIASOCKET_* keys)
 AI_VIASOCKET_SERVICE=anthropic
 AI_VIASOCKET_MODEL=claude-sonnet-5-5
+AI_VIASOCKET_POLICY_CONFIRMED=false   # true only after docs/viasocket-ai-data-policy.md is answered
 ANTHROPIC_API_KEY=<owner-provided key> # backup if viaSocket AI fails (optional)
 AI_MODEL=claude-opus-5-5              # backup model
 AI_MODE=supervised
@@ -41,7 +42,7 @@ The feature branch must be deployed first. That deploys migration 007, which is 
 
 The startup log should say: `AI work analysis: viasocket, model anthropic/claude-sonnet-5-5; backup anthropic claude-opus-5-5; mode supervised (1 selected task(s))`.
 
-Before the test, ask viaSocket how long AI threads are kept and whether they are used for training: every analysis is stored there as a thread.
+**Blocking:** the viaSocket data-policy questions ([viasocket-ai-data-policy.md](viasocket-ai-data-policy.md)) must be answered before a real task is sent to viaSocket. Until then the test can only run with `AI_PROVIDER=anthropic`, if you accept Anthropic's terms for this data.
 `/api/health` should show `ai: configured`, `aiMode: supervised`.
 
 ## The test

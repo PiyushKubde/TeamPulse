@@ -52,6 +52,8 @@ export function loadConfig(overrides = {}) {
       model: env.AI_MODEL || 'claude-opus-5-5',
       viasocketService: env.AI_VIASOCKET_SERVICE || 'anthropic',
       viasocketModel: env.AI_VIASOCKET_MODEL || 'claude-sonnet-5-5',
+      // Set to true ONLY after viaSocket has answered the open data-policy questions (docs/viasocket-ai-data-policy.md).
+      viasocketPolicyConfirmed: env.AI_VIASOCKET_POLICY_CONFIRMED === 'true',
       effort: env.AI_EFFORT || 'medium',
       timeoutMs: Number(env.AI_TIMEOUT_MS) || 120000,
       fallbacks: env.AI_FALLBACKS !== 'off',

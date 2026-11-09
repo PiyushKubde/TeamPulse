@@ -70,7 +70,7 @@ function presentAssessment(db, a) {
     .map((f) => ({ id: f.id, action: f.action, actorRole: f.actor_role, by: f.actor_name, dimension: f.dimension, dimensionLabel: f.dimension ? LABELS[f.dimension] : null, fromLevel: levelText(f.dimension, f.from_level), toLevel: levelText(f.dimension, f.to_level), comment: f.comment, at: f.created_at }))
   return {
     id: a.id, taskId: a.task_id, userId: a.user_id, userName: userName(db, a.user_id), isCurrent: Boolean(a.is_current),
-    provider: a.provider, model: a.model, requestedModel: ctxj.requestedModel ?? null, fallback: ctxj.fallback ?? null, live: a.provider !== 'rules' && !ctxj.simulated,
+    provider: a.provider, model: a.model, aiMeta: ctxj.ai ?? null, requestedModel: ctxj.requestedModel ?? null, fallback: ctxj.fallback ?? null, live: a.provider !== 'rules' && !ctxj.simulated,
     promptVersion: a.prompt_version, rubricVersion: a.rubric_version, guardrailVersion: ctxj.guardrailVersion ?? null, simulated: Boolean(ctxj.simulated),
     periodStart: a.period_start, periodEnd: a.period_end, createdAt: a.created_at,
     evidenceState: a.evidence_state, understanding: a.understanding, summary: a.summary,
@@ -140,7 +140,7 @@ export function analyseTask(db, ctx, provider, taskId, { trigger = 'manual', mod
   if (subjectId !== ctx.user.id && !canManageTask(db, ctx, task)) throw forbidden('Only the person doing the task or their manager can analyse it.')
   if (task.status === 'CANCELLED') throw invalid('A cancelled task is not analysed.')
   supervisedCheck(db, ctx, mode, task, provider)
-  return requestAnalysis(db, provider, { task, subjectId, actorId: ctx.user.id, trigger, notify: mode.mode === 'on' })
+  return requestAnalysis(db, provider, { task, subjectId, actorId: ctx.user.id, trigger, notify: mode.mode === 'on', allowReviewed: canReviewSubject(db, ctx, subjectId) })
 }
 
 /**

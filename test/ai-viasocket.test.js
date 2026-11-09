@@ -25,7 +25,7 @@ async function fakeAnthropic() {
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
   return { url: `http://127.0.0.1:${server.address().port}`, calls: () => n, close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(r) }) }
 }
-const cfg = (extra = {}) => ({ production: true, ai: { provider: 'viasocket', timeoutMs: 2000, maxRetries: 0, ...extra } })
+const cfg = (extra = {}) => ({ production: true, ai: { provider: 'viasocket', viasocketPolicyConfirmed: true, timeoutMs: 2000, maxRetries: 0, ...extra } })
 const gen = (p) => p.generate({ system: 'SYS', user: 'Evidence pack (JSON). {"items":[]}', schema: OUTPUT_SCHEMA, validate: validateOutput, context: { orgId: 'org-1', runId: 'run-1' } })
 
 test('viaSocket request: own identifier, fresh thread per call, json_schema, our prompt + no-browse, chosen model', async () => {
@@ -64,7 +64,7 @@ test('viaSocket answers as a JSON string are parsed; prose, truncation, tool cal
   }
 })
 
-test('with ANTHROPIC_API_KEY: any viaSocket failure — error or invalid answer — goes to Anthropic once, recorded', async () => {
+test('with ANTHROPIC_API_KEY: a viaSocket provider failure or invalid answer goes to Anthropic once, recorded', async () => {
   const api = await fakeAnthropic()
   try {
     const backupCfg = (vsAnswer) => createAiProvider(cfg({ apiKey: 'sk-ant-test-not-real', baseUrl: api.url }), { vs: stubVs(vsAnswer) })
