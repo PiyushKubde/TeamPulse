@@ -57,6 +57,8 @@ export function seedOrg(db) {
 export async function startApp({ vs = { configured: false }, m91 = createM91Transport({}), cfgOverrides = {}, google, mailer, ai } = {}) {
   const db = openDatabase(':memory:')
   const cfg = loadConfig({ dataDir: mkdtempSync(join(tmpdir(), 'teampulse-test-')), cronSecret: 'test-cron-secret', devLogin: false, appUrl: 'https://teampulse.test', ...cfgOverrides })
+  // An injected AI provider runs in AI_MODE=on unless the test sets cfgOverrides.ai (supervised-mode tests do).
+  if (ai && !cfgOverrides.ai) cfg.ai = { ...cfg.ai, mode: 'on' }
   const app = createApp({ db, cfg, vs, m91, ...(google ? { google } : {}), ...(mailer ? { mailer } : {}), ...(ai ? { ai } : {}) })
   const server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)) })
   const base = `http://127.0.0.1:${server.address().port}`
