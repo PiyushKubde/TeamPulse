@@ -276,3 +276,55 @@ No cross-organization access, privilege escalation, or secret leakage in Git/fro
 3. **Genuinely production-ready:** deployment and scheduling (verified in production); security posture of the API (production smoke + local tests); core task, permission, request, blocker, review, impact and reporting logic (verified locally, same code in production); Google OAuth configuration up to Google's sign-in page.
 4. **Looks complete but is unproven:** every Slack/Gmail automation (A, B), Gmail/Slack intake (C — mapping on assumed fields), TeamPulse events reaching published flows (D), connected-app management, all M91 delivery, and signed-in production screens.
 5. **Must be fixed before presenting as finished:** the three P0 items, plus P1 items 4 (restricted Connected Apps builders) and 10 (deploy from `main`). Everything else can follow as polish.
+
+---
+
+# Fix round 1 — P0 + P1 (approved 2026-11-09)
+
+Branch `claude/teampulse-mvp`: `ff44274` (reliability), `9321c04` (P1 server), `2885a25` (P1 UI) on top of `deb52e2`.
+**Production still runs `b601638` (the audited build).** Deploying `2885a25` was stopped by this session's safety check, and
+your instruction is to deploy production from `main` after verification — so nothing below has reached production yet.
+
+## Status per item
+
+| # | Item | Original status | Fix implemented | Tests executed | Live / production result |
+|---|---|---|---|---|---|
+| P0-1 | Rotate exposed viaSocket embed secret | FAIL (exposed in chat) | **Not rotated.** viaSocket's docs: the signing secret is **org-wide** (org 4160 "walkover plugs", 229 embed projects); there is no rotate API; rotating breaks every other project in the org until each is updated | — | Needs an org-owner decision (see "Required from you") |
+| P0-1 | Rotate both Embarko deploy tokens | FAIL (exposed in chat) | **Not rotated.** Embarko's API can only *request* tokens by email; revocation and creation are in the dashboard (embarko.ai/app/tokens) | — | Needs you; new token must come through the environment's secret settings (read by a **new** session), never chat |
+| P0-1 | Exposure check | — | Re-verified | `git log --all -p` scan; `public/` scan | **0** secrets in Git history or frontend; `.env` untracked |
+| P0-2 | Live A/B/C/D on real accounts | NOT VERIFIED | Intake now refuses to switch on until it has read a **real** message from the chosen label/channel and mapped a title + message id (`sampleEvent`) — mapping can no longer rest on assumed fields | [SIMULATED] test "intake refuses…" | **Not run**: needs your connected test Slack/Gmail and your approval per send |
+| P0-3 | Signed-in production QA, persistence, restart | NOT VERIFIED | Scheduled job now reports row counts (orgs, users, tasks, requests, impact) — readable from Embarko's schedule history, so persistence across a restart is checkable without any login | [LOCAL] test "scheduled job reports row counts…" | **Not run** in production (no deploy; signing in needs your Google accounts) |
+| P1-1 | Employee completed tasks | FAIL | Completed count + "Recently completed" list (with "Record outcome") | [LOCAL] p1-gaps test 1; crawl | Not deployed |
+| P1-2 | Per-person attention view | PARTIAL | "People who may need help": overdue, blocked (longest hours), stalled, not started, at risk, unusual load — signals, not a ranking | [LOCAL] p1-gaps test 2 | Not deployed |
+| P1-3 | Weekly CSV | PARTIAL | `/api/reports/weekly.csv` (section, person, item, detail, status) + button | [LOCAL] p1-gaps test 3 | Not deployed |
+| P1-4 | User-flow execution history | PARTIAL | "Runs" per flow via documented `runHistory`; ownership checked in TeamPulse and by viaSocket | [LOCAL] p1-gaps test 4; **[LIVE-EXT]** automation token issued (201); another user's/unknown flow → viaSocket 403 | Not deployed; real run rows need a real flow |
+| P1-5 | Restricted Connected Apps builders | PARTIAL | "Build with X" → pick a TeamPulse event allowed for your role → builder restricted to that one app's curated actions | [LOCAL] p1-gaps test 4 (contexts per app/role); restriction mechanism **[LIVE-EXT]** verified earlier (My Tasks builder showed only its 4 apps) | Per-app variants not rendered live yet |
+| P1-6 | Employee Reports page | UI issue | Clear "Reports are for managers" page | crawl: 0 problem screens (was 14) | Not deployed |
+| P1-7 | Employee Team Tasks | UI issue | Managers-only page pointing to My Tasks (no personal list shown as "team") | crawl | Not deployed |
+| P1-8 | Manager-only automation actions | UI issue | Automate hidden unless viaSocket configured and the role can use it; GitHub builder manager-only | crawl; p1-gaps test 4 | Not deployed |
+| P1-9 | Reliable notifications | Risk | Durable `event_outbox`: stored before handlers, DONE after, replayed on start and every 15 min | [LOCAL] reliability test 1 (crash simulated → recovered once, no duplicates) | Not deployed |
+| P1-10 | Backups | Risk | Daily verified archive (DB snapshot + evidence, SHA-256) in `DATA_DIR/backups`, newest 7; off-host **encrypted** (AES-256-GCM) copy to Embarko file storage when `BACKUP_ENCRYPTION_KEY` is set; `scripts/restore-backup.js` | [LOCAL] reliability tests 2–3 (encrypted, wrong key fails, restore round trip, no overwrite) | Not deployed; off-host needs `BACKUP_ENCRYPTION_KEY` set by you in App setup |
+| P1-9 (M91) | M91 live | NOT VERIFIED | Unchanged: implemented per official docs, sending disabled without `M91_API_KEY` | [SIMULATED] contract tests | Remaining dependency: an M91 API key |
+| P1-10 (main) | Deploy from `main` | Divergent | Not yet merged: waits for production verification | — | — |
+| P1-11 | Google consent screen published | NOT VERIFIED | — | — | You: Google Cloud → OAuth consent screen → "In production" |
+| — | Task request architecture | Decision | Kept as approved: requests and tasks stay separate, no SUGGESTED task rows | existing tests | — |
+
+## Tests executed in this round (actual)
+
+| Category | Command | Result |
+|---|---|---|
+| Lint | `npx eslint .` | 0 problems |
+| [LOCAL]+[SIMULATED] | `npm test` | **52 tests, 52 pass, 0 fail** (8 new) |
+| [LOCAL] browser | `node scripts/e2e.mjs` | Passed |
+| [LOCAL] crawl | 3 roles × 2 viewports × 27 routes | 162 screens, **0** with errors, loaders or overflow |
+| [LIVE-EXT] | viaSocket automation token + runHistory for a test user | 201; foreign flow → 403 (isolation enforced by viaSocket) |
+| [PROD] | — | none this round (deploy blocked) |
+
+## Required from you (external actions only)
+
+1. **Deploy permission**: allow promoting `claude/teampulse-mvp` to `main` and deploying `main` to production (or allow a verification deploy of the branch first).
+2. **Embarko tokens**: in https://embarko.ai/app/tokens revoke both exposed tokens and create one new token; add it in this cloud environment's settings as a secret named `EMBARKO_DEPLOY_TOKEN`; continue in a new session (it reads it there).
+3. **viaSocket secret**: decide with the org-4160 owner whether to rotate the org-wide signing secret (affects all 229 projects). If yes, after rotation I refresh `.env` through the viaSocket connector's encrypted secret transfer and update Embarko — no chat paste.
+4. **Backups**: in Embarko → teampulse → App setup add `BACKUP_ENCRYPTION_KEY` (any long random string; keep a copy offline — without it off-host backups cannot be restored).
+5. **Live tests**: on production sign in as admin; connect your test Slack and Gmail; approve each test send; for C create a Gmail label and a Slack channel and send one test message to each. For manager/employee journeys, two more Google accounts invited from Settings → Members.
+6. **M91** (optional): an `M91_API_KEY` in App setup to test real alerts.
