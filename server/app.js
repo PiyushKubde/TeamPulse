@@ -35,6 +35,9 @@ import * as measure from './measurement/assessments.js'
 import * as evidenceSources from './evidence/sources.js'
 import * as evidenceSvc from './evidence/service.js'
 import { receiveEvidenceEvent, retryInbox } from './evidence/ingest.js'
+import * as journeys from './intelligence/journeys.js'
+import * as signals from './intelligence/signals.js'
+import * as assistant from './intelligence/assistant.js'
 import { notifyInApp } from './services/notify.js'
 import * as v from './validate.js'
 import { now } from './db.js'
@@ -445,6 +448,17 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   app.post('/api/contribution/analyse', h((req) => { const ctx = member(req); limitWork(`work:${ctx.user.id}`); return measure.analyseWork(db, ctx, ai, aiModeNow, { userId: req.body?.userId }) }))
   app.get('/api/contribution/intelligence', h((req) => measure.teamIntelligence(db, member(req), req.query)))
 
+  // ---------- final sprint: assistant, copilot, contribution journeys, signals ----------
+  const limitAssistant = rateLimiter({ windowMs: 60000, max: 30 })
+  app.get('/api/assistant/day', h((req) => assistant.dayDigest(db, member(req), { day: req.query.day, tz: req.query.tz, userId: req.query.userId })))
+  app.get('/api/assistant/suggestions', h((req) => { const ctx = member(req); return { mine: assistant.suggestions(false), team: isManager(ctx) ? assistant.suggestions(true) : [], ai: measure.aiMode(cfg, ai).mode === 'on' && ai.configured } }))
+  app.post('/api/assistant/ask', h((req) => { const ctx = member(req); limitAssistant(`ask:${ctx.user.id}`); return assistant.ask(db, ctx, req.body || {}) }))
+  app.post('/api/assistant/day/ai', h(async (req) => { const ctx = member(req); limitAnalyse(`analyse:${ctx.user.id}`); return assistant.aiWriteUp(db, ctx, ai, aiModeNow, req.body || {}) }))
+  app.get('/api/journeys', h((req) => journeys.listJourneys(db, member(req), req.query)))
+  app.get('/api/journeys/:taskId', h((req) => journeys.taskJourney(db, member(req), req.params.taskId)))
+  app.get('/api/signals', h((req) => signals.listSignals(db, member(req), req.query)))
+  app.post('/api/signals/:id', h((req) => signals.actOnSignal(db, member(req), req.params.id, req.body)))
+
   // ---------- sprint 2: external evidence ----------
   const limitEvidenceIn = rateLimiter({ windowMs: 60000, max: 120 })
   app.post('/api/work-evidence/events/:id', h((req) => {
@@ -520,6 +534,7 @@ export async function runAlertJob({ db, vs, m91, cfg, ai = null }) {
     const retried = await auto.retryFailedRuns(db, vs, { appUrl: cfg.appUrl })
     const analyses = ai ? recoverRuns(db, ai) : 0
     const evidence = retryInbox(db)
+    const sig = signals.detectAll(db)
     const health = await evidenceSources.checkSourceHealth(db, vs).catch((e) => ({ checked: 0, error: e.message }))
     db.prepare(`INSERT INTO app_state (key, value, updated_at) VALUES ('alert_job_last', ?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(now(), now())
     let backup = null
@@ -531,7 +546,7 @@ export async function runAlertJob({ db, vs, m91, cfg, ai = null }) {
     const backupText = backup?.error ? `backup FAILED (${backup.error})`
       : backup ? `backup made (off-host ${backup.offsite}${backup.offsiteError ? `: ${backup.offsiteError}` : ''}; ${backup.restoreVerified ? 'restore verified' : `restore NOT verified: ${backup.restoreDetail}`})`
         : last ? `last backup ${last.at} (off-host ${last.offsite}; ${last.restoreVerifiedAt ? 'restore verified' : 'restore not verified'})` : 'no backup yet'
-    return { raised, sent, retried, replayed, analyses, text: `Alerts raised ${raised}; M91 sent ${sent.sent}, retrying ${sent.retrying}, failed ${sent.failed}, not configured ${sent.notConfigured}; automation retries ${retried.retried}; AI analyses resumed ${analyses}; evidence events retried ${evidence.retried}; evidence sources checked ${health.checked}; outbox replayed ${replayed}; ${backupText}; ${stats}` }
+    return { raised, sent, retried, replayed, analyses, text: `Alerts raised ${raised}; M91 sent ${sent.sent}, retrying ${sent.retrying}, failed ${sent.failed}, not configured ${sent.notConfigured}; automation retries ${retried.retried}; AI analyses resumed ${analyses}; evidence events retried ${evidence.retried}; evidence sources checked ${health.checked}; signals opened ${sig.opened}, resolved ${sig.resolved}; outbox replayed ${replayed}; ${backupText}; ${stats}` }
   } finally {
     db.prepare(`UPDATE app_state SET value = ?, updated_at = ? WHERE key = 'alert_job_lease'`).run(new Date(0).toISOString(), now())
   }
