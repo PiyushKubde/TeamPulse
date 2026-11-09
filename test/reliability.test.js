@@ -50,6 +50,7 @@ test('backups: verified snapshot + evidence, encrypted off-host upload, retentio
     // A corrupted off-host copy is caught by the restore check.
     const bad = { ...storage, download: async () => Buffer.from('TPB1garbage-garbage-garbage-garbage-garbage-garbage') }
     assert.equal((await makeBackup(t.db, t.cfg.dataDir, { encryptionKey: 'test-key-123', storage: bad })).restoreVerified, false)
+    assert.match(uploaded[0].name, /^teampulse-backup-.*\.gz$/, 'an extension Embarko storage accepts')
     const enc = uploaded[0].bytes
     assert.equal(enc.includes(Buffer.from('Back me up')), false, 'off-host copy is encrypted')
     assert.throws(() => decrypt(enc, 'wrong-key'))
@@ -57,7 +58,7 @@ test('backups: verified snapshot + evidence, encrypted off-host upload, retentio
     // No key → nothing leaves the host.
     assert.equal((await makeBackup(t.db, t.cfg.dataDir, { encryptionKey: '', storage })).offsite, 'not_configured')
     // Restore the encrypted copy into an empty folder and read it.
-    const encFile = join(mkdtempSync(join(tmpdir(), 'tp-enc-')), 'b.enc'); writeFileSync(encFile, enc)
+    const encFile = join(mkdtempSync(join(tmpdir(), 'tp-enc-')), 'teampulse-backup-x.gz'); writeFileSync(encFile, enc)
     const target = join(mkdtempSync(join(tmpdir(), 'tp-restore-')), 'data')
     execFileSync('node', ['--disable-warning=ExperimentalWarning', 'scripts/restore-backup.js', encFile, target], { env: { ...process.env, BACKUP_ENCRYPTION_KEY: 'test-key-123' } })
     const db = new DatabaseSync(join(target, 'teampulse.db'), { readOnly: true })
@@ -81,5 +82,21 @@ test('the scheduled job reports row counts (persistence check) and makes the dai
     const r2 = await t.call('/tasks/alerts', { headers: { Authorization: 'Bearer test-cron-secret' } })
     assert.match(r2.text, /last backup .* \(off-host not_configured; restore not verified\)/)
     assert.equal(t.db.prepare('SELECT COUNT(*) AS n FROM backups').get().n, 1)
+  } finally { await t.close() }
+})
+
+test('a backup whose off-host copy failed is retried on the next run; a verified one waits a day', async () => {
+  const { backupIfDue } = await import('../server/services/backups.js')
+  const t = await startApp()
+  try {
+    seedOrg(t.db)
+    const failing = { put: async () => { throw new Error('upload 400 file_type_not_allowed') }, list: async () => [], remove: async () => {} }
+    assert.equal((await backupIfDue(t.db, t.cfg.dataDir, { encryptionKey: 'k', storage: failing })).offsite, 'failed')
+    const files = []
+    const ok = { put: async (n, b) => { files.push(b); return { id: 'f1', url: 'mem://1' } }, list: async () => [], remove: async () => {}, download: async () => files[0] }
+    const retried = await backupIfDue(t.db, t.cfg.dataDir, { encryptionKey: 'k', storage: ok })
+    assert.ok(retried, 'retried because the last off-host copy failed')
+    assert.equal(retried.restoreVerified, true)
+    assert.equal(await backupIfDue(t.db, t.cfg.dataDir, { encryptionKey: 'k', storage: ok }), null, 'verified: not again today')
   } finally { await t.close() }
 })

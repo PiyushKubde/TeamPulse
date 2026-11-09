@@ -81,7 +81,7 @@ export function embarkoStorage(env = process.env, fetchImpl = fetch) {
   const auth = { Authorization: `Bearer ${token}` }
   return {
     async put(name, bytes) {
-      const res = await fetchImpl(`${base}/apps/${app}/files/${encodeURIComponent(name)}`, { method: 'PUT', headers: { ...auth, 'Content-Length': String(bytes.length), 'Content-Type': 'application/octet-stream' }, body: bytes })
+      const res = await fetchImpl(`${base}/apps/${app}/files/${encodeURIComponent(name)}`, { method: 'PUT', headers: { ...auth, 'Content-Length': String(bytes.length), 'Content-Type': 'application/gzip' }, body: bytes })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(`upload ${res.status} ${body.error || ''}`.trim())
       return body
@@ -118,9 +118,10 @@ export async function makeBackup(db, dataDir, { encryptionKey = process.env.BACK
   let offsite = { status: 'not_configured', id: null, error: null }
   if (encryptionKey && storage) {
     try {
-      const out = await storage.put(`teampulse-backup-${ts}.enc`, encrypt(archive, encryptionKey))
+      // Embarko storage accepts only some extensions (no .enc); the content is AES-256-GCM ciphertext either way.
+      const out = await storage.put(`teampulse-backup-${ts}.gz`, encrypt(archive, encryptionKey))
       offsite = { status: 'uploaded', id: out.id || null, error: null, url: out.url || null }
-      const old = (await storage.list()).filter((f) => /^teampulse-backup-.*\.enc$/.test(f.filename)).slice(KEEP)
+      const old = (await storage.list()).filter((f) => /^teampulse-backup-.*\.gz$/.test(f.filename)).slice(KEEP)
       for (const f of old) await storage.remove(f.id)
     } catch (error) {
       offsite = { status: 'failed', id: null, error: String(error.message).slice(0, 200) }
@@ -150,10 +151,15 @@ export async function makeBackup(db, dataDir, { encryptionKey = process.env.BACK
   return { file, rows, uploads: uploads.length, offsite: offsite.status, offsiteError: offsite.error, restoreVerified: restore.ok, restoreDetail: restore.detail }
 }
 
-/** Daily: a backup when the newest is older than 23 hours. */
-export async function backupIfDue(db, dataDir, opts) {
-  const last = db.prepare('SELECT created_at FROM backups ORDER BY created_at DESC LIMIT 1').get()
-  if (last && Date.now() - Date.parse(last.created_at) < 23 * 3600000) return null
+/**
+ * Daily: a backup when the newest is older than 23 hours — or sooner when the newest one's off-host copy failed or
+ * could not be restored while a key is configured (retried on the next scheduled run).
+ */
+export async function backupIfDue(db, dataDir, opts = {}) {
+  const last = db.prepare('SELECT created_at, offsite_status, restore_verified_at FROM backups ORDER BY created_at DESC LIMIT 1').get()
+  const key = opts.encryptionKey ?? process.env.BACKUP_ENCRYPTION_KEY
+  const offsiteBroken = key && last && (last.offsite_status !== 'uploaded' || !last.restore_verified_at)
+  if (last && !offsiteBroken && Date.now() - Date.parse(last.created_at) < 23 * 3600000) return null
   return makeBackup(db, dataDir, opts)
 }
 
