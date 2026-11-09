@@ -13,6 +13,7 @@ const vs = createViasocketGateway(cfg.viasocket)
 const m91 = createM91Transport(cfg.m91)
 const mailer = createMailer(cfg.mail, { db, vs })
 const app = createApp({ db, cfg, vs, m91, mailer })
+const ai = app.locals.ai
 
 if (process.env.DEV_LOGIN && cfg.production) console.warn('[config] DEV_LOGIN is ignored in production.')
 console.log(`[config] Public URL: ${cfg.appUrl || '(not set)'}`)
@@ -21,6 +22,7 @@ console.log(`[config] ViaSocket: ${vs.configured ? 'configured' : 'not configure
 console.log(`[config] M91: ${m91.status().state} — ${m91.status().message}`)
 console.log(`[config] Scheduled jobs: ${cfg.cronSecret ? 'CRON_SECRET set' : 'no CRON_SECRET (scheduled routes refuse all calls)'}${cfg.localScheduler ? '; local scheduler on' : ''}`)
 console.log(`[config] Email (verification, password reset): ${mailer.configured ? `configured via ${mailer.provider}` : 'NOT configured — email sign-up and password reset are unavailable (set MAIL_PROVIDER, see .env.example)'}`)
+console.log(`[config] AI work analysis: ${ai.configured ? `${ai.simulated ? 'SIMULATED (development only, not AI)' : `${ai.name}, model ${ai.model}`}` : `not configured — ${ai.reason}`}`)
 if (cfg.devLogin) console.log('[config] DEV_LOGIN is on: anyone can sign in by email. Local development only.')
 
 // Events left PENDING by a previous process (crash, restart, redeploy) are replayed now; their handlers are idempotent.
@@ -29,7 +31,7 @@ const server = app.listen(cfg.port, cfg.host, () => console.log(`TeamPulse liste
 
 // Local development only: Embarko runs the jobs through embarko.json schedules, never an in-process timer.
 if (cfg.localScheduler && !cfg.production) {
-  setInterval(() => runAlertJob({ db, vs, m91, cfg }).then((r) => console.log(`[scheduler] ${r.text}`)).catch((e) => console.error('[scheduler]', e.message)), 5 * 60000).unref()
+  setInterval(() => runAlertJob({ db, vs, m91, cfg, ai }).then((r) => console.log(`[scheduler] ${r.text}`)).catch((e) => console.error('[scheduler]', e.message)), 5 * 60000).unref()
 }
 
 const shutdown = () => server.close(() => { db.close(); process.exit(0) })

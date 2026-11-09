@@ -45,6 +45,15 @@ export function loadConfig(overrides = {}) {
       smtp: { host: env.SMTP_HOST || '', port: Number(env.SMTP_PORT) || 587, secure: env.SMTP_SECURE === 'true', user: env.SMTP_USER || '', pass: env.SMTP_PASS || '' },
       viasocket: { userId: env.MAIL_VIASOCKET_USER_ID || '', connectionId: env.MAIL_VIASOCKET_CONNECTION_ID || '' }
     },
+    // AI work measurement (server/ai/provider.js). Keys stay on the server.
+    ai: {
+      provider: (env.AI_PROVIDER || '').toLowerCase(),
+      apiKey: env.ANTHROPIC_API_KEY || '',
+      model: env.AI_MODEL || 'claude-opus-5-5',
+      effort: env.AI_EFFORT || 'medium',
+      timeoutMs: Number(env.AI_TIMEOUT_MS) || 120000,
+      fallbacks: env.AI_FALLBACKS !== 'off'
+    },
     ...overrides
   }
   // The callback defaults to APP_URL + /auth/google/callback, so production only needs the client id and secret.

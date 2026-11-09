@@ -28,6 +28,11 @@ import { sendThrough, slackChannels, slackUsers } from './integrations/actions.j
 import * as auto from './automations/engine.js'
 import * as intake from './automations/intake.js'
 import * as contextFlows from './automations/context-flows.js'
+import { createAiProvider } from './ai/provider.js'
+import { seedRubrics } from './measurement/rubric.js'
+import { onWorkEvent, recoverRuns } from './measurement/engine.js'
+import * as measure from './measurement/assessments.js'
+import { notifyInApp } from './services/notify.js'
 import * as v from './validate.js'
 import { now } from './db.js'
 
@@ -45,8 +50,10 @@ export function rateLimiter({ windowMs, max }) {
   }
 }
 
-export function createApp({ db, cfg, vs = { configured: false }, m91, google = googleTransport(), listen = true, mailer = null }) {
+export function createApp({ db, cfg, vs = { configured: false }, m91, google = googleTransport(), listen = true, mailer = null, ai = null }) {
   mailer ||= createMailer(cfg.mail || {}, { db, vs })
+  ai ||= createAiProvider(cfg)
+  seedRubrics(db)
   const app = express()
   app.disable('x-powered-by')
   app.set('trust proxy', 1)
@@ -59,10 +66,13 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     onEvent((e) => (e.type === 'task.assigned' ? auto.runNewTaskNotification(db, vs, { ...e, appUrl: cfg.appUrl }) : null)),
     onEvent((e) => contextFlows.onTaskEvent(db, vs, e, cfg.appUrl)),
     onEvent(() => alerts.processDeliveries(db, m91)),
-    onEvent((e) => alerts.closeResolvedAlerts(db, m91, e))
+    onEvent((e) => alerts.closeResolvedAlerts(db, m91, e)),
+    onEvent((e) => onWorkEvent(db, ai, e)),
+    onEvent((e) => (e.type === 'assessment.ready' ? notifyInApp(db, { orgId: e.orgId, userId: e.subjectId, kind: 'assessment_ready', title: 'Your work analysis is ready to review', link: `#/tasks/${e.taskId}`, taskId: e.taskId, dedupeKey: `assessment-ready:${e.assessmentId}` }) : null))
   ] : []
   app.locals.stopListening = () => unsubscribe.forEach((fn) => fn())
   app.locals.events = { recoverOutbox }
+  app.locals.ai = ai
 
   const limitAuth = rateLimiter({ windowMs: 60000, max: 30 })
   const limitLogin = rateLimiter({ windowMs: 60000, max: 10 })
@@ -128,7 +138,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   // ---------- health ----------
   app.get('/api/health', h(() => {
     db.prepare('SELECT 1').get()
-    return { ok: true, database: 'ok', google: cfg.google.configured ? 'configured' : 'not_configured', email: mailer.configured ? 'configured' : 'not_configured', viasocket: vs.configured ? 'configured' : 'not_configured', m91: m91.status().state, time: now() }
+    return { ok: true, database: 'ok', google: cfg.google.configured ? 'configured' : 'not_configured', email: mailer.configured ? 'configured' : 'not_configured', viasocket: vs.configured ? 'configured' : 'not_configured', ai: ai.configured ? (ai.simulated ? 'simulated' : 'configured') : 'not_configured', m91: m91.status().state, time: now() }
   }))
 
   // ---------- authentication ----------
@@ -185,7 +195,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     return { ok: true }
   }))
   app.get('/api/session', h((req) => {
-    const base = { googleConfigured: cfg.google.configured, devLogin: cfg.devLogin, emailAuth: { available: mailer.configured }, legal: cfg.legal || {}, integrations: { viasocket: vs.configured }, ...(cfg.google.configured ? {} : { googleCallbackUrl: cfg.google.redirectUri || null }) }
+    const base = { googleConfigured: cfg.google.configured, devLogin: cfg.devLogin, emailAuth: { available: mailer.configured }, legal: cfg.legal || {}, integrations: { viasocket: vs.configured, ai: ai.configured ? (ai.simulated ? 'simulated' : 'configured') : 'not_configured' }, ...(cfg.google.configured ? {} : { googleCallbackUrl: cfg.google.redirectUri || null }) }
     if (!req.user) return { ...base, user: null }
     const c = req.ctx
     return {
@@ -412,6 +422,21 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   }))
   app.get('/vendor/viasocket-apps-browser.js', (req, res) => res.type('text/javascript').sendFile(VIASOCKET_BROWSER))
 
+  // ---------- AI work measurement ----------
+  const limitAnalyse = rateLimiter({ windowMs: 3600000, max: 30 })
+  app.get('/api/tasks/:id/assessment', h((req) => measure.getTaskAssessment(db, member(req), ai, req.params.id)))
+  app.post('/api/tasks/:id/assessment/analyse', h((req) => {
+    const ctx = member(req)
+    limitAnalyse(`analyse:${ctx.user.id}`)
+    const out = measure.analyseTask(db, ctx, ai, req.params.id)
+    return { ...out, view: measure.getTaskAssessment(db, ctx, ai, req.params.id) }
+  }))
+  app.post('/api/tasks/:id/assessment/respond', h((req) => { const ctx = member(req); measure.employeeRespond(db, ctx, req.params.id, req.body); return measure.getTaskAssessment(db, ctx, ai, req.params.id) }))
+  app.post('/api/tasks/:id/assessment/review', h((req) => { const ctx = member(req); measure.managerReview(db, ctx, req.params.id, req.body); return measure.getTaskAssessment(db, ctx, ai, req.params.id) }))
+  app.get('/api/assessments/:id', h((req) => measure.getAssessmentById(db, member(req), req.params.id)))
+  app.get('/api/contribution/team', h((req) => measure.teamOverview(db, member(req), req.query)))
+  app.get('/api/contribution/people/:userId', h((req) => measure.personProfile(db, member(req), req.params.userId, req.query)))
+
   // ---------- scheduled jobs (Embarko schedules call these with CRON_SECRET) ----------
   const cronOk = (req) => {
     const expected = cfg.cronSecret
@@ -419,7 +444,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   }
   app.get('/tasks/alerts', h(async (req, res) => {
     cronOk(req)
-    const out = await runAlertJob({ db, vs, m91, cfg })
+    const out = await runAlertJob({ db, vs, m91, cfg, ai })
     res.type('text/plain').send(out.text)
   }))
   app.get('/tasks/weekly-report', h(async (req, res) => {
@@ -448,7 +473,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
  * A lease in app_state stops overlapping runs (e.g. a manual run during a scheduled one) from double-processing;
  * every step is also idempotent through dedupe keys, so a redeploy or duplicate call never repeats an alert.
  */
-export async function runAlertJob({ db, vs, m91, cfg }) {
+export async function runAlertJob({ db, vs, m91, cfg, ai = null }) {
   const lease = db.prepare(`INSERT INTO app_state (key, value, updated_at) VALUES ('alert_job_lease', ?, ?)
                             ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at WHERE app_state.value < ?`)
     .run(new Date(Date.now() + 4 * 60000).toISOString(), now(), now()).changes
@@ -458,6 +483,7 @@ export async function runAlertJob({ db, vs, m91, cfg }) {
     const raised = alerts.scanAlerts(db)
     const sent = await alerts.processDeliveries(db, m91)
     const retried = await auto.retryFailedRuns(db, vs, { appUrl: cfg.appUrl })
+    const analyses = ai ? recoverRuns(db, ai) : 0
     db.prepare(`INSERT INTO app_state (key, value, updated_at) VALUES ('alert_job_last', ?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(now(), now())
     let backup = null
     try { backup = await backupIfDue(db, cfg.dataDir) } catch (error) { console.error('[backup] failed:', error.message); backup = { error: error.message } }
@@ -468,7 +494,7 @@ export async function runAlertJob({ db, vs, m91, cfg }) {
     const backupText = backup?.error ? `backup FAILED (${backup.error})`
       : backup ? `backup made (off-host ${backup.offsite}${backup.offsiteError ? `: ${backup.offsiteError}` : ''}; ${backup.restoreVerified ? 'restore verified' : `restore NOT verified: ${backup.restoreDetail}`})`
         : last ? `last backup ${last.at} (off-host ${last.offsite}; ${last.restoreVerifiedAt ? 'restore verified' : 'restore not verified'})` : 'no backup yet'
-    return { raised, sent, retried, replayed, text: `Alerts raised ${raised}; M91 sent ${sent.sent}, retrying ${sent.retrying}, failed ${sent.failed}, not configured ${sent.notConfigured}; automation retries ${retried.retried}; outbox replayed ${replayed}; ${backupText}; ${stats}` }
+    return { raised, sent, retried, replayed, analyses, text: `Alerts raised ${raised}; M91 sent ${sent.sent}, retrying ${sent.retrying}, failed ${sent.failed}, not configured ${sent.notConfigured}; automation retries ${retried.retried}; AI analyses resumed ${analyses}; outbox replayed ${replayed}; ${backupText}; ${stats}` }
   } finally {
     db.prepare(`UPDATE app_state SET value = ?, updated_at = ? WHERE key = 'alert_job_lease'`).run(new Date(0).toISOString(), now())
   }
