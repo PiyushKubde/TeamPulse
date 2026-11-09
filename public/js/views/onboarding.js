@@ -21,7 +21,7 @@ export function renderLogin(root, q) {
     const href = `/auth/google${invite ? `?returnTo=${encodeURIComponent(`#/invite/${invite}`)}` : ''}`
     box.innerHTML = html`
       ${sess.googleConfigured ? html`<a class="btn google" style="width:100%" href="${href}">${GOOGLE} Continue with Google</a>`
-        : html`<div class="notice warn">Google sign-in is not configured on this server yet. An administrator must set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI (see README).</div>`}
+        : html`<div class="notice warn"><b>Google sign-in is not set up yet.</b> An administrator must add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to this app’s settings${sess.googleCallbackUrl ? html`, and register this redirect URI in the Google OAuth client: <span class="mono" style="word-break:break-all">${sess.googleCallbackUrl}</span>` : ''}.</div>`}
       ${sess.devLogin ? html`<details style="margin-top:16px"><summary class="small muted">Local development sign-in</summary>
         <form id="dev-login" class="stack" style="margin-top:10px"><div class="form-error"></div>
           <div><label for="dev-email">Email</label><input id="dev-email" name="email" type="email" required placeholder="you@example.com"></div>

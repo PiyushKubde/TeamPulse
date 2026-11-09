@@ -154,7 +154,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     return { ok: true }
   }))
   app.get('/api/session', h((req) => {
-    const base = { googleConfigured: cfg.google.configured, devLogin: cfg.devLogin }
+    const base = { googleConfigured: cfg.google.configured, devLogin: cfg.devLogin, ...(cfg.google.configured ? {} : { googleCallbackUrl: cfg.google.redirectUri || null }) }
     if (!req.user) return { ...base, user: null }
     const c = req.ctx
     return {
