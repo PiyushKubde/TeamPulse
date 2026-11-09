@@ -328,3 +328,48 @@ your instruction is to deploy production from `main` after verification — so n
 4. **Backups**: in Embarko → teampulse → App setup add `BACKUP_ENCRYPTION_KEY` (any long random string; keep a copy offline — without it off-host backups cannot be restored).
 5. **Live tests**: on production sign in as admin; connect your test Slack and Gmail; approve each test send; for C create a Gmail label and a Slack channel and send one test message to each. For manager/employee journeys, two more Google accounts invited from Settings → Members.
 6. **M91** (optional): an `M91_API_KEY` in App setup to test real alerts.
+
+---
+
+# Production verification round (2026-11-09)
+
+Plan update from the owner: Embarko token rotation and viaSocket org-secret rotation are **skipped by decision** (existing
+configuration kept); `BACKUP_ENCRYPTION_KEY` was configured by the owner on Embarko (confirmed present in the app's
+environment keys; value never read).
+
+## Git and deployment
+
+| Step | Result | Evidence |
+|---|---|---|
+| Feature branch verified | `claude/teampulse-mvp` clean, in sync with GitHub | `git status`, `git fetch` |
+| Tests on the final commit | **53 tests, 53 pass, 0 fail**; lint 0 problems; browser e2e passed | `npm test`, `npx eslint .`, `node scripts/e2e.mjs` |
+| Promote to `main` | Fast-forward only, no force: `8b10bf8..963cfe0`, then `963cfe0..538b4b6` | `git push origin HEAD:main` output; `main` = `claude/teampulse-mvp` = `538b4b6` |
+| Deploy `main` to Embarko | `git archive origin/main` deployed with the deploy token | Embarko `currentDeployment.appVersion = 538b4b6`, status `success` (v10; v11 after the restart) |
+
+## Production results [PROD]
+
+| Check | Result | Evidence |
+|---|---|---|
+| Deployed commit | **538b4b6** (= `main`) | Embarko app record `currentDeployment.appVersion`; job output format only this build produces |
+| Health | ok; database ok; Google configured; viaSocket configured; M91 not configured | `/api/health` |
+| Scheduled alert job | Runs `ok` (HTTP 200) on the new build; manual and 15-minute scheduled runs | Embarko schedule run history (see below) |
+| Weekly report job | `ok` — "1 manager/admin report(s); delivered by Slack/Gmail 0" (no delivery configured) | Embarko schedule run |
+| **Backup creation** | **PASS** — verified archive made in production (`integrity_check` ok, SHA-256 recorded) | job output; server log `[backup] … 22982 bytes` |
+| **Off-host encrypted copy** | **PASS** — uploaded to Embarko file storage as `teampulse-backup-…gz` (23 030 bytes) | storage listing via deploy token |
+| Encrypted at rest off-host | **PASS** — the file fetched through its public link starts with the `TPB1` encrypted format; no gzip header, no SQLite header, no readable JSON | byte check of the downloaded file |
+| **Backup restoration with the configured key** | **PASS** — the app downloaded its own off-host copy, decrypted it with `BACKUP_ENCRYPTION_KEY`, restored it into a temporary folder, `integrity_check` ok, row counts equal to the snapshot | job output "off-host uploaded; restore verified"; server log "restore VERIFIED" |
+| Bug found and fixed in production | First run failed: Embarko storage `400 file_type_not_allowed` for `.enc`. Fixed (`538b4b6`): upload as `.gz` (content still ciphertext) + automatic retry of failed off-host copies | job output before/after |
+| **Persistence across restart** | **PASS** — restart via environment apply (new deployment v11). The new process read the backup record written by the previous process at 09:11:47 and the same counts (1 organization, 2 users) | job output after restart: "last backup 2026-11-09T09:11:47.347Z (off-host uploaded; restore verified); db: 1 org(s), 2 user(s)…" |
+| Persistence across redeploys | **PASS** — 1 organization, 2 users before and after v9 → v10 → v11 | job outputs |
+| Notification persistence (outbox) | Mechanism deployed; production outbox had 0 pending to replay. **Replay itself verified locally only** (crash simulated → recovered once, no duplicates) — no production event has occurred to replay | job output "outbox replayed 0"; [LOCAL] reliability test |
+| Signed-in admin / manager / employee journeys | **NOT VERIFIED in production** — requires the owner's Google accounts (2 users exist in production) | — |
+| Session persistence across restart (production) | **NOT VERIFIED** — sessions are rows in the same database, which persisted; a signed-in check needs the owner | — |
+| Live Slack/Gmail automations (A, B, C, D) | **NOT VERIFIED** — needs the owner's connected test accounts and approval per send | — |
+| M91 | Sending disabled (no `M91_API_KEY`); not simulated as success | health `m91: not_configured` |
+
+## Remaining external dependencies
+
+1. Owner signs in on production as admin and invites two more Google accounts (manager, employee) to run the signed-in journeys.
+2. Owner connects test Slack and Gmail on production and approves each test send (A, B), creates a Gmail label and a Slack channel with one test message each (C), and publishes one flow from an "Automate" button (D).
+3. `M91_API_KEY` for live M91 alerts (optional; disabled until provided).
+4. Credential rotation: skipped by owner decision (recorded risk: the viaSocket embed secret and the Embarko deploy tokens appeared in a chat transcript).
