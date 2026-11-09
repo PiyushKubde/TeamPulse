@@ -1,15 +1,19 @@
-// Running allowlisted viaSocket actions on a user's own connection, in the documented order:
-// live connection check → enabled app (script_id, server only) → version id → runAction.
-// Action ids, versions and input shapes are the ones DealSaathi runs live (Slack Send_Message v107, Gmail Send Email V55).
+// Running allowlisted viaSocket actions on a user's own connection, in the documented order (viasocket-apps 0.19):
+// live connection check → that connection's enabled-app flow (script_id, server only; enabled once) → runAction by key
+// with a pinned version. https://viasocket.com/docs/skill/actions-and-events.md?format=sdk
 import { now } from '../db.js'
 import { AppError } from '../errors.js'
 import { requireOwnConnection } from './connections.js'
 import { redact, requireViasocket, viasocketError } from './errors.js'
 
+// Keys and versions from the app pages, confirmed with user.listActions() on 2026-11-09.
 export const ACTIONS = {
-  gmail_send_email: { slug: 'gmail', app: 'Gmail', actionId: 'rowogelpy0h6', version: 'V55', check: 'check the Gmail Sent folder' },
-  slack_send_message: { slug: 'slack', app: 'Slack', actionId: 'row1jrbor', version: 'V107', check: 'check the Slack channel' }
+  gmail_send_email: { slug: 'gmail', app: 'Gmail', key: 'Send_Email', version: 'v55', actionId: 'rowogelpy0h6', check: 'check the Gmail Sent folder' },
+  slack_send_message: { slug: 'slack', app: 'Slack', key: 'Send_Message', version: 'v107', actionId: 'row1jrbor', check: 'check the Slack channel' }
 }
+
+/** Every message TeamPulse sends carries this line, so the intake (C) recognises and ignores its own messages. */
+export const MARKER = 'Sent by TeamPulse'
 
 export async function requireActiveConnection(db, vs, ctx, connectionId, action) {
   requireViasocket(vs)
@@ -22,13 +26,17 @@ export async function requireActiveConnection(db, vs, ctx, connectionId, action)
   return row
 }
 
+/**
+ * The enabled-app flow for exactly this connection: the stored one if viaSocket still has it, else the user's existing
+ * flow for this auth_id, else a new enable(slug, auth_id). A paused one is resumed, never enabled twice.
+ */
 async function scriptIdFor(db, vs, userId, connection) {
   const flows = await vs.listFlows(userId)
   const stored = db.prepare('SELECT script_id FROM enabled_apps WHERE user_id = ? AND auth_id = ?').get(userId, connection.auth_id)
-  const known = stored && flows.find((f) => f.id === stored.script_id)
-  const flow = known && known.status !== 'deleted' ? known : flows.find((f) => f.serviceId === connection.service_id && f.authId === connection.auth_id && f.status !== 'deleted')
+  const known = stored && flows.find((f) => f.id === stored.script_id && f.status !== 'deleted')
+  const flow = known || flows.find((f) => f.authId === connection.auth_id && f.serviceId === connection.service_id && f.status !== 'deleted')
   if (flow?.status === 'paused') await vs.setFlowStatus(userId, flow.id, 1)
-  const scriptId = flow?.id || (await vs.enable(userId, connection.service_id, connection.auth_id)).scriptId
+  const scriptId = flow?.id || (await vs.enable(userId, connection.app_slug, connection.auth_id)).scriptId
   if (stored?.script_id !== scriptId) {
     db.prepare(`INSERT INTO enabled_apps (user_id, auth_id, service_id, script_id, created_at) VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT (user_id, auth_id) DO UPDATE SET script_id = excluded.script_id, service_id = excluded.service_id`).run(userId, connection.auth_id, connection.service_id, scriptId, now())
@@ -40,22 +48,21 @@ async function scriptIdFor(db, vs, userId, connection) {
  * Runs one action for `ctx.user` on their own connection. Never throws: returns
  * { outcome: 'answered', result } | { outcome: 'failed', reason } | { outcome: 'unknown', reason }.
  */
-export async function runOnce(db, vs, ctx, connectionId, actionKey, inputData) {
-  const action = ACTIONS[actionKey]
+export async function runOnce(db, vs, ctx, connectionId, actionName, inputData) {
+  const action = ACTIONS[actionName]
   let scriptId
-  let versionId
   try {
     const connection = await requireActiveConnection(db, vs, ctx, connectionId, action)
     scriptId = await scriptIdFor(db, vs, ctx.user.id, connection)
-    versionId = await vs.versionIdFor(connection.service_id, action.actionId, action.version)
   } catch (error) {
     return { outcome: 'failed', notSent: true, reason: (error instanceof AppError ? error : viasocketError(error, `prepare ${action.app}`)).message }
   }
   try {
-    return { outcome: 'answered', result: await vs.runAction(scriptId, versionId, inputData) }
+    return { outcome: 'answered', result: await vs.runAction(scriptId, action.key, inputData, action.version) }
   } catch (error) {
     if (error?.status === null || error?.status === undefined) return { outcome: 'unknown', reason: `No answer from ViaSocket, so it is not known whether ${action.app} acted: ${action.check} before retrying.` }
-    return { outcome: 'failed', reason: redact(error?.message || 'ViaSocket refused the action.').slice(0, 300) }
+    console.log(`[action] ${action.app} ${action.key} ${action.version} failed: HTTP ${error.status}`)
+    return { outcome: 'failed', reason: redact(error?.body?.errorMsg?.message || error?.message || 'ViaSocket refused the action.').slice(0, 300) }
   }
 }
 
@@ -88,29 +95,48 @@ export function readSlackResult(result) {
 
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 export const bodyToHtml = (text) => String(text).trim().split(/\n{2,}/).map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('')
+/** Gmail Send_Email v55 inputData. from, cc, bcc, replyTo, attachments, labelIds left out on purpose. */
 export const gmailInput = ({ to, subject, body, fromName }) => ({ to, subject, messageBody: bodyToHtml(body), ...(fromName ? { fromName } : {}) })
-export const slackInput = ({ channelId, text }) => ({ destination: { messageto: 'channel', channel_id: [channelId] }, markdown_content: text })
+/** Slack Send_Message v107 inputData: a channel or a direct message; every other key left out on purpose. */
+export const slackInput = ({ channelId, userId, text }) => (userId
+  ? { destination: { messageto: 'user', userId: [userId] }, markdown_content: text }
+  : { destination: { messageto: 'channel', channel_id: [channelId] }, markdown_content: text })
 
-/** The user's Slack channels, for choosing where a notification goes (Send_Message's destination.channel_id picker). */
-export async function slackChannels(db, vs, ctx, connectionId) {
-  const action = ACTIONS.slack_send_message
-  const connection = await requireActiveConnection(db, vs, ctx, connectionId, action)
+/**
+ * Options of a PICK key for the user's own connection: { options, hasMore, paginate, message }.
+ * `eventKey` is the action or trigger key, `version` its pinned version.
+ */
+export async function pickOptions(db, vs, ctx, connectionId, { slug, app, eventKey, version, fieldKey, existingFields = {}, search, paginate }) {
+  const connection = await requireActiveConnection(db, vs, ctx, connectionId, { slug, app })
   try {
-    const versionId = await vs.versionIdFor(connection.service_id, action.actionId, action.version)
-    const { options } = await vs.listOptions(ctx.user.id, versionId, { fieldKey: 'destination.channel_id', authId: connection.auth_id, existingFields: { destination: { messageto: 'channel' } } })
-    return options.map((o) => ({ label: String(o.label), value: String(o.value) }))
+    const out = await vs.listOptions(ctx.user.id, slug, eventKey, { fieldKey, authId: connection.auth_id, existingFields, version, ...(search ? { search } : {}), ...(paginate ? { paginate } : {}) })
+    return { options: (out.options || []).map((o) => ({ label: String(o.label), value: String(o.value) })), hasMore: Boolean(out.hasMore), paginate: out.paginate ?? null, message: out.message || null }
   } catch (error) {
-    throw viasocketError(error, 'list your Slack channels')
+    throw viasocketError(error, `list your ${app} options`)
   }
 }
 
-/** Sends one message through Slack or Gmail and reads the provider's own id back. */
+const SM = ACTIONS.slack_send_message
+/** The user's Slack channels (Send_Message's destination.channel_id). */
+export async function slackChannels(db, vs, ctx, connectionId, { search } = {}) {
+  return (await pickOptions(db, vs, ctx, connectionId, { slug: SM.slug, app: SM.app, eventKey: SM.key, version: SM.version, fieldKey: 'destination.channel_id', existingFields: { destination: { messageto: 'channel' } }, search })).options
+}
+/** The people of the user's Slack workspace (Send_Message's destination.userId), for "message me". */
+export async function slackUsers(db, vs, ctx, connectionId, { search } = {}) {
+  return (await pickOptions(db, vs, ctx, connectionId, { slug: SM.slug, app: SM.app, eventKey: SM.key, version: SM.version, fieldKey: 'destination.userId', existingFields: { destination: { messageto: 'user' } }, search })).options
+}
+
+/**
+ * Sends one message through Slack or Gmail and reads the provider's own id back.
+ * config: { channel: 'slack'|'gmail', connectionId, slackChannelId?, slackUserId?, slackChannelLabel? }
+ */
 export async function sendThrough(db, vs, ctx, config, { subject, text, to }) {
   const isGmail = config.channel === 'gmail'
   const ran = await runOnce(db, vs, ctx, config.connectionId, isGmail ? 'gmail_send_email' : 'slack_send_message',
-    isGmail ? gmailInput({ to, subject, body: text, fromName: 'TeamPulse' }) : slackInput({ channelId: config.slackChannelId, text: `*${subject}*\n${text}` }))
+    isGmail ? gmailInput({ to, subject, body: `${text}\n\n${MARKER}`, fromName: 'TeamPulse' })
+      : slackInput({ channelId: config.slackChannelId, userId: config.slackUserId, text: `*${subject}*\n${text}\n_${MARKER}_` }))
   if (ran.outcome !== 'answered') return { status: ran.outcome === 'unknown' ? 'UNKNOWN' : 'FAILED', error: ran.reason }
   const read = isGmail ? readGmailResult(ran.result) : readSlackResult(ran.result)
   if (!read.ok) return { status: read.unknown ? 'UNKNOWN' : 'FAILED', error: read.reason }
-  return { status: 'SUCCEEDED', summary: isGmail ? `Gmail accepted the email (message ${read.providerId})` : `Posted to Slack ${config.slackChannelLabel || 'channel'} (ts ${read.providerId})` }
+  return { status: 'SUCCEEDED', summary: isGmail ? `Gmail accepted the email (message ${read.providerId})` : `Posted to Slack ${config.slackChannelLabel || (config.slackUserId ? 'direct message' : 'channel')} (ts ${read.providerId})` }
 }

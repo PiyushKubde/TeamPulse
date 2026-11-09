@@ -6,29 +6,29 @@ import { viasocketError } from './errors.js'
 
 export const CURATED_APPS = [
   {
-    slug: 'slack', name: 'Slack', actions: ['row1jrbor'], runsInTeamPulse: true,
-    purpose: 'Posts new-task notifications and the weekly team report to a channel you choose.',
-    usedBy: ['New Task Notification', 'Weekly Team Report', 'Share a task to Slack (task page)']
+    slug: 'slack', name: 'Slack', actions: ['row1jrbor', 'rowo0opjzsgk'], runsInTeamPulse: true, priority: 1,
+    purpose: 'Task-assignment notifications (to you or a team channel), the weekly team report, and turning messages in an intake channel into task requests.',
+    usedBy: ['My notifications', 'Team task notifications', 'Weekly team report', 'Slack intake → task requests', 'Share a task to Slack']
   },
   {
-    slug: 'gmail', name: 'Gmail', actions: ['rowogelpy0h6'], runsInTeamPulse: true,
-    purpose: 'Emails new-task notifications to the assignee and the weekly team report, from your own Gmail.',
-    usedBy: ['New Task Notification', 'Weekly Team Report']
+    slug: 'gmail', name: 'Gmail', actions: ['rowogelpy0h6', 'row9ls2itxoc'], runsInTeamPulse: true, priority: 1,
+    purpose: 'Task-assignment emails, the weekly team report, and turning labelled emails into task requests.',
+    usedBy: ['My notifications', 'Team task notifications', 'Weekly team report', 'Gmail intake → task requests']
   },
   {
-    slug: 'github', name: 'GitHub', actions: null, runsInTeamPulse: false,
-    purpose: 'Build flows from GitHub events (pull requests, issues) — for example post a merged PR link to TeamPulse as task evidence through the Advanced Builder.',
-    usedBy: ['Advanced Builder (opens filtered to GitHub)']
+    slug: 'google-sheets', name: 'Google Sheets', actions: null, runsInTeamPulse: false, priority: 1,
+    purpose: 'Log your assigned tasks or each weekly report as rows in a sheet — built in place from My Tasks and Reports.',
+    usedBy: ['My Tasks → Automate', 'Reports → Send to Google Sheets']
   },
   {
-    slug: 'google-calendar', name: 'Google Calendar', actions: null, runsInTeamPulse: false,
-    purpose: 'Build calendar flows, such as creating a deadline event when a task is assigned.',
-    usedBy: ['Advanced Builder (opens filtered to Google Calendar)']
+    slug: 'google-calendar', name: 'Google Calendar', actions: null, runsInTeamPulse: false, priority: 2,
+    purpose: 'Put the deadline of each task assigned to you in your calendar — built in place from My Tasks.',
+    usedBy: ['My Tasks → Automate']
   },
   {
-    slug: 'google-sheets', name: 'Google Sheets', actions: null, runsInTeamPulse: false,
-    purpose: 'Build reporting flows, such as appending the weekly summary to a sheet.',
-    usedBy: ['Advanced Builder (opens filtered to Google Sheets)']
+    slug: 'github', name: 'GitHub', actions: null, runsInTeamPulse: false, priority: 2,
+    purpose: 'Create or comment on an issue when a task in your team is completed — built in place from a task.',
+    usedBy: ['Task page → Automate (managers)']
   }
 ]
 
