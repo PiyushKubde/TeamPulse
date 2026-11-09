@@ -28,6 +28,8 @@ export function loadConfig(overrides = {}) {
     uploadMaxBytes: Number(env.UPLOAD_MAX_BYTES) || 5 * 1024 * 1024,
     m91: {
       apiKey: env.M91_API_KEY || '',
+      // A channel send link (secret): alerts the whole M91 channel. Takes precedence over the API key.
+      sendLink: (env.M91_SEND_LINK || '').trim(),
       callbackToken: env.M91_CALLBACK_TOKEN || ''
     },
     viasocket: {

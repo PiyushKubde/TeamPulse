@@ -32,6 +32,9 @@ import { createAiProvider } from './ai/provider.js'
 import { seedRubrics } from './measurement/rubric.js'
 import { onWorkEvent, recoverRuns } from './measurement/engine.js'
 import * as measure from './measurement/assessments.js'
+import * as evidenceSources from './evidence/sources.js'
+import * as evidenceSvc from './evidence/service.js'
+import { receiveEvidenceEvent, retryInbox } from './evidence/ingest.js'
 import { notifyInApp } from './services/notify.js'
 import * as v from './validate.js'
 import { now } from './db.js'
@@ -100,7 +103,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   // cookie is SameSite=Lax. Token-authenticated machine endpoints are exempt.
   app.use('/api', (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store')
-    const machine = req.path.startsWith('/inbound/') || req.path.startsWith('/webhooks/') || req.path.startsWith('/viasocket/events/')
+    const machine = req.path.startsWith('/inbound/') || req.path.startsWith('/webhooks/') || req.path.startsWith('/viasocket/events/') || req.path.startsWith('/evidence/events/')
     if (!machine && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.get('x-requested-with') !== 'TeamPulse') {
       return next(new AppError(403, 'csrf', 'Missing request header.'))
     }
@@ -247,7 +250,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     if (!out.phone || !m91.ready) return { ...out, m91: m91.ready ? null : 'not_configured' }
     try {
       const inv = await m91.invite(out.phone, `TeamPulse — ${req.user.name}`.slice(0, 80))
-      return { ...out, m91: inv.reachable ? 'reachable' : 'invited' }
+      return { ...out, m91: inv.state === 'channel' ? 'channel' : inv.reachable ? 'reachable' : 'invited' }
     } catch (error) {
       return { ...out, m91: 'invite_failed', m91Error: String(error.message).slice(0, 200) }
     }
@@ -438,6 +441,35 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   app.post('/api/tasks/:id/assessment/review', h((req) => { const ctx = member(req); measure.managerReview(db, ctx, req.params.id, req.body); return measure.getTaskAssessment(db, ctx, ai, req.params.id, aiModeNow) }))
   app.get('/api/assessments/:id', h((req) => measure.getAssessmentById(db, member(req), req.params.id)))
   app.get('/api/contribution/team', h((req) => measure.teamOverview(db, member(req), req.query)))
+  const limitWork = rateLimiter({ windowMs: 3600000, max: 6 })
+  app.post('/api/contribution/analyse', h((req) => { const ctx = member(req); limitWork(`work:${ctx.user.id}`); return measure.analyseWork(db, ctx, ai, aiModeNow, { userId: req.body?.userId }) }))
+  app.get('/api/contribution/intelligence', h((req) => measure.teamIntelligence(db, member(req), req.query)))
+
+  // ---------- sprint 2: external evidence ----------
+  const limitEvidenceIn = rateLimiter({ windowMs: 60000, max: 120 })
+  app.post('/api/evidence/events/:id', h((req) => {
+    limitEvidenceIn(`evidence:${req.params.id}`)
+    const auth = req.get('authorization') || ''
+    return receiveEvidenceEvent(db, req.params.id, auth.startsWith('Bearer ') ? auth.slice(7).trim() : null, req.body)
+  }))
+  app.get('/api/evidence/catalog', h((req) => { member(req); return { configured: vs.configured, apps: evidenceSources.catalog() } }))
+  app.get('/api/evidence/sources', h((req) => evidenceSources.listSources(db, member(req), { userId: req.query.userId })))
+  app.get('/api/evidence/scope-options', h((req) => evidenceSources.scopeOptions(db, vs, member(req), { app: req.query.app, connectionId: req.query.connectionId, parent: req.query.parent, search: req.query.search })))
+  app.post('/api/evidence/sources', h((req) => evidenceSources.createSource(db, vs, member(req), req.body, { appUrl: cfg.appUrl })))
+  app.post('/api/evidence/sources/:id/status', h((req) => evidenceSources.setSourceStatus(db, vs, member(req), req.params.id, req.body)))
+  app.get('/api/evidence/identities', h((req) => evidenceSources.listIdentities(db, member(req), req.query.userId || undefined)))
+  app.post('/api/evidence/identities', h((req) => evidenceSources.addIdentity(db, member(req), req.body)))
+  app.delete('/api/evidence/identities/:id', h((req) => evidenceSources.removeIdentity(db, member(req), req.params.id)))
+  app.get('/api/evidence', h((req) => evidenceSvc.listEvidence(db, member(req), req.query)))
+  app.get('/api/evidence/:id', h((req) => evidenceSvc.getEvidence(db, member(req), req.params.id)))
+  app.delete('/api/evidence/:id', h((req) => evidenceSvc.removeEvidence(db, member(req), req.params.id)))
+  app.post('/api/evidence/:id/links', h((req) => evidenceSvc.linkToTask(db, member(req), req.params.id, req.body)))
+  app.post('/api/evidence/:id/dispute', h((req) => evidenceSvc.disputeAttribution(db, member(req), req.params.id, req.body)))
+  app.post('/api/evidence/:id/attribution', h((req) => evidenceSvc.resolveAttribution(db, member(req), req.params.id, req.body)))
+  app.post('/api/evidence-links/:id', h((req) => evidenceSvc.decideLink(db, member(req), req.params.id, req.body)))
+  app.post('/api/evidence-links/:id/share', h((req) => evidenceSvc.setShare(db, member(req), req.params.id, req.body)))
+  app.get('/api/tasks/:id/external-evidence', h((req) => evidenceSvc.taskEvidence(db, member(req), req.params.id)))
+
   app.get('/api/contribution/people/:userId', h((req) => measure.personProfile(db, member(req), req.params.userId, req.query)))
 
   // ---------- scheduled jobs (Embarko schedules call these with CRON_SECRET) ----------
@@ -487,6 +519,8 @@ export async function runAlertJob({ db, vs, m91, cfg, ai = null }) {
     const sent = await alerts.processDeliveries(db, m91)
     const retried = await auto.retryFailedRuns(db, vs, { appUrl: cfg.appUrl })
     const analyses = ai ? recoverRuns(db, ai) : 0
+    const evidence = retryInbox(db)
+    const health = await evidenceSources.checkSourceHealth(db, vs).catch((e) => ({ checked: 0, error: e.message }))
     db.prepare(`INSERT INTO app_state (key, value, updated_at) VALUES ('alert_job_last', ?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(now(), now())
     let backup = null
     try { backup = await backupIfDue(db, cfg.dataDir) } catch (error) { console.error('[backup] failed:', error.message); backup = { error: error.message } }
@@ -497,7 +531,7 @@ export async function runAlertJob({ db, vs, m91, cfg, ai = null }) {
     const backupText = backup?.error ? `backup FAILED (${backup.error})`
       : backup ? `backup made (off-host ${backup.offsite}${backup.offsiteError ? `: ${backup.offsiteError}` : ''}; ${backup.restoreVerified ? 'restore verified' : `restore NOT verified: ${backup.restoreDetail}`})`
         : last ? `last backup ${last.at} (off-host ${last.offsite}; ${last.restoreVerifiedAt ? 'restore verified' : 'restore not verified'})` : 'no backup yet'
-    return { raised, sent, retried, replayed, analyses, text: `Alerts raised ${raised}; M91 sent ${sent.sent}, retrying ${sent.retrying}, failed ${sent.failed}, not configured ${sent.notConfigured}; automation retries ${retried.retried}; AI analyses resumed ${analyses}; outbox replayed ${replayed}; ${backupText}; ${stats}` }
+    return { raised, sent, retried, replayed, analyses, text: `Alerts raised ${raised}; M91 sent ${sent.sent}, retrying ${sent.retrying}, failed ${sent.failed}, not configured ${sent.notConfigured}; automation retries ${retried.retried}; AI analyses resumed ${analyses}; evidence events retried ${evidence.retried}; evidence sources checked ${health.checked}; outbox replayed ${replayed}; ${backupText}; ${stats}` }
   } finally {
     db.prepare(`UPDATE app_state SET value = ?, updated_at = ? WHERE key = 'alert_job_lease'`).run(new Date(0).toISOString(), now())
   }

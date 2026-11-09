@@ -2,13 +2,17 @@
 // references the model may cite (and nothing else), plus deterministic signals the guardrails rely on.
 // The pack is deterministic (no "now"), so identical inputs hash identically and are never analysed twice.
 //
-// Future phases add normalized external evidence (GitHub, Slack, Gmail, Calendar, Sheets via ViaSocket) through
-// EXTERNAL_SOURCES: each returns items of the same shape { kind, at, author, text, verified, source, href }.
-// None is wired in this phase: external activity is not collected and is never treated as proof of value.
+// External evidence (sprint 2: GitHub, Slack, Gmail, Calendar, Sheets via viaSocket) enters only through links to this
+// task that a person confirmed or that matched with high confidence (evidence/matching.js). It is grouped — a series of
+// commits or a message thread is one item, never counted one by one — and every item says who authored it relative
+// to the employee and whether it is an observed fact, someone's own account, or a reported figure. Unlinked evidence
+// by the employee from the task's period is offered as "candidates": the model may propose a match, never cite it.
 import { createHash } from 'node:crypto'
 import { json } from '../db.js'
+import { usableLinks } from '../evidence/matching.js'
 
-export const EXTERNAL_SOURCES = [] // (db, task, subjectId) => items; empty in phase 1 by design
+const APP_LABEL = { github: 'GitHub', slack: 'Slack', gmail: 'Gmail', 'google-calendar': 'Google Calendar', 'google-sheets': 'Google Sheets' }
+const MAX_CANDIDATES = 8
 
 const clip = (s, n = 1500) => (s == null ? null : String(s).length > n ? `${String(s).slice(0, n)}…` : String(s))
 const words = (s) => (s ? String(s).trim().split(/\s+/).filter((w) => /[a-z0-9]/i.test(w)).length : 0)
@@ -141,7 +145,7 @@ export function buildEvidencePack(db, task, subjectId) {
   for (const e of db.prepare(`SELECT e.*, t.title FROM task_events e JOIN tasks t ON t.id = e.task_id WHERE e.org_id = ? AND e.actor_id = ? AND e.type = 'comment' AND e.task_id != ? AND t.assignee_id IS NOT ? ORDER BY e.created_at LIMIT 10`).all(task.org_id, subjectId, task.id, subjectId)) {
     if (inWindow(e.created_at)) add('help', { at: e.created_at, author: 'employee', text: `Comment on a teammate's task "${clip(e.title, 120)}": ${clip(json(e.data, {}).body, 400)}` }, { label: `Helped on: ${e.title}`, taskId: e.task_id, href: `#/tasks/${e.task_id}` })
   }
-  for (const src of EXTERNAL_SOURCES) for (const it of src(db, task, subjectId) || []) add('external', it, { label: it.label || it.source, href: it.href || null })
+  const external = externalItems(db, task, subjectId, from, to, add)
 
   // Effort is context only (never rewarded): elapsed time and how many updates were posted.
   const effort = {
@@ -151,7 +155,7 @@ export function buildEvidencePack(db, task, subjectId) {
   }
 
   const regression = signals.reopened > 0 || signals.qualityConcerns.some((q) => !lastApproval || items.find((i) => i.ref === q.ref)?.at > lastApproval)
-  const substantiveWords = words(task.description) + words(task.expected_outcome) + items.filter((i) => ['update', 'comment', 'submission', 'review', 'context', 'impact', 'help'].includes(i.kind))
+  const substantiveWords = words(task.description) + words(task.expected_outcome) + items.filter((i) => ['update', 'comment', 'submission', 'review', 'context', 'impact', 'help', 'external'].includes(i.kind))
     .reduce((n, i) => n + words(i.text) + words(i.workSummary) + words(i.outcomeClaimed) + words(i.result) + words(i.workPerformed), 0)
 
   const pack = {
@@ -168,19 +172,71 @@ export function buildEvidencePack(db, task, subjectId) {
       blockersOutsideEmployeeControl: blockerContext.filter((b) => b.outside).map((b) => b.ref), openBlockers: blockerContext.filter((b) => b.status === 'OPEN').map((b) => b.ref),
       managerChangedDeadlineOrPriority: signals.managerChanges.length > 0, reassigned: signals.reassigned,
       verifiedImpactRecords: impacts.filter((i) => i.verification === 'VERIFIED').map((i) => i.ref),
-      sharedImpactRecords: impacts.filter((i) => i.others.length).map((i) => i.ref)
+      sharedImpactRecords: impacts.filter((i) => i.others.length).map((i) => i.ref),
+      externalByOthers: external.items.filter((x) => x.author !== 'employee').map((x) => x.ref),
+      candidateEvidence: external.candidates.map((x) => x.ref)
     },
-    effortContext: effort
+    effortContext: effort,
+    externalEvidenceNote: external.items.length || external.candidates.length ? 'External evidence: "system_recorded" items are facts recorded by the app (a commit exists, a PR was merged); "self_reported" items are what a person wrote; "reported_figure" values come from a spreadsheet and are not verified. Activity counts mean nothing: one commit or many, one message or many, say nothing about value. "candidate" items are NOT linked to this task: never cite them; you may only say in evidence_matches whether each seems to belong to it.' : undefined
   }
   const facts = {
     refs: { task: { kind: 'task', label: task.title, href: `#/tasks/${task.id}`, taskId: task.id }, ...refs },
     blockers: blockerContext, impacts, claims, effort, signals, regression, lastApproval,
-    evidenceItems: evidenceRefs.length, substantiveWords,
+    evidenceItems: evidenceRefs.length + external.items.filter((x) => x.author === 'employee' && x.verification === 'system_recorded').length, substantiveWords,
+    external: external.items, candidates: external.candidates,
     delivered: ['SUBMITTED_FOR_REVIEW', 'COMPLETED'].includes(task.status),
     blockedOutside: blockerContext.some((b) => b.outside && b.status === 'OPEN') || (task.status !== 'COMPLETED' && task.status !== 'SUBMITTED_FOR_REVIEW' && blockerContext.some((b) => b.outside)),
     period: { start: from, end: to || task.updated_at }
   }
   return { pack, facts }
+}
+
+/**
+ * Linked external evidence (grouped) and unlinked candidates. Grouping: commits by the same author in the same repository
+ * become one item; Slack messages in one thread become one item. Effort-like counts are kept out of the text.
+ */
+function externalItems(db, task, subjectId, from, to, add) {
+  const items = []
+  const links = usableLinks(db, task.id)
+  const authorOf = (e) => (e.actor_user_id === subjectId || (e.attribution === 'self' && e.collector_id === subjectId && !e.actor_user_id) ? 'employee'
+    : e.actor_user_id ? 'teammate' : e.attribution === 'external' ? 'external_person' : 'unknown')
+  const groups = new Map()
+  for (const e of links) {
+    const key = e.kind === 'commit' ? `commit:${e.actor_user_id || e.actor_identity}:${e.resource_ref}` : e.app === 'slack' ? `slack:${e.parent_ref || e.external_id}` : `one:${e.id}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(e)
+  }
+  for (const list of groups.values()) {
+    const e = list[0]
+    const meta = json(e.metadata_json, {})
+    const author = authorOf(e)
+    const many = list.length > 1
+    const authors = [...new Set(list.map(authorOf))]
+    const keepMeta = e.app === 'github' ? { merged: meta.merged ?? undefined, state: meta.state ?? undefined, linesChanged: meta.additions != null ? (meta.additions || 0) + (meta.deletions || 0) : undefined, filesChanged: meta.changedFiles ?? undefined, reviewersRequested: meta.reviewersRequested ?? undefined, path: meta.path ?? undefined }
+      : e.app === 'google-calendar' ? { role: meta.role, durationMinutes: meta.durationMinutes, attendees: Array.isArray(meta.attendees) ? meta.attendees.length : undefined }
+        : e.app === 'google-sheets' ? { values: meta.values, previousValues: meta.previous || undefined }
+          : e.app === 'gmail' ? { attachments: (meta.attachments || []).map((a) => a.filename).slice(0, 5) } : {}
+    const ref = add('external', {
+      at: e.occurred_at, author: authors.length === 1 ? author : 'several', app: APP_LABEL[e.app] || e.app, eventType: many ? `${e.kind} (series)` : e.kind,
+      verification: e.verification, linkedBy: e.link_status === 'confirmed' ? 'confirmed by a person' : `suggested automatically (${e.link_method}, ${Math.round(e.confidence * 100)}%)`,
+      title: clip(e.title, 200), text: many ? list.slice(0, 6).map((x) => `- ${clip(x.title || x.content, 160)}`).join('\n') : clip(e.content, 700),
+      sharedWithTaskOwner: e.share === 'shared', details: Object.fromEntries(Object.entries(keepMeta).filter(([, val]) => val !== undefined && val !== null))
+    }, { label: `${APP_LABEL[e.app] || e.app}: ${clip(e.title, 80) || e.kind}${many ? ' (series)' : ''}`, href: e.source_url || '#/evidence', evidenceIds: list.map((x) => x.id) })
+    items.push({ ref, author: authors.length === 1 ? author : 'several', verification: e.verification, evidenceIds: list.map((x) => x.id), app: e.app })
+  }
+  // Candidates: the employee's own active evidence from the task period, not linked anywhere and not rejected here.
+  const start = new Date(Date.parse(from) - 3 * 86400000).toISOString()
+  const end = new Date((to ? Date.parse(to) : Date.parse(task.updated_at)) + 3 * 86400000).toISOString()
+  const cands = db.prepare(`SELECT e.* FROM external_evidence e WHERE e.org_id = ? AND e.actor_user_id = ? AND e.status = 'active' AND e.attribution IN ('self','member') AND e.occurred_at BETWEEN ? AND ?
+                            AND NOT EXISTS (SELECT 1 FROM evidence_task_links l WHERE l.evidence_id = e.id AND (l.status = 'confirmed' OR (l.status = 'suggested' AND l.confidence >= 0.85) OR (l.task_id = ? AND l.status = 'rejected')))
+                            ORDER BY e.occurred_at DESC LIMIT ?`).all(task.org_id, subjectId, start, end, task.id, MAX_CANDIDATES)
+  const candidates = []
+  for (const e of cands) {
+    const ref = add('candidate', { at: e.occurred_at, app: APP_LABEL[e.app] || e.app, eventType: e.kind, title: clip(e.title, 160), text: clip(e.content, 300), note: 'Not linked to this task. Do not cite.' },
+      { label: `${APP_LABEL[e.app] || e.app}: ${clip(e.title, 80) || e.kind} (not linked)`, href: e.source_url || '#/evidence', evidenceId: e.id })
+    candidates.push({ ref, evidenceId: e.id })
+  }
+  return { items, candidates }
 }
 
 /** Not enough to assess anything: no description, a one-line completion note, no evidence, no outcome records. */

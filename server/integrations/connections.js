@@ -91,6 +91,8 @@ export async function disconnect(db, vs, ctx, id) {
       for (const { script_id } of db.prepare('SELECT script_id FROM enabled_apps WHERE user_id = ? AND auth_id = ?').all(ctx.user.id, row.auth_id)) await vs.setFlowStatus(ctx.user.id, script_id, 2)
       // Intake subscriptions on this account are paused first: a flow on a revoked connection fails on its next run.
       for (const { script_id } of db.prepare(`SELECT script_id FROM intake_subscriptions WHERE owner_id = ? AND connection_id = ? AND status = 'ACTIVE' AND script_id IS NOT NULL`).all(ctx.user.id, row.id)) await vs.setFlowStatus(ctx.user.id, script_id, 2)
+      // Evidence collection on this account stops too (sprint 2).
+      for (const { script_id } of db.prepare(`SELECT x.script_id FROM evidence_subscriptions x JOIN evidence_sources s ON s.id = x.source_id WHERE s.owner_id = ? AND s.connection_id = ? AND x.status = 'ACTIVE' AND x.script_id IS NOT NULL`).all(ctx.user.id, row.id)) await vs.setFlowStatus(ctx.user.id, script_id, 2)
       await vs.revokeConnection(ctx.user.id, row.auth_id)
     }
   } catch (error) {
@@ -99,6 +101,8 @@ export async function disconnect(db, vs, ctx, id) {
   transaction(db, () => {
     db.prepare('DELETE FROM enabled_apps WHERE user_id = ? AND auth_id = ?').run(ctx.user.id, row.auth_id)
     db.prepare(`UPDATE intake_subscriptions SET status = 'PAUSED', last_error = 'The connected account was disconnected.', updated_at = ? WHERE connection_id = ? AND status = 'ACTIVE'`).run(now(), row.id)
+    db.prepare(`UPDATE evidence_subscriptions SET status = 'PAUSED', updated_at = ? WHERE source_id IN (SELECT id FROM evidence_sources WHERE connection_id = ?) AND status = 'ACTIVE'`).run(now(), row.id)
+    db.prepare(`UPDATE evidence_sources SET status = 'NEEDS_RECONNECT', last_error = 'The connected account was disconnected.', updated_at = ? WHERE connection_id = ? AND status IN ('ACTIVE','PAUSED')`).run(now(), row.id)
     db.prepare(`UPDATE notification_prefs SET channel = 'none', connection_id = NULL, updated_at = ? WHERE connection_id = ?`).run(now(), row.id)
     db.prepare('DELETE FROM app_connections WHERE id = ?').run(row.id)
     for (const w of db.prepare(`SELECT * FROM automation_workflows WHERE org_id = ? AND owner_id = ?`).all(ctx.orgId, ctx.user.id)) {

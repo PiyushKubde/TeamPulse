@@ -8,9 +8,9 @@ export const RATED = ['impact', 'quality', 'ownership', 'problem_solving', 'coll
 export const LABELS = { complexity: 'Complexity', impact: 'Impact', quality: 'Quality', ownership: 'Ownership', problem_solving: 'Problem-solving', collaboration: 'Collaboration' }
 
 export const DEFAULT_RUBRIC = {
-  id: 'rubric-default-v1',
+  id: 'rubric-default-v2',
   key: 'default',
-  version: 'default-2026-11-v1',
+  version: 'default-2026-11-v2',
   roleScope: 'all',
   definition: {
     principle: 'Work volume is not work value. Assess what this piece of work actually involved and achieved, from evidence, not how many tasks were closed or how long it took.',
@@ -40,13 +40,17 @@ export const DEFAULT_RUBRIC = {
       'An estimate is not a verified outcome. Never invent numbers, tests, deployments or business results.',
       'Connected-app activity or message volume is not proof of valuable work.',
       'If the evidence does not support a judgement, say insufficient_evidence instead of guessing.',
-      'This is decision support for a manager, never a performance or employment decision.'
+      'This is decision support for a manager, never a performance or employment decision.',
+      'External activity is context, not output: a commit is not impact, a merged PR is not business success, a message is not a contribution, a meeting is not output, an email is not customer value, a spreadsheet value is not a verified result.',
+      'External evidence keeps its author: work by a teammate or someone outside the organization is never the employee\'s contribution, and a shared outcome is not credited in full to one person.'
     ]
   }
 }
 
 /** Seeds the built-in default rubric (idempotent). */
 export function seedRubrics(db) {
+  // Only the current built-in default stays active; older versions remain for the assessments made with them.
+  db.prepare(`UPDATE evaluation_rubrics SET is_active = 0 WHERE org_id IS NULL AND key = 'default' AND id != ?`).run(DEFAULT_RUBRIC.id)
   db.prepare(`INSERT INTO evaluation_rubrics (id, org_id, key, version, role_scope, definition, is_active, created_at)
               VALUES (?, NULL, ?, ?, ?, ?, 1, ?) ON CONFLICT (id) DO NOTHING`)
     .run(DEFAULT_RUBRIC.id, DEFAULT_RUBRIC.key, DEFAULT_RUBRIC.version, DEFAULT_RUBRIC.roleScope, JSON.stringify(DEFAULT_RUBRIC.definition), now())

@@ -8,12 +8,15 @@ import { canManageTask, isAdmin, isManager, managersForTask, requireManager, req
 import * as v from '../validate.js'
 import { audit } from '../services/audit.js'
 import { notifyInApp } from '../services/notify.js'
+import { raiseAlert } from '../services/alerts.js'
 import { CATEGORY_LABELS } from '../services/impact.js'
 import { DIMENSIONS, LABELS, RATED } from './rubric.js'
 import { aiStatus, requestAnalysis, PROMPT_VERSION } from './engine.js'
 import { buildEvidencePack, hashInput, isInsufficient } from './evidence-pack.js'
 import { GUARDRAIL_VERSION } from './guardrails.js'
 import { rubricFor } from './rubric.js'
+import { storeMatches } from '../evidence/matching.js'
+import { canSeeEvidence } from '../evidence/service.js'
 
 /** Resolves AI_MODE / AI_SUPERVISED_TASKS ("taskId:owner@email, …") into { mode, tasks: Map(taskId → email|null) }. */
 export function aiMode(cfg, provider) {
@@ -201,7 +204,11 @@ export function employeeRespond(db, ctx, taskId, body) {
       .run(uuid(), ctx.orgId, a.id, task.id, subjectId, ctx.user.id, action, dimension, fromLevel, toLevel, comment, ts)
     if (status) db.prepare('UPDATE contribution_assessments SET employee_status = ?, updated_at = ? WHERE id = ?').run(status, ts, a.id)
     audit(db, { orgId: ctx.orgId, actorId: ctx.user.id, action: `assessment.employee_${action.toLowerCase()}`, entityType: 'assessment', entityId: a.id, before: { employeeStatus: a.employee_status }, after: { employeeStatus: status || a.employee_status, dimension, fromLevel, toLevel, comment } })
-    if (action === 'PROPOSE_CORRECTION' || action === 'DISPUTE') {
+    if (action === 'DISPUTE') {
+      // A dispute is a human intervention: an alert (in-app, and M91 when the org turned that rule on).
+      raiseAlert(db, { orgId: ctx.orgId, rule: 'assessment_disputed', userIds: managersForTask(db, task).filter((m) => m !== ctx.user.id), taskId: task.id, title: `${ctx.user.name} disputes the analysis of “${task.title}”`, body: comment, link: `#/tasks/${task.id}`, anchor: `${a.id}:${ts}` })
+    }
+    if (action === 'PROPOSE_CORRECTION') {
       for (const m of managersForTask(db, task)) {
         if (m === ctx.user.id) continue
         notifyInApp(db, { orgId: ctx.orgId, userId: m, kind: 'assessment_feedback', title: `${ctx.user.name} ${action === 'DISPUTE' ? 'disputes' : 'proposes a correction to'} the analysis of “${task.title}”`, body: comment, link: `#/tasks/${task.id}`, taskId: task.id, dedupeKey: `assessment:${a.id}:${action}:${ts}` })
@@ -352,5 +359,71 @@ export function teamOverview(db, ctx, q = {}) {
     period: p, ordering: 'alphabetical', people: rows,
     team: { verifiedOutcomes: teamOutcomes.size, note: 'Shared outcomes are counted once for the team, however many people contributed.' },
     note: 'Listed alphabetically. Not a ranking: the number of tasks is not a measure of contribution. Open a person to see what their work involved and why.'
+  }
+}
+
+// ---------- sprint 2: whole-work analysis and team intelligence ----------
+
+const ANALYSE_LIMIT = 10
+/**
+ * "Analyse my work" (or a manager's "analyse this person"): refresh evidence matching for the person, then analyse each
+ * recent task through the normal path — same supervised gate, data-policy gate, dedupe (unchanged input = no call),
+ * reviewed-analysis protection and rate limit. Returns what happened per task; nothing is published anywhere.
+ */
+export function analyseWork(db, ctx, provider, mode, { userId } = {}) {
+  const subject = userId ? v.id(userId, 'Person', { required: true }) : ctx.user.id
+  if (subject !== ctx.user.id && !canReviewSubject(db, ctx, subject)) throw notFound('Person')
+  const since = new Date(Date.now() - 60 * 86400000).toISOString()
+  let rematched = 0
+  for (const e of db.prepare(`SELECT * FROM external_evidence WHERE org_id = ? AND actor_user_id = ? AND status = 'active' AND occurred_at >= ?`).all(ctx.orgId, subject, since)) rematched += storeMatches(db, e)
+  const tasks = db.prepare(`SELECT * FROM tasks WHERE org_id = ? AND assignee_id = ? AND status IN ('IN_PROGRESS','BLOCKED','SUBMITTED_FOR_REVIEW','COMPLETED') AND updated_at >= ? ORDER BY updated_at DESC LIMIT ?`)
+    .all(ctx.orgId, subject, new Date(Date.now() - 30 * 86400000).toISOString(), ANALYSE_LIMIT)
+  const results = []
+  for (const t of tasks) {
+    try {
+      const out = analyseTask(db, ctx, provider, t.id, { mode })
+      results.push({ taskId: t.id, title: t.title, status: out.status })
+    } catch (error) {
+      results.push({ taskId: t.id, title: t.title, status: 'not_analysed', code: error.code || 'error', reason: error.message })
+    }
+  }
+  return {
+    subject: userName(db, subject), tasks: results.length, rematched, results,
+    pendingConfirmations: db.prepare(`SELECT COUNT(*) AS n FROM evidence_task_links l JOIN external_evidence e ON e.id = l.evidence_id WHERE e.org_id = ? AND (l.contributor_id = ? OR e.actor_user_id = ?) AND l.status = 'suggested'`).get(ctx.orgId, subject, subject).n
+  }
+}
+
+/**
+ * Team Intelligence (managers): significant contributions with their reasons, open blockers (outside-control marked),
+ * evidence needing a decision, and per person the overview — never a ranking or an activity count.
+ */
+export function teamIntelligence(db, ctx, q = {}) {
+  requireManager(ctx)
+  const overview = teamOverview(db, ctx, q)
+  const ids = overview.people.map((p) => p.userId)
+  const ph = ids.map(() => '?').join(',')
+  const significant = ids.length ? db.prepare(`SELECT a.*, t.title AS task_title FROM contribution_assessments a JOIN tasks t ON t.id = a.task_id WHERE a.org_id = ? AND a.is_current = 1 AND a.user_id IN (${ph}) AND a.created_at >= ? ORDER BY a.created_at DESC LIMIT 200`).all(ctx.orgId, ...ids, overview.period.from) : []
+  const sig = []
+  for (const a of significant) {
+    const c = effectiveRow(db, a.id, 'complexity')
+    const imp = effectiveRow(db, a.id, 'impact')
+    const verified = (json(a.impact_json, {}).verified || []).length
+    if (!((c?.state === 'assessed' && c.level >= 3) || verified)) continue
+    const ctxj = json(a.context_json, {})
+    sig.push({
+      assessmentId: a.id, taskId: a.task_id, taskTitle: a.task_title, userId: a.user_id, name: userName(db, a.user_id), at: a.created_at,
+      complexity: c?.state === 'assessed' ? `L${c.level}` : null, complexityReason: c?.reason, impact: imp?.state === 'assessed' ? imp.level : null, verifiedOutcomes: verified,
+      externalEvidence: (ctxj.external || []).filter((x) => x.author === 'employee').length > 0, sharedWithOthers: (ctxj.external || []).some((x) => x.author === 'teammate') || (ctxj.shared || []).length > 0,
+      managerStatus: a.manager_status, employeeStatus: a.employee_status, simulated: Boolean(ctxj.simulated)
+    })
+  }
+  const blockers = ids.length ? db.prepare(`SELECT b.*, t.title AS task_title, t.assignee_id FROM blockers b JOIN tasks t ON t.id = b.task_id WHERE b.org_id = ? AND b.status = 'OPEN' AND t.assignee_id IN (${ph}) ORDER BY b.reported_at`).all(ctx.orgId, ...ids)
+    .map((b) => ({ id: b.id, taskId: b.task_id, taskTitle: b.task_title, userId: b.assignee_id, name: userName(db, b.assignee_id), description: b.description, outsideControl: Boolean(b.is_external) || Boolean(b.dependency_owner_id && b.dependency_owner_id !== b.assignee_id), since: b.reported_at, escalated: Boolean(b.escalated_at) })) : []
+  const review = db.prepare(`SELECT e.* FROM external_evidence e WHERE e.org_id = ? AND e.status = 'active' AND (e.attribution IN ('disputed','unknown') OR EXISTS (SELECT 1 FROM evidence_task_links l WHERE l.evidence_id = e.id AND l.share = 'shared' AND l.status = 'suggested')) ORDER BY e.occurred_at DESC LIMIT 100`).all(ctx.orgId)
+    .filter((e) => canSeeEvidence(db, ctx, e))
+  return {
+    ...overview, significant: sig.slice(0, 15), blockers,
+    evidenceReview: { disputed: review.filter((e) => e.attribution === 'disputed').length, unknownAuthor: review.filter((e) => e.attribution === 'unknown').length, sharedPending: review.filter((e) => !['disputed', 'unknown'].includes(e.attribution)).length },
+    note: 'Not a ranking. External activity (commits, messages, emails, meetings) is never counted; it only adds context to tasks people did.'
   }
 }

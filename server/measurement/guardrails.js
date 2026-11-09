@@ -6,7 +6,7 @@
 import { RATED } from './rubric.js'
 
 // Bump on any change to these rules: part of the dedupe hash, stored with every run and assessment.
-export const GUARDRAIL_VERSION = 'guardrails-2026-11-v4'
+export const GUARDRAIL_VERSION = 'guardrails-2026-11-v5'
 const LEVEL_OF = { L1: 1, L2: 2, L3: 3, L4: 4 }
 const SELF_CAP = 0.6
 
@@ -52,7 +52,7 @@ export function insufficientAssessment(facts, task) {
     impact: { ...impactBlock(facts, []), basis: impactBasis(facts) },
     missing: missingInfo(facts, task),
     notes: ['Rules: evidence below the minimum, so the AI was not asked (nothing to analyse, nothing guessed).'],
-    blockerNote: '', sharedNote: ''
+    blockerNote: '', sharedNote: '', observed: [], matches: []
   }
 }
 
@@ -77,7 +77,11 @@ export function applyGuardrails(output, { pack, facts, task }) {
   const corroborates = (ref) => {
     const it = itemOf.get(ref)
     if (!it) return false
-    if (['evidence', 'blocker', 'event', 'help', 'external'].includes(it.kind)) return true
+    if (it.kind === 'candidate') return false
+    // External evidence: an observed fact recorded by the app (a commit, a merged PR) or someone else's words
+    // corroborate; the employee's own messages and emails are their account, like a progress note.
+    if (it.kind === 'external') return it.verification === 'system_recorded' || it.author !== 'employee'
+    if (['evidence', 'blocker', 'event', 'help'].includes(it.kind)) return true
     if (it.kind === 'review') return Boolean(it.text)
     if (it.kind === 'impact') return it.verification === 'verified' || it.evidenceItems > 0
     return it.author !== 'employee' && !it.selfReported
@@ -85,7 +89,10 @@ export function applyGuardrails(output, { pack, facts, task }) {
   const selfReported = (ref) => !corroborates(ref)
   const corpus = evidenceText(pack)
   const cleanRefs = (list, where) => {
-    const ok = [...new Set(list.filter((r) => known.has(r)))]
+    // Candidates are unlinked evidence: never citable, however the model uses them.
+    const cand = list.filter((r) => kindOf(r) === 'candidate')
+    if (cand.length) notes.push(`Removed ${cand.length} citation(s) of evidence not linked to this task (${where}).`)
+    const ok = [...new Set(list.filter((r) => known.has(r) && kindOf(r) !== 'candidate'))]
     const bad = list.filter((r) => !known.has(r))
     if (bad.length) notes.push(`Removed ${bad.length} reference(s) the AI cited that do not exist in the evidence (${where}).`)
     return ok
@@ -125,6 +132,18 @@ export function applyGuardrails(output, { pack, facts, task }) {
     if (x.state !== 'assessed') x.level = null
     dims[k] = x
   }
+
+  // The employee's own contribution is never rated from other people's work: ownership, problem-solving and
+  // collaboration that cite only external evidence authored by someone else are not ratings.
+  for (const k of ['ownership', 'problem_solving', 'collaboration', 'quality']) {
+    const d = dims[k]
+    if (d.state === 'assessed' && d.refs.length && d.refs.every((r) => kindOf(r) === 'external' && itemOf.get(r)?.author !== 'employee')) {
+      notes.push(`${k.replace('_', '-')} cited only other people's external evidence; marked insufficient.`)
+      Object.assign(d, { state: 'insufficient_evidence', level: null })
+    }
+  }
+  // Impact may never rest on a spreadsheet figure alone: reported, not verified.
+  if (dims.impact.state === 'assessed' && dims.impact.refs.length && dims.impact.refs.every((r) => itemOf.get(r)?.verification === 'reported_figure')) lower(dims.impact, 2, 'impact cited only spreadsheet figures, which are reported, not verified.')
 
   // High problem-solving / collaboration ratings need something beyond the employee's own account (ownership is
   // exempt: the employee's own progress updates and blocker reports ARE evidence of ownership).
@@ -179,6 +198,16 @@ export function applyGuardrails(output, { pack, facts, task }) {
     estimated.push({ text: e.description, refs: cleanRefs(e.basis_refs, 'estimated outcome'), label: 'AI estimate — not verified' })
   }
 
+  // Observed facts: each must rest on a citable reference; matches: only for candidate refs.
+  const observed = []
+  for (const f of output.observed_facts || []) {
+    const refsOk = [...new Set((f.refs || []).filter((r) => known.has(r) && kindOf(r) !== 'candidate'))]
+    if (refsOk.length) observed.push({ fact: f.fact, refs: refsOk })
+  }
+  if ((output.observed_facts || []).length > observed.length) notes.push(`Dropped ${(output.observed_facts || []).length - observed.length} "observed fact(s)" without valid evidence.`)
+  const matches = (output.evidence_matches || []).filter((m) => kindOf(m.ref) === 'candidate' && m.relevant)
+    .map((m) => ({ ref: m.ref, evidenceId: facts.refs[m.ref].evidenceId, reason: String(m.reason).slice(0, 300) }))
+
   const all = [complexity, ...Object.values(dims)]
   const insufficient = all.filter((d) => d.state === 'insufficient_evidence').length
   return {
@@ -191,6 +220,7 @@ export function applyGuardrails(output, { pack, facts, task }) {
     missing: [...new Set([...output.missing_information, ...missingInfo(facts, task)])].slice(0, 12),
     notes,
     blockerNote: output.blocker_note,
-    sharedNote: output.shared_contribution_note
+    sharedNote: output.shared_contribution_note,
+    observed, matches
   }
 }

@@ -27,7 +27,7 @@ async function profile(sb) {
   renderMyNotifications(sb.querySelector('#my-notif'))
   renderSignInMethods(sb.querySelector('#signin'))
   bindForm(sb.querySelector('#pf'), (d) => api('/api/profile', { method: 'PATCH', body: { phone: d.phone || null } }), { onSuccess: (out) => {
-    const M = { reachable: 'Saved. M91 can reach this phone.', invited: 'Saved. Accept the TeamPulse invitation in the M91 app to receive urgent alerts.', invite_failed: `Saved, but the M91 invitation failed: ${out.m91Error || ''}` }
+    const M = { channel: 'Saved. Urgent alerts go to your team’s M91 channel — ask your admin to add this phone there in the M91 app.', reachable: 'Saved. M91 can reach this phone.', invited: 'Saved. Accept the TeamPulse invitation in the M91 app to receive urgent alerts.', invite_failed: `Saved, but the M91 invitation failed: ${out.m91Error || ''}` }
     toast(M[out.m91] || 'Saved.'); reloadSession()
   } })
 }

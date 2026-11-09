@@ -18,9 +18,17 @@ const dim = (desc) => ({
 
 export const OUTPUT_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['understanding', 'complexity', 'dimensions', 'contribution_summary', 'estimated_outcomes', 'missing_information', 'blocker_note', 'shared_contribution_note'],
+  required: ['understanding', 'observed_facts', 'complexity', 'dimensions', 'contribution_summary', 'estimated_outcomes', 'missing_information', 'blocker_note', 'shared_contribution_note', 'evidence_matches'],
   properties: {
     understanding: { type: 'string', description: 'What the work was and what was done, in 2-4 plain sentences, from the evidence only.' },
+    observed_facts: {
+      type: 'array', description: 'Facts the evidence records, each with its refs — no interpretation (e.g. "PR #42 was merged", "the manager requested changes"). Interpretation belongs in the reasons.',
+      items: { type: 'object', additionalProperties: false, required: ['fact', 'refs'], properties: { fact: { type: 'string' }, refs } }
+    },
+    evidence_matches: {
+      type: 'array', description: 'Only for items of kind "candidate": whether each seems to belong to this task. Proposals for a person to confirm; never evidence.',
+      items: { type: 'object', additionalProperties: false, required: ['ref', 'relevant', 'reason'], properties: { ref: { type: 'string' }, relevant: { type: 'boolean' }, reason: { type: 'string' } } }
+    },
     complexity: {
       type: 'object', additionalProperties: false, required: ['state', 'level', 'confidence', 'reason', 'evidence_refs'],
       properties: {
@@ -73,7 +81,13 @@ function checkDim(d, path, levels) {
 
 /** Throws with a precise message when the output does not match the schema. */
 export function validateOutput(o) {
+  // Sprint 2 fields: answers from earlier prompt versions (and test doubles) without them are read as "none".
+  if (o && typeof o === 'object' && !Array.isArray(o)) { o.observed_facts ??= []; o.evidence_matches ??= [] }
   checkKeys(o, OUTPUT_SCHEMA.required, 'output')
+  if (!Array.isArray(o.observed_facts) || o.observed_facts.length > 20) throw new Error('observed_facts must be a short list')
+  o.observed_facts.forEach((x, i) => { checkKeys(x, ['fact', 'refs'], `observed_facts[${i}]`); if (!isStr(x.fact) || x.fact.length > 500) throw new Error('a fact must be short text'); checkRefs(x.refs, `observed_facts[${i}].refs`) })
+  if (!Array.isArray(o.evidence_matches) || o.evidence_matches.length > 20) throw new Error('evidence_matches must be a short list')
+  o.evidence_matches.forEach((x, i) => { checkKeys(x, ['ref', 'relevant', 'reason'], `evidence_matches[${i}]`); if (!isStr(x.ref) || typeof x.relevant !== 'boolean' || !isStr(x.reason)) throw new Error(`evidence_matches[${i}] is invalid`) })
   for (const k of ['understanding', 'contribution_summary', 'blocker_note', 'shared_contribution_note']) if (!isStr(o[k]) || o[k].length > 4000) throw new Error(`output.${k} must be text`)
   checkDim(o.complexity, 'complexity', ['L1', 'L2', 'L3', 'L4', 'none'])
   checkKeys(o.dimensions, ['impact', 'quality', 'ownership', 'problem_solving', 'collaboration'], 'dimensions')
