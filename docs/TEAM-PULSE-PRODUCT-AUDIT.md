@@ -585,3 +585,18 @@ Design: [docs/work-intelligence.md](work-intelligence.md). This sprint adds no n
 | `npm audit` | 0 vulnerabilities |
 | Credential scan of changed files | clean. The M91 send link is not in the repo |
 | Live AI write-up, live viaSocket triggers, live M91 | **not run**. Stand-ins only; the policy gate and supervised mode are unchanged |
+
+
+# Production deployment of the final sprint (2026-11-09, 12:06 UTC)
+
+| Check | Result |
+| --- | --- |
+| Deployed | `e991fc7` (`claude/teampulse-mvp`, clean tree) → Embarko v12. `currentDeployment.appVersion = e991fc7`, status success. Before: v11 = `538b4b6` |
+| Tests on `e991fc7` before deploying | `npm test` 125/125, all four e2e suites pass, lint clean |
+| Backup before deploying | Owner accepted the newest verified backup: 09:11:47 UTC, encrypted off-host copy `teampulse-backup-2026-11-09T09-11-44-867Z.gz` (23 030 bytes), restore check passed in production. Embarko has no data-export API and the app backs up daily, so no newer backup could be made without a code change. Row counts were identical at deploy time |
+| Migrations | 006 (rebuilds `users`, keeping every column and row), 007, 008, 009: each in its own transaction. Rehearsed on a database built by `538b4b6`: users, Google subjects, sessions and memberships kept; `integrity_check` ok; `foreign_key_check` empty; not re-run on a restart |
+| Start-up | Clean log, no errors; storage at `DATA_DIR`; `/api/health` ok, database ok |
+| Data after deploying | Automatic alert run at 12:15:41 UTC on v12 finished `ok`: 1 org, 2 users, 0 tasks (unchanged); backup record readable; signals ran (0 opened) |
+| Unauthenticated production checks | Page and new view scripts 200; new APIs 401; cron 401; evidence webhook without a token 401; dev login off; Google sign-in redirects to Google; sign-in page fits desktop and phone, no console errors |
+| AI and M91 | AI provider not configured, so `aiMode` is off (no AI calls possible); viaSocket policy gate closed; M91 not configured; no env vars or alert rules changed; no alert sent |
+| **Not verified in production** | Every signed-in journey (needs the owner's Google accounts); live GitHub, Slack, Gmail, Calendar and Sheets events; live AI; live M91 |
