@@ -6,7 +6,8 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'node:crypto'
 import { gzipSync, gunzipSync } from 'node:zlib'
 import { DatabaseSync } from 'node:sqlite'
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { now, uuid } from '../db.js'
 
@@ -90,7 +91,12 @@ export function embarkoStorage(env = process.env, fetchImpl = fetch) {
       if (!res.ok) throw new Error(`list ${res.status}`)
       return (await res.json()).files || []
     },
-    async remove(id) { await fetchImpl(`${base}/apps/${app}/files/${id}`, { method: 'DELETE', headers: auth }) }
+    async remove(id) { await fetchImpl(`${base}/apps/${app}/files/${id}`, { method: 'DELETE', headers: auth }) },
+    async download(url) {
+      const res = await fetchImpl(url)
+      if (!res.ok) throw new Error(`download ${res.status}`)
+      return Buffer.from(await res.arrayBuffer())
+    }
   }
 }
 
@@ -113,20 +119,35 @@ export async function makeBackup(db, dataDir, { encryptionKey = process.env.BACK
   if (encryptionKey && storage) {
     try {
       const out = await storage.put(`teampulse-backup-${ts}.enc`, encrypt(archive, encryptionKey))
-      offsite = { status: 'uploaded', id: out.id || null, error: null }
+      offsite = { status: 'uploaded', id: out.id || null, error: null, url: out.url || null }
       const old = (await storage.list()).filter((f) => /^teampulse-backup-.*\.enc$/.test(f.filename)).slice(KEEP)
       for (const f of old) await storage.remove(f.id)
     } catch (error) {
       offsite = { status: 'failed', id: null, error: String(error.message).slice(0, 200) }
     }
   }
-  db.prepare(`INSERT INTO backups (id, file, sha256, size_bytes, rows_summary, offsite_id, offsite_status, offsite_error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(id, file, sha(archive), archive.length, JSON.stringify({ ...rows, uploads: uploads.length }), offsite.id, offsite.status, offsite.error, now())
+  // Prove the off-host copy restores: download it back, decrypt with the configured key, restore into a temporary
+  // folder, check integrity and compare row counts with the snapshot. The key never leaves the server.
+  let restore = { ok: false, detail: offsite.status === 'uploaded' ? null : 'no off-host copy to check' }
+  if (offsite.status === 'uploaded' && offsite.url && storage.download) {
+    const tmp = mkdtempSync(join(tmpdir(), 'tp-restore-check-'))
+    try {
+      const back = unpackArchive(decrypt(await storage.download(offsite.url), encryptionKey))
+      writeFileSync(join(tmp, 'teampulse.db'), back.db)
+      const restored = verifySnapshot(join(tmp, 'teampulse.db'))
+      const same = JSON.stringify(restored) === JSON.stringify(rows) && back.uploads.length === uploads.length
+      restore = { ok: same, detail: same ? `restored from Embarko storage: integrity ok, ${restored.tasks} task(s), ${back.uploads.length} file(s) match` : 'restored copy does not match the snapshot' }
+    } catch (error) {
+      restore = { ok: false, detail: `restore check failed: ${String(error.message).slice(0, 150)}` }
+    } finally { rmSync(tmp, { recursive: true, force: true }) }
+  }
+  db.prepare(`INSERT INTO backups (id, file, sha256, size_bytes, rows_summary, offsite_id, offsite_status, offsite_error, restore_verified_at, restore_detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, file, sha(archive), archive.length, JSON.stringify({ ...rows, uploads: uploads.length }), offsite.id, offsite.status, offsite.error, restore.ok ? now() : null, restore.detail, now())
   // Local retention: newest KEEP archives.
   const archives = readdirSync(dir).filter((f) => f.endsWith('.tpbackup')).sort().reverse()
   for (const f of archives.slice(KEEP)) rmSync(join(dir, f), { force: true })
-  console.log(`[backup] ${file}: ${archive.length} bytes, ${rows.tasks} task(s), ${uploads.length} file(s); off-host ${offsite.status}${offsite.error ? ` (${offsite.error})` : ''}`)
-  return { file, rows, uploads: uploads.length, offsite: offsite.status, offsiteError: offsite.error }
+  console.log(`[backup] ${file}: ${archive.length} bytes, ${rows.tasks} task(s), ${uploads.length} file(s); off-host ${offsite.status}${offsite.error ? ` (${offsite.error})` : ''}; ${restore.ok ? 'restore VERIFIED' : `restore not verified (${restore.detail})`}`)
+  return { file, rows, uploads: uploads.length, offsite: offsite.status, offsiteError: offsite.error, restoreVerified: restore.ok, restoreDetail: restore.detail }
 }
 
 /** Daily: a backup when the newest is older than 23 hours. */
@@ -138,5 +159,5 @@ export async function backupIfDue(db, dataDir, opts) {
 
 export function lastBackup(db) {
   const b = db.prepare('SELECT * FROM backups ORDER BY created_at DESC LIMIT 1').get()
-  return b ? { at: b.created_at, file: b.file, offsite: b.offsite_status, rows: JSON.parse(b.rows_summary) } : null
+  return b ? { at: b.created_at, file: b.file, offsite: b.offsite_status, restoreVerifiedAt: b.restore_verified_at, restoreDetail: b.restore_detail, rows: JSON.parse(b.rows_summary) } : null
 }

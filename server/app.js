@@ -440,7 +440,9 @@ export async function runAlertJob({ db, vs, m91, cfg }) {
     // Row counts (no data) let the operator confirm the database persisted across restarts from the schedule history.
     const count = (t) => db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n
     const stats = `db: ${count('organizations')} org(s), ${count('users')} user(s), ${count('tasks')} task(s), ${count('task_requests')} request(s), ${count('impact_records')} impact record(s)`
-    const backupText = backup?.error ? `backup FAILED (${backup.error})` : backup ? `backup made (off-host ${backup.offsite})` : last ? `last backup ${last.at} (off-host ${last.offsite})` : 'no backup yet'
+    const backupText = backup?.error ? `backup FAILED (${backup.error})`
+      : backup ? `backup made (off-host ${backup.offsite}${backup.offsiteError ? `: ${backup.offsiteError}` : ''}; ${backup.restoreVerified ? 'restore verified' : `restore NOT verified: ${backup.restoreDetail}`})`
+        : last ? `last backup ${last.at} (off-host ${last.offsite}; ${last.restoreVerifiedAt ? 'restore verified' : 'restore not verified'})` : 'no backup yet'
     return { raised, sent, retried, replayed, text: `Alerts raised ${raised}; M91 sent ${sent.sent}, retrying ${sent.retrying}, failed ${sent.failed}, not configured ${sent.notConfigured}; automation retries ${retried.retried}; outbox replayed ${replayed}; ${backupText}; ${stats}` }
   } finally {
     db.prepare(`UPDATE app_state SET value = ?, updated_at = ? WHERE key = 'alert_job_lease'`).run(new Date(0).toISOString(), now())

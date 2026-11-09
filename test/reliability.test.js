@@ -43,9 +43,13 @@ test('backups: verified snapshot + evidence, encrypted off-host upload, retentio
     mkdirSync(join(t.cfg.dataDir, 'uploads', s.org.id), { recursive: true })
     writeFileSync(join(t.cfg.dataDir, 'uploads', s.org.id, 'x.txt'), 'evidence bytes')
     const uploaded = []
-    const storage = { put: async (name, bytes) => { uploaded.push({ name, bytes }); return { id: `f${uploaded.length}` } }, list: async () => uploaded.map((u, i) => ({ id: `f${i + 1}`, filename: u.name })).reverse(), remove: async () => {} }
+    const storage = { put: async (name, bytes) => { uploaded.push({ name, bytes }); return { id: `f${uploaded.length}`, url: `mem://f${uploaded.length}` } }, list: async () => uploaded.map((u, i) => ({ id: `f${i + 1}`, filename: u.name })).reverse(), remove: async () => {}, download: async (url) => uploaded[Number(url.slice(7)) - 1].bytes }
     const out = await makeBackup(t.db, t.cfg.dataDir, { encryptionKey: 'test-key-123', storage })
     assert.equal(out.rows.tasks, 1); assert.equal(out.uploads, 1); assert.equal(out.offsite, 'uploaded')
+    assert.equal(out.restoreVerified, true, out.restoreDetail)
+    // A corrupted off-host copy is caught by the restore check.
+    const bad = { ...storage, download: async () => Buffer.from('TPB1garbage-garbage-garbage-garbage-garbage-garbage') }
+    assert.equal((await makeBackup(t.db, t.cfg.dataDir, { encryptionKey: 'test-key-123', storage: bad })).restoreVerified, false)
     const enc = uploaded[0].bytes
     assert.equal(enc.includes(Buffer.from('Back me up')), false, 'off-host copy is encrypted')
     assert.throws(() => decrypt(enc, 'wrong-key'))
@@ -73,9 +77,9 @@ test('the scheduled job reports row counts (persistence check) and makes the dai
     seedOrg(t.db)
     const r = await t.call('/tasks/alerts', { headers: { Authorization: 'Bearer test-cron-secret' } })
     assert.match(r.text, /db: 2 org\(s\), 7 user\(s\), 0 task\(s\)/)
-    assert.match(r.text, /backup made \(off-host not_configured\)/)
+    assert.match(r.text, /backup made \(off-host not_configured; restore NOT verified: no off-host copy to check\)/)
     const r2 = await t.call('/tasks/alerts', { headers: { Authorization: 'Bearer test-cron-secret' } })
-    assert.match(r2.text, /last backup .* \(off-host not_configured\)/)
+    assert.match(r2.text, /last backup .* \(off-host not_configured; restore not verified\)/)
     assert.equal(t.db.prepare('SELECT COUNT(*) AS n FROM backups').get().n, 1)
   } finally { await t.close() }
 })
