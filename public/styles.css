@@ -235,3 +235,5 @@ ul.plain { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4p
   table.dims tr { border-bottom: 1px solid var(--border); padding: 8px 10px; }
   table.dims td { border: 0; padding: 2px 0; }
 }
+.pack-preview { max-height: 50vh; overflow: auto; font-size: 11.5px; background: var(--surface-2); padding: 10px; border-radius: var(--radius-sm); white-space: pre-wrap; word-break: break-word; }
+.badge.wrap { white-space: normal; border-radius: var(--radius-sm); }

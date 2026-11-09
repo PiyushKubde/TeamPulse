@@ -10,7 +10,8 @@ const MGR = { PENDING: ['Not reviewed by a manager', 'outline'], APPROVED: ['App
 const ACTION_TEXT = { CONFIRM: 'confirmed the analysis', PROPOSE_CORRECTION: 'proposed a correction', ADD_CONTEXT: 'added context', DISPUTE: 'disputed the analysis', APPROVE: 'approved the analysis', ADJUST: 'adjusted a level', MANAGER_DISPUTE: 'disputed the analysis' }
 const DIM_KEYS = [['complexity', 'Complexity'], ['impact', 'Impact'], ['quality', 'Quality'], ['ownership', 'Ownership'], ['problem_solving', 'Problem-solving'], ['collaboration', 'Collaboration']]
 
-const pct = (c) => (c == null ? '' : `${Math.round(c * 100)}% confidence`)
+const pct = (c) => (c == null ? '' : `model-reported confidence ${Math.round(c * 100)}%`)
+const BASIS = { verified: ['Impact level backed by a manager-verified outcome', 'ok'], evidence_supported: ['Impact level is an estimate: the outcome record has evidence but is not verified yet', 'info'], claimed: ['Impact level is an estimate from the employee\'s own claims — nothing verified', 'warn'], none: ['No outcome recorded: impact cannot be judged', 'outline'] }
 const dots = (level, max = 5) => html`<span class="dots" aria-label="level ${level} of ${max}">${Array.from({ length: max }, (_, i) => html`<i class="${i < level ? 'on' : ''}"></i>`)}</span>`
 const evidenceChips = (list) => (list?.length ? html`<div class="chips">${list.map((e) => e.href ? html`<a class="chip" href="${e.href}" ${e.href.startsWith('http') ? raw('target="_blank" rel="noopener noreferrer"') : ''}>${e.label}</a>` : html`<span class="chip">${e.label}</span>`)}</div>` : '')
 const levelCell = (dim) => dim.state !== 'assessed'
@@ -32,6 +33,9 @@ export async function renderAssessmentCard(box, taskId) {
       ${v.available && v.can.analyse ? html`<button class="btn small ${a ? 'ghost' : ''}" id="ai-analyse" ${running ? raw('disabled') : ''}>${analyseLabel}</button>` : ''}</div>
     ${!v.available ? html`<p class="muted small">${v.reason}</p>` : ''}
     ${v.available && !v.ai.configured && !a ? html`<div class="notice">AI analysis is not set up on this server yet. Work with very little information is still checked by rules; for full analysis an administrator must configure an AI provider.</div>` : ''}
+    ${v.available && v.ai.configured && v.ai.mode === 'supervised' ? html`<div class="notice">${v.ai.selectedForSupervisedTest ? html`<b>Supervised live-AI validation.</b> This task is selected for a supervised test with ${v.ai.model}. Only an administrator can start it; no automatic runs and no notifications.` : html`AI analysis is in <b>supervised validation</b>: only tasks selected by an administrator are analysed for now.`}</div>` : ''}
+    ${v.available && v.ai.configured && v.ai.mode === 'off' ? html`<div class="notice">AI analysis is switched off on this server.</div>` : ''}
+    ${v.available && v.can.preview && v.ai.configured && !v.ai.simulated ? html`<p class="small" style="margin:0 0 8px"><button class="btn link" id="ai-preview">See exactly what would be sent to the AI</button></p>` : ''}
     ${running ? html`<div class="notice" role="status"><span class="spinner" aria-hidden="true"></span> Analysing the work and its evidence… this usually takes under a minute.</div>` : ''}
     ${failed ? html`<div class="notice err" role="alert"><b>The last analysis failed.</b> ${v.run.error || ''} ${v.can.analyse ? html`<button class="btn small ghost" id="ai-again">Try again</button>` : ''}</div>` : ''}
     ${a ? assessmentBody(a, v) : v.available && !running && !failed ? html`<p class="muted small">${v.isMine ? 'No analysis yet. It runs automatically when you submit the work, or press “Analyse my work”.' : 'No analysis yet. It runs automatically when the work is submitted.'}</p>` : ''}`.toString()
@@ -45,6 +49,17 @@ export async function renderAssessmentCard(box, taskId) {
     } catch (e) { toast(errorText(e), { error: true }); btn.disabled = false }
   }
   box.querySelector('#ai-analyse')?.addEventListener('click', (e) => start(e.currentTarget))
+  box.querySelector('#ai-preview')?.addEventListener('click', async () => {
+    try {
+      const p = await api(`/api/tasks/${taskId}/assessment/preview`)
+      modal(html`<h2 id="modal-title">What would be sent to the AI</h2>
+        <p class="small">${p.insufficient ? 'Too little evidence: rules would answer and the AI would not be called.' : `Provider ${p.provider} · model ${p.model} · ${Math.ceil(p.bytes / 1024)} KB of task data.`} Built from TeamPulse data only: ${p.externalSources} external sources, ${p.filesOpened} files opened. Names are left out.</p>
+        ${p.blockedBy ? html`<div class="notice warn small">${p.blockedBy}</div>` : ''}
+        <p class="small muted">Items: ${Object.entries(p.itemCounts).map(([k, n]) => `${n} ${k}`).join(' · ') || 'none'} · prompt ${p.promptVersion} · ${p.guardrailVersion} · rubric ${p.rubricVersion}</p>
+        <pre class="pack-preview">${JSON.stringify(p.pack, null, 2)}</pre>
+        <div class="row end"><button class="btn" data-close>Close</button></div>`.toString())
+    } catch (e) { toast(errorText(e), { error: true }) }
+  })
   box.querySelector('#ai-again')?.addEventListener('click', (e) => start(e.currentTarget))
   if (running) setTimeout(() => { if (box.isConnected) reload() }, 3000)
   if (a) bindActions(box, a, v, taskId, reload)
@@ -63,7 +78,9 @@ function assessmentBody(a, v) {
       <span class="badge ${a.evidenceState === 'sufficient' ? 'ok' : a.evidenceState === 'partial' ? 'warn' : 'bad'}">${a.evidenceState === 'sufficient' ? 'Enough evidence' : a.evidenceState === 'partial' ? 'Partly enough evidence' : 'Not enough evidence'}</span>
       <span class="badge ${EMP[a.employeeStatus][1]}">${EMP[a.employeeStatus][0]}</span><span class="badge ${MGR[a.managerStatus][1]}">${MGR[a.managerStatus][0]}</span>
       ${a.simulated ? html`<span class="badge warn" title="AI_PROVIDER=mock">Simulated — development only, not AI</span>` : ''}
-      ${a.provider === 'rules' ? html`<span class="badge outline">Rules only (no AI call)</span>` : ''}</div>
+      ${a.provider === 'rules' ? html`<span class="badge outline">Rules only (no AI call)</span>` : ''}
+      ${a.live ? html`<span class="badge brand" title="Generated by ${a.model}">Live AI · ${a.model}</span>` : ''}
+      ${a.fallback ? html`<span class="badge warn" title="The requested model declined; the answer came from a fallback model">Fallback: ${a.requestedModel} → ${a.model}</span>` : ''}</div>
     <div class="ai-understood"><div class="small muted">What TeamPulse understood</div><p>${a.understanding || '—'}</p>
       ${a.summary ? html`<div class="small muted" style="margin-top:6px">Contribution</div><p>${a.summary}</p>` : ''}</div>
     <div class="table-wrap" style="margin-top:12px"><table class="dims"><thead><tr><th>Dimension</th><th>Level</th><th>Why</th></tr></thead><tbody>
@@ -73,6 +90,7 @@ function assessmentBody(a, v) {
           ${x.adjustments.map((j) => html`<div class="small" style="margin-top:2px">${j.by} set ${j.levelText}${x.key === 'complexity' ? '' : '/5'} ${ago(j.at)}: “${j.reason}”</div>`)}</td></tr>`)}
     </tbody></table></div>
     <h3 style="margin:16px 0 8px">Impact: claimed, estimated, supported, verified</h3>
+    ${imp.basis ? html`<p class="small" style="margin:-4px 0 8px"><span class="badge wrap ${BASIS[imp.basis][1]}">${BASIS[imp.basis][0]}</span></p>` : ''}
     <div class="impact-grid">
       ${col('Claimed', 'The employee\'s own account', imp.claimed, 'outline')}
       ${col('AI-estimated', 'Likely, not verified', imp.estimated, 'warn')}
@@ -93,8 +111,10 @@ function assessmentBody(a, v) {
       <span class="small muted">You make the judgement; the analysis only explains the work.</span></div>` : ''}
     ${a.feedback.length || v.history.length ? html`<details style="margin-top:12px" ${a.feedback.some((f) => f.actorRole === 'employee' && f.action !== 'CONFIRM') && v.can.review ? raw('open') : ''}><summary class="small">History (${a.feedback.length} response${a.feedback.length === 1 ? '' : 's'}${v.history.length ? `, ${v.history.length} earlier analysis${v.history.length === 1 ? '' : 'es'}` : ''})</summary>
       <ul class="timeline" style="margin-top:6px">${a.feedback.map((f) => html`<li><div><b>${f.by}</b> ${ACTION_TEXT[f.action]}${f.dimensionLabel ? html` — ${f.dimensionLabel} ${f.fromLevel ?? '—'} → ${f.toLevel}` : ''}${f.comment ? html`: “${f.comment}”` : ''}</div><div class="when">${ago(f.at)}</div></li>`)}
-      ${v.history.map((h) => html`<li><div class="muted">Earlier analysis (${h.provider}${h.model ? ` · ${h.model}` : ''}) — kept unchanged</div><div class="when">${ago(h.createdAt)}</div></li>`)}</ul></details>` : ''}
-    <p class="small muted" style="margin-top:10px">${a.provider === 'rules' ? 'Rules' : `${a.simulated ? 'Simulated analyser' : 'AI'}: ${a.provider}${a.model ? ` · ${a.model}` : ''}`} · rubric ${a.rubricVersion} · prompt ${a.promptVersion} · ${ago(a.createdAt)}. Decision support, not a performance decision.</p>`
+      ${v.history.map((h) => html`<li><div class="muted">Earlier analysis (${h.provider}${h.model ? ` · ${h.model}` : ''}) — kept unchanged</div>
+        ${(h.responses || []).map((f) => html`<div class="small">On that analysis, <b>${f.by}</b> ${ACTION_TEXT[f.action]}${f.dimensionLabel ? html` — ${f.dimensionLabel} ${f.fromLevel ?? '—'} → ${f.toLevel}` : ''}${f.comment ? html`: “${f.comment}”` : ''}</div>`)}
+        <div class="when">${ago(h.createdAt)}</div></li>`)}</ul></details>` : ''}
+    <p class="small muted" style="margin-top:10px">${a.provider === 'rules' ? 'Rules' : `${a.simulated ? 'Simulated analyser' : 'AI'}: ${a.provider}${a.model ? ` · ${a.model}` : ''}`} · rubric ${a.rubricVersion} · prompt ${a.promptVersion}${a.guardrailVersion ? ` · ${a.guardrailVersion}` : ''} · ${ago(a.createdAt)}. Confidence is reported by the model and not yet calibrated. Decision support, not a performance decision.</p>`
 }
 
 function levelForm(dimHint) {
