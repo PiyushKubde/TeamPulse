@@ -2,6 +2,7 @@ import { api, html, raw, esc, modal, bindForm, toast, errorText, confirmDialog, 
 import { app } from '../app.js'
 import { eventText } from './dashboard.js'
 import { openContextBuilder } from './automations.js'
+import { renderAssessmentCard } from './contribution.js'
 
 let assignableCache = null
 async function assignable() {
@@ -159,6 +160,7 @@ export async function renderTaskDetail(main, id) {
           </div>`)}
           ${t.status === 'COMPLETED' ? html`<p class="small muted" style="margin-top:10px">Completion is not the same as impact. ${t.isMine ? html`<a href="#/impact?new=1&taskId=${t.id}">Record the outcome this delivered</a> so it can be verified.` : ''}</p>` : ''}
         </section>` : ''}
+        ${t.assigneeId ? html`<section class="card" id="ai-card" aria-live="polite">${raw('<div class="loading">Loading the contribution analysis…</div>')}</section>` : ''}
         <section class="card"><div class="card-head"><h2>Activity and comments</h2></div>
           <ul class="timeline">${d.events.map((e) => html`<li><div><b>${e.actorName || 'System'}</b> ${eventText(e)}</div><div class="when">${dt(e.createdAt)}</div></li>`)}</ul>
           <form id="comment" class="row" style="margin-top:8px;align-items:flex-start"><div class="grow" style="flex:1"><label for="c-body" class="sr" style="position:absolute;left:-999px">Comment</label><textarea id="c-body" name="body" rows="2" required maxlength="4000" placeholder="Write a comment…" style="min-height:44px"></textarea></div><button class="btn ghost" type="submit">Comment</button></form>
@@ -184,6 +186,8 @@ export async function renderTaskDetail(main, id) {
       </div>
     </div>`
 
+  const aiCard = main.querySelector('#ai-card')
+  if (aiCard) renderAssessmentCard(aiCard, id)
   const reload = () => renderTaskDetail(main, id).catch((e) => toast(errorText(e), { error: true }))
   const run = async (fn, msg) => { try { await fn(); if (msg) toast(msg); app.refreshCounts(); reload() } catch (e) { toast(errorText(e), { error: true }) } }
   bindForm(main.querySelector('#comment'), (b) => api(`/api/tasks/${id}/comments`, { method: 'POST', body: b }), { onSuccess: reload })

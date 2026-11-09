@@ -1,4 +1,4 @@
-import { api, html, avatar, ago, dt, statusBadge, prioBadge, conditionBadges, progressBar, verifyBadge, empty, bindForm, toast, requestBadge } from '../ui.js'
+import { api, html, avatar, ago, dt, statusBadge, prioBadge, conditionBadges, progressBar, verifyBadge, empty, bindForm, toast, requestBadge, errorText } from '../ui.js'
 import { app } from '../app.js'
 import { openTaskForm } from './tasks.js'
 
@@ -46,6 +46,17 @@ export async function renderDashboard(main) {
     ${personalSection(p, !m)}
   `
   document.getElementById('new-task').addEventListener('click', () => openTaskForm())
+  const cd = document.getElementById('contrib-dash')
+  if (cd) {
+    api(`/api/contribution/team?from=${encodeURIComponent(new Date(Date.now() - 30 * 86400000).toISOString())}`).then((t) => {
+      const box = cd.querySelector('.loading')
+      const needs = t.people.filter((p) => p.awaitingYourReview || p.disputes)
+      box.outerHTML = (t.people.some((p) => p.analysed)
+        ? html`<p class="small muted" style="margin-bottom:8px">Last 30 days: ${t.people.reduce((n, p) => n + p.analysed, 0)} piece(s) of work analysed; ${t.team.verifiedOutcomes} verified team outcome(s) (shared ones counted once).</p>
+          ${needs.length ? html`<ul class="list">${needs.map((p) => html`<li><div class="grow"><a href="#/contribution/${p.userId}"><b>${p.name}</b></a></div>${p.awaitingYourReview ? html`<span class="badge warn">${p.awaitingYourReview} to review</span>` : ''}${p.disputes ? html`<span class="badge warn">${p.disputes} disputed</span>` : ''}</li>`)}</ul>` : html`<p class="small">Nothing waiting for your review.</p>`}`
+        : empty('No analysed work yet', 'Work is analysed when it is submitted for review.')).toString()
+    }).catch((e) => { cd.querySelector('.loading').outerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString() })
+  }
   const f = document.getElementById('reflection')
   if (f) bindForm(f, (d) => api('/api/reflections', { method: 'PUT', body: { day: p.reflection.day, ...d } }), { onSuccess: (r) => { toast('Reflection saved.'); document.getElementById('refl-saved').textContent = `Saved ${ago(r.savedAt)}` } })
 }
@@ -82,6 +93,8 @@ function managerSection(m) {
         <div class="row" style="margin-top:4px">${p.reasons.map((r) => html`<span class="badge ${r.severity >= 3 ? 'bad' : r.severity === 2 ? 'warn' : 'outline'}">${r.text}</span>`)}</div></div></li>`)}</ul>`
         : empty('Nobody looks stuck', 'No one has overdue, blocked, stalled or unusually heavy work right now.')}
     </section>
+    <section class="card" style="margin-top:16px" aria-labelledby="ca-h" id="contrib-dash"><div class="card-head"><div><h2 id="ca-h">Contribution analysis</h2><p>What people's work involved — complexity, quality, ownership and verified impact, with reasons. Not a ranking.</p></div><a class="btn small ghost" href="#/contribution">Open</a></div>
+      <div class="loading">Loading…</div></section>
     <div class="grid two" style="margin-top:16px">
       <section class="card" aria-labelledby="wl-h"><div class="card-head"><div><h2 id="wl-h">Team workload</h2><p>Open work per person — a planning view, not a performance measure</p></div></div>
         ${m.workload.length ? html`<div class="table-wrap"><table><thead><tr><th>Person</th><th class="num">Active</th><th class="num">Blocked</th><th class="num">Due ≤3d</th><th class="num">Overdue</th><th class="num hide-sm">Review</th></tr></thead><tbody>
@@ -133,7 +146,7 @@ function personalSection(p, solo) {
       </section>
     </div>
     <div class="grid two" style="margin-top:16px">
-      <section class="card"><div class="card-head"><div><h2>My contributions and impact</h2><p>What changed because of your work</p></div><a class="btn small" href="#/impact?new=1">Record an outcome</a></div>
+      <section class="card"><div class="card-head"><div><h2>My contributions and impact</h2><p>What changed because of your work</p></div><div class="row"><a class="btn small ghost" href="#/contribution/${app.me.id}">My contribution analysis</a><a class="btn small" href="#/impact?new=1">Record an outcome</a></div></div>
         ${p.impact.length ? html`<ul class="list">${p.impact.map((r) => html`<li><div class="grow"><a href="#/impact/${r.id}"><b>${r.title}</b></a><div class="small muted">${r.categoryLabel}</div></div>${verifyBadge(r.verificationStatus)}</li>`)}</ul>`
           : empty('No outcomes recorded yet', 'Record a contribution: the problem, what you did, and what changed.')}
       </section>

@@ -9,6 +9,7 @@ import { renderAutomations } from './views/automations.js'
 import { renderAlerts } from './views/alerts.js'
 import { renderReports } from './views/reports.js'
 import { renderSettings } from './views/settings.js'
+import { renderContribution, renderPerson } from './views/contribution.js'
 
 const ICONS = {
   dashboard: 'M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z',
@@ -86,6 +87,8 @@ const ROUTES = [
   [/^#\/requests$/, 'requests', () => renderRequests],
   [/^#\/impact$/, 'impact', () => renderImpact],
   [/^#\/impact\/([0-9a-f-]{36})$/, 'impact', (m) => (main) => renderImpactDetail(main, m[1])],
+  [/^#\/contribution$/, 'impact', () => renderContribution],
+  [/^#\/contribution\/([0-9a-f-]{36})$/, 'impact', (m) => (main, q) => renderPerson(main, m[1], q)],
   [/^#\/automations$/, 'automations', () => renderAutomations],
   [/^#\/alerts$/, 'alerts', () => renderAlerts],
   [/^#\/reports$/, 'reports', () => renderReports],
