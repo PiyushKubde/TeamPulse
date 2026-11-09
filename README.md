@@ -22,6 +22,7 @@ TeamPulse helps managers see what each person is working on, what is pending, bl
 | Alerts | In-app notifications for every alert rule; configurable thresholds; M91 phone alerts (Platform API) with retries, history, answers read back from M91, and automatic close on resolution. |
 | Contribution analysis | AI work measurement: per-task complexity (L1–L4) and five dimensions with reasons, evidence and confidence; claimed vs estimated vs verified impact; employee confirm/correct/dispute; manager approve/adjust/dispute with history. Deterministic guardrails; never a score or ranking. See [docs/ai-work-measurement.md](docs/ai-work-measurement.md). |
 | Work evidence | GitHub, Slack, Gmail, Google Calendar, Google Sheets evidence from each person's own connections (viaSocket triggers), attributed by identity, matched to tasks (rules; AI only proposes), used in on-demand analyses; Team intelligence for managers. See [docs/work-evidence.md](docs/work-evidence.md). |
+| Work intelligence | AI Work Assistant ("Analyse my day", questions answered from records, optional AI write-up when `AI_MODE=on`), contribution journeys from request to outcome, Manager Copilot, Contribution Reviews, proactive signals with dismiss/resolve history. See [docs/work-intelligence.md](docs/work-intelligence.md). |
 | Automation Center | ViaSocket: curated Connected Apps (Slack, Gmail, GitHub, Google Calendar, Google Sheets), three ready-made automations, and the full ViaSocket Embed builder. |
 
 ## Stack and decisions

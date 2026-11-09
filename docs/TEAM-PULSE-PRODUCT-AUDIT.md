@@ -546,3 +546,42 @@ Design: [docs/work-evidence.md](work-evidence.md). M91 channel mode: [docs/integ
 | `test:e2e`, `test:e2e:auth`, `test:e2e:measurement`, `test:e2e:evidence` (incl. phone width) | pass |
 | `eval:measurement --dry-run` | 14/14 |
 | Live viaSocket triggers, live AI, live M91 | **not run**: stand-ins and real webhook deliveries only |
+
+
+# Final sprint — AI Work Operating System (2026-11-09, feature branch, not deployed)
+
+Design: [docs/work-intelligence.md](work-intelligence.md). This sprint adds no new data collection, provider or credential.
+
+## Built
+
+| Scope item | Result |
+| --- | --- |
+| Employee AI Work Assistant | "Analyse my day": done, delivered, moved forward, blocked, meaningful contributions with reasons, missing context and next priorities. Fixed-intent questions with linked answers. Optional AI write-up only with `AI_MODE=on`. |
+| AI Contribution Graph | One journey per task across 10 stages, from source request to evidence to verified outcome. Shows contributors, what is missing, possible links (confirm or reject), "not part of this work" and related work. |
+| Manager AI Copilot | Team questions in Team Intelligence: today and this week, complex work solved, blocked and why, verified outcomes, reviews, delays, who needs help, attention. Contribution Reviews page. |
+| Proactive signals | 9 rule-based kinds stored in `work_signals` (migration 009): deduplicated, resolve themselves, reopen when the condition returns, dismissal needs a reason, history and audit kept. Shown on dashboards ("Where to intervene", "Today"), in the Assistant and in Reviews. |
+| viaSocket feels native | "Connected apps" as three steps: connect, choose what to collect, analyse. Evidence appears in journeys, the day digest and answers. |
+| M91 for interventions | Existing rules unchanged. New `impact_verification_needed` for significant unverified outcomes (in-app by default). Signals never page directly. |
+| Navigation by role | Manager: team-first, then a "My work" section. Employee: work, evidence, assistant, contributions. |
+| Fairness and privacy | No counts, ranks or scores. External blockers are marked and not penalised. Shared work is counted once. Weak matches need a person's confirmation. Team data needs manager scope; other orgs return 404. |
+
+## Bugs found by the tests and fixed
+
+1. The question box id rendered as `q-` because the template helper renders `false` as empty. The form is now keyed `mine`/`team`.
+2. Evidence chips overflowed a phone screen by about 520px. Inline chips ignore `max-width`, so they are now inline-block in a wrapping row.
+3. Journey contributors were filtered by visibility, which hid co-contributors on work the viewer could see.
+4. e2e selectors still used the old nav labels (Team Tasks, Performance) and an ambiguous "Ready-made automations" text.
+
+## Validation (actual)
+
+| Check | Result |
+| --- | --- |
+| `npm test` | **125/125**, including 6 new intelligence tests: day digest, questions, journey, copilot scoping, signals lifecycle, AI write-up gates |
+| `test:e2e` | pass (new navigation) |
+| `test:e2e:auth` | pass |
+| `test:e2e:measurement` | pass |
+| `test:e2e:evidence` | pass. Extended with: Analyse my day, questions (focus, find evidence, unknown question), journey timeline, Copilot "who is blocked", Reviews with signal dismissal plus a reason, "Where to intervene", and phone-width checks for the assistant, journey, contributions, reviews and dashboard |
+| `eval:measurement --dry-run` | 14 cases, all as expected (draft expectations, not an accuracy measure) |
+| `npm audit` | 0 vulnerabilities |
+| Credential scan of changed files | clean. The M91 send link is not in the repo |
+| Live AI write-up, live viaSocket triggers, live M91 | **not run**. Stand-ins only; the policy gate and supervised mode are unchanged |
