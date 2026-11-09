@@ -54,10 +54,10 @@ export function seedOrg(db) {
   return { org, leadershipTeam, admin, manager, manager2, teamA, teamB, employee, employee2, outsider, otherAdmin, otherOrg }
 }
 
-export async function startApp({ vs = { configured: false }, m91 = createM91Transport({}), cfgOverrides = {}, google } = {}) {
+export async function startApp({ vs = { configured: false }, m91 = createM91Transport({}), cfgOverrides = {}, google, mailer } = {}) {
   const db = openDatabase(':memory:')
   const cfg = loadConfig({ dataDir: mkdtempSync(join(tmpdir(), 'teampulse-test-')), cronSecret: 'test-cron-secret', devLogin: false, appUrl: 'https://teampulse.test', ...cfgOverrides })
-  const app = createApp({ db, cfg, vs, m91, ...(google ? { google } : {}) })
+  const app = createApp({ db, cfg, vs, m91, ...(google ? { google } : {}), ...(mailer ? { mailer } : {}) })
   const server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)) })
   const base = `http://127.0.0.1:${server.address().port}`
   const call = async (path, { method = 'GET', body, as, headers = {}, raw } = {}) => {
@@ -69,7 +69,7 @@ export async function startApp({ vs = { configured: false }, m91 = createM91Tran
     const text = await res.text()
     let parsed = null
     try { parsed = text ? JSON.parse(text) : null } catch { parsed = text }
-    return { status: res.status, body: parsed, text, headers: res.headers }
+    return { status: res.status, body: parsed, text, headers: res.headers, cookie: res.headers.get('set-cookie')?.split(';')[0] || null }
   }
   const close = () => new Promise((r) => { app.locals.stopListening(); server.close(r) })
   return { db, cfg, app, base, call, close, settled }

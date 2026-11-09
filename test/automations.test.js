@@ -267,7 +267,7 @@ test('migration 003 keeps existing automations and their run history (table rebu
   db.prepare(`INSERT INTO automation_use_cases (key, name, description, updated_at) VALUES ('weekly_team_report','W','d',?)`).run(ts)
   db.prepare(`INSERT INTO automation_workflows (id, org_id, use_case_key, owner_id, status, config, created_at, updated_at) VALUES ('w1','o1','weekly_team_report','u1','ACTIVE','{}',?,?)`).run(ts, ts)
   db.prepare(`INSERT INTO automation_execution_logs (id, org_id, workflow_id, use_case_key, trigger, status, started_at) VALUES ('l1','o1','w1','weekly_team_report','schedule','SUCCEEDED',?)`).run(ts)
-  assert.deepEqual(migrate(db), ['003_viasocket_automations.sql', '004_outbox.sql', '005_backup_restore_check.sql'])
+  assert.deepEqual(migrate(db), ['003_viasocket_automations.sql', '004_outbox.sql', '005_backup_restore_check.sql', '006_email_password_auth.sql'])
   assert.equal(db.prepare('SELECT workflow_id FROM automation_execution_logs').get().workflow_id, 'w1', 'run history still points at its automation')
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM automation_workflows').get().n, 1)
   assert.equal(db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1)
