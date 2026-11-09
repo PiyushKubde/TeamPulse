@@ -8,8 +8,8 @@ TeamPulse helps managers see what each person is working on, what is pending, bl
 
 | Area | What works |
 | --- | --- |
-| Sign-in | Continue with Google (OAuth 2.0 / OpenID Connect, PKCE, state, nonce, RS256 ID-token verification). Identity = Google `sub`. |
-| Organizations | Create an organization (creator becomes admin), invitations bound to a Google-verified email, join-by-code with manager/admin approval. No role is ever granted from an email domain. |
+| Sign-in | Continue with Google (OAuth 2.0 / OpenID Connect, PKCE, state, nonce, RS256 ID-token verification), and email + password (Argon2id, email verification, reset, lockout) once an email provider is configured. See [docs/email-auth.md](docs/email-auth.md). |
+| Organizations | Create an organization (creator becomes admin), invitations bound to a verified email, join-by-code with manager/admin approval. No role is ever granted from an email domain. |
 | Roles | Admin, Manager, Employee — enforced on the server for every route. Managers see only the teams they manage; other organizations are invisible (404). |
 | Tasks | Full CRUD, assignment/reassignment, priorities, start/due dates, links, statuses `ASSIGNED → IN_PROGRESS → BLOCKED → SUBMITTED_FOR_REVIEW → COMPLETED`, `CANCELLED`, reopen/restore as recorded events. Overdue and at-risk are **derived**. |
 | Permissions | Per-employee `can_create_tasks`, `can_create_directly`, `can_self_assign`, `can_assign_others`, `approval_required`; every change audited. |
@@ -72,6 +72,7 @@ Then sign in as `manager@demo.teampulse`, `admin@demo.teampulse`, or employees `
 | `npm run migrate` | Apply pending migrations and exit |
 | `npm test` | Unit + API tests (`node:test`, in-memory database) |
 | `npm run test:e2e` | Browser journeys in Chromium (Playwright) against a temporary server |
+| `npm run test:e2e:auth` | Browser journeys for email/password sign-in (mail through a local SMTP sink) |
 | `npm run lint` | ESLint |
 | `npm run seed:demo` | Demo organization for local development |
 
@@ -81,7 +82,8 @@ Every secret comes from environment variables; see [.env.example](.env.example).
 
 | Integration | Needed for | Without it |
 | --- | --- | --- |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Signing in | The login page says sign-in is not configured |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Google sign-in | The login page says Google sign-in is not configured |
+| `MAIL_PROVIDER`, `MAIL_FROM`, `SMTP_*` (or `MAIL_VIASOCKET_*`) | Email/password sign-up, verification, password reset | Only Google sign-in is offered; email sign-up says it is unavailable |
 | `VIASOCKET_ORG_ID`, `VIASOCKET_PROJECT_ID`, `VIASOCKET_EMBED_SECRET` | Connected apps, Slack/Gmail delivery, builder | Automation Center shows it is not configured; external requests and in-app alerts still work |
 | `M91_API_KEY`, `M91_CALLBACK_TOKEN` | M91 phone alerts | Alerts are in-app only |
 
@@ -96,7 +98,7 @@ server/
   index.js            boot: config, database, integrations, HTTP
   app.js              routes, middleware (security headers, CSRF guard, rate limits, sessions), scheduled-job routes
   access.js           roles, scopes, task visibility — the authorization core
-  auth/               Google OIDC and sessions
+  auth/               Google OIDC, email/password accounts, password hashing, mailer, sessions
   services/           orgs, permissions, tasks, requests, impact, evidence, alerts, reports, dashboards
   integrations/       viaSocket gateway, connections, actions; M91 transport
   automations/        ready-made automations engine
