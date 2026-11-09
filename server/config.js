@@ -50,6 +50,8 @@ export function loadConfig(overrides = {}) {
       provider: (env.AI_PROVIDER || '').toLowerCase(),
       apiKey: env.ANTHROPIC_API_KEY || '',
       model: env.AI_MODEL || 'claude-opus-5-5',
+      viasocketService: env.AI_VIASOCKET_SERVICE || 'anthropic',
+      viasocketModel: env.AI_VIASOCKET_MODEL || 'claude-sonnet-5-5',
       effort: env.AI_EFFORT || 'medium',
       timeoutMs: Number(env.AI_TIMEOUT_MS) || 120000,
       fallbacks: env.AI_FALLBACKS !== 'off',

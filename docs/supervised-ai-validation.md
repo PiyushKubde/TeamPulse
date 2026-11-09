@@ -21,15 +21,17 @@ With a real provider configured, `AI_MODE` defaults to **supervised**:
 ## Before the test
 
 1. Pick one task, ideally completed with good evidence, and note its id and the owner's email.
-2. On the task page, as an admin, click "See exactly what would be sent to the AI". This calls the preview endpoint, which makes no AI call and writes nothing. Check the content is acceptable to send to Anthropic, and check `wouldCallModel: true`.
+2. On the task page, as an admin, click "See exactly what would be sent to the AI". This calls the preview endpoint, which makes no AI call and writes nothing. Check the content is acceptable to send to viaSocket AI (and Anthropic, if the backup is set), and check `wouldCallModel: true`.
 3. Take a backup (the scheduled job makes a daily verified one).
 
 ## Configuration (Embarko → App setup → Environment, set by the owner)
 
 ```
-AI_PROVIDER=anthropic
-ANTHROPIC_API_KEY=<owner-provided key>
-AI_MODEL=claude-opus-5-5
+AI_PROVIDER=viasocket                 # viaSocket built-in AI (uses the existing VIASOCKET_* keys)
+AI_VIASOCKET_SERVICE=anthropic
+AI_VIASOCKET_MODEL=claude-sonnet-5-5
+ANTHROPIC_API_KEY=<owner-provided key> # backup if viaSocket AI fails (optional)
+AI_MODEL=claude-opus-5-5              # backup model
 AI_MODE=supervised
 AI_SUPERVISED_TASKS=<task-uuid>:<owner@email>
 # optional: AI_EFFORT=medium, AI_TIMEOUT_MS=120000, AI_FALLBACKS=on
@@ -37,15 +39,17 @@ AI_SUPERVISED_TASKS=<task-uuid>:<owner@email>
 
 The feature branch must be deployed first. That deploys migration 007, which is additive, and needs the owner's approval.
 
-The startup log should say: `AI work analysis: anthropic, model claude-opus-5-5; mode supervised (1 selected task(s))`.
+The startup log should say: `AI work analysis: viasocket, model anthropic/claude-sonnet-5-5; backup anthropic claude-opus-5-5; mode supervised (1 selected task(s))`.
+
+Before the test, ask viaSocket how long AI threads are kept and whether they are used for training: every analysis is stored there as a thread.
 `/api/health` should show `ai: configured`, `aiMode: supervised`.
 
 ## The test
 
-1. As an admin, open the task. The card says the task is selected for a supervised test with `claude-opus-5-5`.
+1. As an admin, open the task. The card says the task is selected for a supervised test.
 2. Press **Analyse this work**. It usually takes under a minute, and the card refreshes itself.
 3. Check:
-   - The card shows "Live AI · claude-opus-5-5", or a fallback badge naming the model that answered.
+   - The card shows "Live AI · viaSocket AI · anthropic/claude-sonnet-5-5", or "viaSocket AI failed — answered by the anthropic backup".
    - Every evidence chip links to something real on the task.
    - "Rules TeamPulse applied" is reasonable.
    - Nothing is claimed that the task does not show.

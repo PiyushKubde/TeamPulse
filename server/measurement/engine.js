@@ -112,14 +112,14 @@ export async function processRun(db, provider, runId) {
     let result
     let output
     for (let i = 0; i < 2; i++) { // one more try when the answer does not validate
-      result = await provider.generate({ system: systemPrompt(rubric), user: userPrompt(pack), schema: OUTPUT_SCHEMA })
+      result = await provider.generate({ system: systemPrompt(rubric), user: userPrompt(pack), schema: OUTPUT_SCHEMA, validate: validateOutput, context: { orgId: task.org_id, runId } })
       try { output = validateOutput(result.output); break } catch (error) {
         if (i === 1) throw new ProviderError('invalid_output', `The AI answer did not match the required structure: ${error.message}`, false)
       }
     }
     const assessed = applyGuardrails(output, { pack, facts, task })
     const assessmentId = transaction(db, () => {
-      const aid = storeAssessment(db, { run, task, subjectId: run.subject_user_id, facts, pack, assessed, provider, model: result.model, fallback: result.fallback })
+      const aid = storeAssessment(db, { run, task, subjectId: run.subject_user_id, facts, pack, assessed, provider: { ...provider, name: result.provider || provider.name }, model: result.model, fallback: result.fallback })
       db.prepare(`UPDATE ai_evaluation_runs SET status = 'SUCCEEDED', error = NULL, model = ?, output_json = ?, guardrails_json = ?, usage_json = ?, latency_ms = ?, assessment_id = ?, finished_at = ?, updated_at = ? WHERE id = ?`)
         .run(result.model || run.model, JSON.stringify(output), JSON.stringify({ version: GUARDRAIL_VERSION, notes: assessed.notes }),
           JSON.stringify({ ...(result.usage || {}), requestedModel: run.model, fallback: result.fallback || null, requestId: result.requestId || null }), Date.now() - started, aid, now(), now(), runId)

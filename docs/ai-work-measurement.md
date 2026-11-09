@@ -68,8 +68,9 @@ Every adjustment is listed under "Rules TeamPulse applied" on the card.
 
 | Variable | Meaning |
 | --- | --- |
-| `AI_PROVIDER` | `anthropic` for real analysis. `mock` = simulated keyword analyser for local development and demos — refused in production and labelled "Simulated — development only, not AI" everywhere |
-| `ANTHROPIC_API_KEY` | Server-side key (never sent to the browser) |
+| `AI_PROVIDER` | `viasocket` (recommended): viaSocket's built-in AI via the existing `VIASOCKET_*` keys, with Anthropic as the backup when `ANTHROPIC_API_KEY` is also set. `anthropic`: Anthropic only. `mock` = simulated keyword analyser for local development and demos — refused in production and labelled "Simulated — development only, not AI" everywhere |
+| `AI_VIASOCKET_SERVICE`, `AI_VIASOCKET_MODEL` | Model viaSocket runs; default `anthropic` / `claude-sonnet-5-5` (viaSocket's docs say `claude-opus-5-5` ignores `json_schema` there) |
+| `ANTHROPIC_API_KEY` | Server-side key (never sent to the browser). With `AI_PROVIDER=viasocket` it is the backup: any viaSocket failure — an error, a timeout, prose instead of JSON, or an answer that fails validation — is retried once on Anthropic in the same run, and the card says "viaSocket AI failed — answered by the anthropic backup" |
 | `AI_MODEL` | Default `claude-opus-5-5` |
 | `AI_EFFORT` | `low` · `medium` (default) · `high` |
 | `AI_TIMEOUT_MS` | Default 120000 |
@@ -77,7 +78,15 @@ Every adjustment is listed under "Rules TeamPulse applied" on the card.
 | `AI_MODE` | `off` · `supervised` (default with a real provider: only `AI_SUPERVISED_TASKS`, admins only, no automatic runs, no notifications) · `on` (automatic on submit/approve) |
 | `AI_SUPERVISED_TASKS` | `taskId:owner-email,…` — see [supervised-ai-validation.md](supervised-ai-validation.md) |
 
-Calls use the official SDK (`@anthropic-ai/sdk` 1.3.0, pinned; it sends the key as a bearer credential and API
+**viaSocket AI** (`user.ai.send`, viasocket-apps 0.19): one call per analysis under the identifier
+`teampulse-ai-<orgId>` (not an employee's chat), a fresh thread id each time so no earlier analysis leaks in, our
+system prompt per call, `json_schema` output, no tools, and an explicit "do not browse" instruction (viaSocket's web
+tools cannot be switched off). Known limits from viaSocket's docs: every call is stored as a thread (no delete
+endpoint, no published retention or training statement — confirm with viaSocket before analysing real employee
+work); the sync reply names neither the model nor token usage, so the model is recorded as requested and marked
+unconfirmed.
+
+**Anthropic** calls use the official SDK (`@anthropic-ai/sdk` 1.3.0, pinned; it sends the key as a bearer credential and API
 version `2026-10-21`; no sampling or thinking-budget parameters are sent — Claude Opus 5.5 always uses adaptive
 thinking). The client is built with an explicit key, base URL, `logLevel: 'warn'` and OpenTelemetry off, so
 environment variables cannot redirect, log or trace evaluation data. Structured outputs (`output_config.format` +

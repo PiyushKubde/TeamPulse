@@ -6,6 +6,7 @@
 //
 //   node scripts/eval-measurement.mjs --dry-run                       build packs, check the dataset; no model calls
 //   node scripts/eval-measurement.mjs --provider=simulated            exercise the harness with the dev simulator
+//   node scripts/eval-measurement.mjs --provider=viasocket --confirm-live [--no-backup]   viaSocket AI (+ Anthropic backup if key set)
 //   AI_PROVIDER=anthropic ANTHROPIC_API_KEY=… \
 //   node scripts/eval-measurement.mjs --provider=anthropic --repeats=3 --confirm-live   real model (costs money)
 //
@@ -24,6 +25,7 @@ import { upsertGoogleUser } from '../server/auth/google.js'
 import { createOrganization } from '../server/services/orgs.js'
 import { createM91Transport } from '../server/integrations/m91.js'
 import { createAiProvider } from '../server/ai/provider.js'
+import { createViasocketGateway } from '../server/integrations/viasocket.js'
 import { buildEvidencePack, isInsufficient } from '../server/measurement/evidence-pack.js'
 import { OUTPUT_SCHEMA, validateOutput } from '../server/measurement/schema.js'
 import { applyGuardrails, insufficientAssessment, GUARDRAIL_VERSION } from '../server/measurement/guardrails.js'
@@ -44,6 +46,10 @@ if (!dry) {
   if (providerName === 'anthropic') {
     if (!args['confirm-live']) { console.error('Refusing to call the live API without --confirm-live (it costs money and sends the fictional dataset to Anthropic).'); process.exit(2) }
     provider = createAiProvider(loadConfig({ ai: { provider: 'anthropic', apiKey: process.env.ANTHROPIC_API_KEY || '', model: process.env.AI_MODEL || 'claude-opus-5-5', effort: process.env.AI_EFFORT || 'medium', timeoutMs: Number(process.env.AI_TIMEOUT_MS) || 120000, fallbacks: process.env.AI_FALLBACKS !== 'off' }, production: true }))
+  } else if (providerName === 'viasocket') {
+    if (!args['confirm-live']) { console.error('Refusing to call viaSocket AI without --confirm-live (it sends the fictional dataset to viaSocket, which stores each call as a thread).'); process.exit(2) }
+    const vs = createViasocketGateway({ orgId: process.env.VIASOCKET_ORG_ID, projectId: process.env.VIASOCKET_PROJECT_ID, secret: process.env.VIASOCKET_EMBED_SECRET })
+    provider = createAiProvider(loadConfig({ ai: { provider: 'viasocket', viasocketService: process.env.AI_VIASOCKET_SERVICE || 'anthropic', viasocketModel: process.env.AI_VIASOCKET_MODEL || 'claude-sonnet-5-5', apiKey: args['no-backup'] ? '' : process.env.ANTHROPIC_API_KEY || '', timeoutMs: Number(process.env.AI_TIMEOUT_MS) || 120000 }, production: true }), { vs })
   } else if (providerName === 'simulated') {
     provider = createAiProvider({ production: false, ai: { provider: 'mock' } })
   } else { console.error(`Unknown --provider=${providerName}`); process.exit(2) }
@@ -155,8 +161,8 @@ for (const c of cases) {
     } else {
       const started = Date.now()
       try {
-        const res = await provider.generate({ system: systemPrompt(rubricFor(db, org.id)), user: userPrompt(pack), schema: OUTPUT_SCHEMA })
-        run.modelCalled = true; run.model = res.model; run.fallback = res.fallback?.used || false; run.usage = res.usage; run.latencyMs = Date.now() - started
+        const res = await provider.generate({ system: systemPrompt(rubricFor(db, org.id)), user: userPrompt(pack), schema: OUTPUT_SCHEMA, validate: validateOutput, context: { orgId: 'eval', runId: `${c.id}-${r}` } })
+        run.modelCalled = true; run.model = res.model; run.answeredBy = res.provider || provider.name; run.fallback = res.fallback?.used || false; run.usage = res.usage; run.latencyMs = Date.now() - started
         try { validateOutput(structuredClone(res.output)); run.schemaValid = true } catch (error) { run.schemaValid = false; run.schemaError = error.message }
         if (run.schemaValid) {
           const raw = res.output
@@ -220,6 +226,7 @@ const summary = dry ? { cases: results.length, insufficientAsExpected: results.f
   guardrailsFixed: sum((x) => x.fixedByGuardrails?.length || 0), guardrailsBroke: sum((x) => x.brokenByGuardrails?.length || 0),
   impactBasisCorrect: `${runs.filter((x) => x.impactBasisOk).length}/${runs.filter((x) => x.impactBasisOk !== null).length}`,
   fallbacks: called.filter((x) => x.fallback).length,
+  answeredBy: called.reduce((m, x) => ({ ...m, [x.answeredBy]: (m[x.answeredBy] || 0) + 1 }), {}),
   tokens: { input: sum((x) => x.usage?.input_tokens || 0), output: sum((x) => x.usage?.output_tokens || 0) }
 }
 const report = {

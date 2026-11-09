@@ -52,7 +52,7 @@ export function rateLimiter({ windowMs, max }) {
 
 export function createApp({ db, cfg, vs = { configured: false }, m91, google = googleTransport(), listen = true, mailer = null, ai = null }) {
   mailer ||= createMailer(cfg.mail || {}, { db, vs })
-  ai ||= createAiProvider(cfg)
+  ai ||= createAiProvider(cfg, { vs })
   const aiModeNow = measure.aiMode(cfg, ai)
   seedRubrics(db)
   const app = express()

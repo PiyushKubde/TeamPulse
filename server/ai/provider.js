@@ -2,6 +2,8 @@
 //   { configured, name, model, generate({ system, user, schema }) → { output, model, usage } }
 // Errors are ProviderError with `retryable` set, so the engine decides about retries without knowing the vendor.
 //
+//   AI_PROVIDER=viasocket  viaSocket's built-in AI through the existing viaSocket keys; if ANTHROPIC_API_KEY is also
+//                          set, a failed viaSocket call is retried once on Anthropic (backup), and recorded as such
 //   AI_PROVIDER=anthropic  Claude through the official SDK (server-side key: ANTHROPIC_API_KEY)
 //   AI_PROVIDER=mock       a deterministic SIMULATED analyser for local development and demos only — refused in
 //                          production, and every assessment it makes is labelled "simulated" in the UI
@@ -12,14 +14,99 @@ export class ProviderError extends Error {
   constructor(code, message, retryable) { super(message); this.code = code; this.retryable = retryable }
 }
 
-export function createAiProvider(cfg) {
+export function createAiProvider(cfg, { vs = null } = {}) {
   const ai = cfg.ai || {}
+  if (ai.provider === 'viasocket') {
+    if (!vs?.configured || !vs.aiSend) {
+      if (ai.apiKey) return withNote(anthropicProvider(ai), 'viaSocket is not configured; using the Anthropic backup.')
+      return notConfigured('AI_PROVIDER=viasocket needs the viaSocket keys (VIASOCKET_ORG_ID, VIASOCKET_PROJECT_ID, VIASOCKET_EMBED_SECRET).')
+    }
+    const primary = viasocketProvider(ai, vs)
+    return ai.apiKey ? withBackup(primary, anthropicProvider(ai)) : primary
+  }
   if (ai.provider === 'anthropic' && ai.apiKey) return anthropicProvider(ai)
   if (ai.provider === 'mock' && !cfg.production) return simulatedProvider()
   const reason = ai.provider === 'mock' ? 'AI_PROVIDER=mock is for local development only and is ignored in production.'
     : ai.provider === 'anthropic' ? 'AI_PROVIDER=anthropic needs ANTHROPIC_API_KEY.'
       : ai.provider ? `Unknown AI_PROVIDER "${ai.provider}".` : 'No AI provider is configured (set AI_PROVIDER and its key).'
-  return { configured: false, name: null, model: null, reason, async generate() { throw new ProviderError('not_configured', reason, false) } }
+  return notConfigured(reason)
+}
+
+const notConfigured = (reason) => ({ configured: false, name: null, model: null, reason, async generate() { throw new ProviderError('not_configured', reason, false) } })
+const withNote = (p, note) => ({ ...p, note })
+
+// ---------- viaSocket built-in AI ----------
+// One stateless-looking call per analysis: a fresh thread id each time (viaSocket stores every thread; no earlier
+// analysis can leak into the next), our system prompt per call (not stored by viaSocket), json_schema output, and an
+// explicit instruction not to browse — viaSocket's web/browser tools cannot be switched off (docs/ai.md).
+// The sync reply does not name the model or report tokens, so the model is recorded as requested, unconfirmed.
+const NO_BROWSE = 'Do not search the web, open links or use any tool. Use only the evidence pack in the message.'
+function viasocketProvider(ai, vs) {
+  const service = ai.viasocketService || 'anthropic'
+  const model = ai.viasocketModel || 'claude-sonnet-5-5' // viaSocket's docs: claude-opus-5-5 ignores json_schema there
+  const timeoutMs = ai.timeoutMs || 120000
+  return {
+    configured: true, name: 'viasocket', model: `${service}/${model}`,
+    async generate({ system, user, schema, context = {} }) {
+      const threadId = `tp-eval-${context.runId || Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 100)
+      let timer
+      const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new ProviderError('timeout', 'viaSocket AI did not answer in time.', true)), timeoutMs) })
+      let reply
+      try {
+        reply = await Promise.race([
+          vs.aiSend(`teampulse-ai-${context.orgId || 'shared'}`, { threadId, message: user, prompt: `${system}\n\n${NO_BROWSE}`, responseType: 'json_schema', jsonSchema: { name: 'contribution_assessment', schema, strict: true }, service, model }),
+          timeout
+        ])
+      } catch (error) {
+        throw error instanceof ProviderError ? error : mapViasocketError(error)
+      } finally { clearTimeout(timer) }
+      if (reply.finishReason === 'truncated') throw new ProviderError('truncated', 'viaSocket AI ran out of output tokens.', true)
+      if (reply.finishReason === 'tool_call') throw new ProviderError('invalid_output', 'viaSocket AI tried to use a tool instead of answering.', true)
+      let output = reply.content
+      if (typeof output === 'string') {
+        try { output = JSON.parse(output) } catch { throw new ProviderError('invalid_output', 'viaSocket AI answered in prose instead of the required JSON.', true) }
+      }
+      if (!output || typeof output !== 'object') throw new ProviderError('invalid_output', 'viaSocket AI returned no answer.', true)
+      return {
+        output, model: `${service}/${model}`, provider: 'viasocket', usage: null, requestId: reply.messageId || null, stopReason: reply.finishReason || null,
+        fallback: { used: false, requestedModel: `${service}/${model}`, servedModel: null, modelConfirmed: false, hops: [] }
+      }
+    }
+  }
+}
+
+function mapViasocketError(error) {
+  const status = error?.status ?? null
+  const detail = String(error?.body?.data?.detail?.error || error?.message || '').slice(0, 200)
+  if (status === 401 || status === 498) return new ProviderError('auth', `viaSocket rejected the request (${status}). Check the viaSocket keys.`, false)
+  if (status === 400 || status === 422) return new ProviderError('bad_request', `viaSocket AI rejected the request (${status})${detail ? `: ${detail}` : ''}. Check AI_VIASOCKET_MODEL / AI_VIASOCKET_SERVICE.`, false)
+  if (status === 429) return new ProviderError('rate_limited', 'viaSocket AI is rate limiting requests.', true)
+  if (status && status >= 500) return new ProviderError('provider_error', `viaSocket AI failed (${status}).`, true)
+  if (status === null) return new ProviderError('network', 'Could not reach viaSocket AI.', true)
+  return new ProviderError('provider_error', `viaSocket AI returned ${status}.`, false)
+}
+
+/**
+ * Primary + backup. Any failure of the primary — an error, or an answer that does not validate — is retried once on
+ * the backup in the same run. The result says which provider answered and why the backup was used.
+ */
+function withBackup(primary, backup) {
+  return {
+    configured: true, name: primary.name, model: primary.model, backup: { name: backup.name, model: backup.model },
+    async generate(args) {
+      let reason
+      try {
+        const r = await primary.generate(args)
+        if (args.validate) args.validate(structuredClone(r.output))
+        return r
+      } catch (error) {
+        reason = `${error.code || 'invalid_output'}: ${String(error.message).slice(0, 160)}`
+        console.log(`[ai] ${primary.name} failed (${reason}); using the ${backup.name} backup`)
+      }
+      const r = await backup.generate(args)
+      return { ...r, provider: backup.name, fallback: { ...(r.fallback || {}), used: true, kind: 'provider_backup', requestedModel: primary.model, servedModel: r.model, primaryError: reason, hops: [{ from: primary.model, to: r.model }, ...(r.fallback?.hops || [])] } }
+    }
+  }
 }
 
 function anthropicProvider(ai) {
@@ -49,7 +136,7 @@ function anthropicProvider(ai) {
       } catch (error) {
         throw mapError(error)
       }
-      return readResponse(res, model)
+      return { ...readResponse(res, model), provider: 'anthropic' }
     }
   }
 }
