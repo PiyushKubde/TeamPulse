@@ -352,7 +352,7 @@ environment keys; value never read).
 |---|---|---|
 | Deployed commit | **538b4b6** (= `main`) | Embarko app record `currentDeployment.appVersion`; job output format only this build produces |
 | Health | ok; database ok; Google configured; viaSocket configured; M91 not configured | `/api/health` |
-| Scheduled alert job | Runs `ok` (HTTP 200) on the new build; manual and 15-minute scheduled runs | Embarko schedule run history (see below) |
+| Scheduled alert job | **PASS** — the automatic 15-minute run at 2026-11-09T09:15:40Z (trigger `schedule`, after the restart) finished `ok` on build `538b4b6`; it found the existing verified backup and did not make a duplicate | Embarko schedule run history |
 | Weekly report job | `ok` — "1 manager/admin report(s); delivered by Slack/Gmail 0" (no delivery configured) | Embarko schedule run |
 | **Backup creation** | **PASS** — verified archive made in production (`integrity_check` ok, SHA-256 recorded) | job output; server log `[backup] … 22982 bytes` |
 | **Off-host encrypted copy** | **PASS** — uploaded to Embarko file storage as `teampulse-backup-…gz` (23 030 bytes) | storage listing via deploy token |
