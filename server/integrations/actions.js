@@ -37,6 +37,7 @@ async function scriptIdFor(db, vs, userId, connection) {
   const flow = known || flows.find((f) => f.authId === connection.auth_id && f.serviceId === connection.service_id && f.status !== 'deleted')
   if (flow?.status === 'paused') await vs.setFlowStatus(userId, flow.id, 1)
   const scriptId = flow?.id || (await vs.enable(userId, connection.app_slug, connection.auth_id)).scriptId
+  if (!flow) console.log(`[viasocket] enabled ${connection.app_slug} for user ${userId}`)
   if (stored?.script_id !== scriptId) {
     db.prepare(`INSERT INTO enabled_apps (user_id, auth_id, service_id, script_id, created_at) VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT (user_id, auth_id) DO UPDATE SET script_id = excluded.script_id, service_id = excluded.service_id`).run(userId, connection.auth_id, connection.service_id, scriptId, now())
@@ -58,7 +59,9 @@ export async function runOnce(db, vs, ctx, connectionId, actionName, inputData) 
     return { outcome: 'failed', notSent: true, reason: (error instanceof AppError ? error : viasocketError(error, `prepare ${action.app}`)).message }
   }
   try {
-    return { outcome: 'answered', result: await vs.runAction(scriptId, action.key, inputData, action.version) }
+    const result = await vs.runAction(scriptId, action.key, inputData, action.version)
+    console.log(`[viasocket] ran ${action.slug} ${action.key} ${action.version} for user ${ctx.user.id}: answered`)
+    return { outcome: 'answered', result }
   } catch (error) {
     if (error?.status === null || error?.status === undefined) return { outcome: 'unknown', reason: `No answer from ViaSocket, so it is not known whether ${action.app} acted: ${action.check} before retrying.` }
     console.log(`[action] ${action.app} ${action.key} ${action.version} failed: HTTP ${error.status}`)
@@ -110,6 +113,7 @@ export async function pickOptions(db, vs, ctx, connectionId, { slug, app, eventK
   const connection = await requireActiveConnection(db, vs, ctx, connectionId, { slug, app })
   try {
     const out = await vs.listOptions(ctx.user.id, slug, eventKey, { fieldKey, authId: connection.auth_id, existingFields, version, ...(search ? { search } : {}), ...(paginate ? { paginate } : {}) })
+    console.log(`[viasocket] listOptions ${slug} ${eventKey} ${fieldKey} for user ${ctx.user.id}: ${(out.options || []).length} option(s)${out.message ? ', with a message' : ''}`)
     return { options: (out.options || []).map((o) => ({ label: String(o.label), value: String(o.value) })), hasMore: Boolean(out.hasMore), paginate: out.paginate ?? null, message: out.message || null }
   } catch (error) {
     throw viasocketError(error, `list your ${app} options`)
@@ -137,6 +141,7 @@ export async function sendThrough(db, vs, ctx, config, { subject, text, to }) {
       : slackInput({ channelId: config.slackChannelId, userId: config.slackUserId, text: `*${subject}*\n${text}\n_${MARKER}_` }))
   if (ran.outcome !== 'answered') return { status: ran.outcome === 'unknown' ? 'UNKNOWN' : 'FAILED', error: ran.reason }
   const read = isGmail ? readGmailResult(ran.result) : readSlackResult(ran.result)
-  if (!read.ok) return { status: read.unknown ? 'UNKNOWN' : 'FAILED', error: read.reason }
+  if (!read.ok) { console.log(`[viasocket] ${config.channel} send not confirmed: ${read.unknown ? 'no provider id' : 'refused'}`); return { status: read.unknown ? 'UNKNOWN' : 'FAILED', error: read.reason } }
+  console.log(`[viasocket] ${config.channel} send confirmed by the provider (id present)`)
   return { status: 'SUCCEEDED', summary: isGmail ? `Gmail accepted the email (message ${read.providerId})` : `Posted to Slack ${config.slackChannelLabel || (config.slackUserId ? 'direct message' : 'channel')} (ts ${read.providerId})` }
 }

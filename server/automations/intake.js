@@ -95,6 +95,7 @@ return res.data`
   } catch (error) {
     throw viasocketError(error, `switch on the ${t.app} intake`)
   }
+  console.log(`[viasocket] subscribed ${t.slug} ${t.key} ${t.version} for user ${ctx.user.id} (intake ${id})`)
   const ts = now()
   db.prepare(`INSERT INTO intake_subscriptions (id, org_id, owner_id, team_id, app, connection_id, trigger_key, version, script_id, input_data, target_label, token_hash, status, created_at, updated_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`)
@@ -188,6 +189,7 @@ export function receiveIntakeEvent(db, id, bearer, body) {
   if (!r || !bearer || !timingSafeEqual(given, Buffer.from(r.token_hash))) throw new AppError(401, 'unauthorized', 'Unauthorized')
   if (r.status !== 'ACTIVE') return { status: 'ignored', reason: 'intake paused' }
   const parsed = parseEvent(r.app, body?.event ?? body)
+  console.log(`[intake] ${r.app} event for intake ${r.id}: keys ${keyPaths(body?.event ?? body).slice(0, 40).join(', ')}; ${parsed.ignore ? `ignored (${parsed.ignore})` : parsed.title ? 'mapped' : 'no title'}`)
   const logId = startLog(db, { orgId: r.org_id, key: 'gmail_slack_intake', trigger: r.app, subjectType: 'intake', subjectId: r.id })
   const ts = now()
   db.prepare('UPDATE intake_subscriptions SET events_received = events_received + 1, last_event_at = ?, updated_at = ? WHERE id = ?').run(ts, ts, r.id)

@@ -56,6 +56,7 @@ export async function saveConnection(db, vs, ctx, body) {
   const match = live.find((c) => c.id === authId)
   if (!match) throw new AppError(403, 'connection_not_yours', 'ViaSocket has no such connection for your account, so it was not saved.')
   if (match.service_id && match.service_id !== serviceId) throw new AppError(400, 'connection_app_mismatch', 'That connection belongs to a different app.')
+  console.log(`[viasocket] connection saved: ${app.slug} for user ${ctx.user.id}`)
   const label = typeof match.connection_label === 'string' ? match.connection_label.replace(/[{}"]/g, '').slice(0, 120) : null
   const ts = now()
   db.prepare(`INSERT INTO app_connections (id, org_id, user_id, app_slug, service_id, auth_id, label, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
