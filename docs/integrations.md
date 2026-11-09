@@ -15,23 +15,23 @@ Flow: `/auth/google` stores state, nonce and a PKCE verifier server-side (10 min
 
 ## ViaSocket
 
-Two ways, both on one embed project:
+TeamPulse uses `viasocket-apps` **0.19.0** (apps by slug, actions and triggers by key with a pinned version). The plan,
+every value and who supplies it: [`viasocket-plan.md`](../viasocket-plan.md). Keys: `VIASOCKET_ORG_ID`,
+`VIASOCKET_PROJECT_ID`, `VIASOCKET_EMBED_SECRET` (server only).
 
-**A. Full ViaSocket Embed** — *Automation Center → Advanced builder*. Mounts `https://embed.viasocket.com/prod-embedcomponent.js` in the page with a per-user embed token from `GET /api/viasocket/token`. Flow events are accepted only from `https://embedfrontend.viasocket.com`; the browser then asks the server to read the flow back from ViaSocket (`listFlows`) — the browser's copy is never trusted.
-
-**B. Selected apps in context** — *Automation Center → Connected apps* (Slack, Gmail, GitHub, Google Calendar, Google Sheets; each verified on viasocket.com/docs/<slug>.md on 2026-11-09). Connect uses the official `viasocket-apps/browser` `connect()` popup; the server checks the new `auth_id` belongs to that user before storing it. Slack and Gmail are run by TeamPulse itself (actions `row1jrbor` Slack Send_Message V107 and `rowogelpy0h6` Gmail Send Email V55 — the same pinned actions DealSaathi runs live). GitHub, Calendar and Sheets open the builder filtered to that app. Slack is also in context on every task page (**Share to Slack**).
-
-Ready-made automations:
-
-| Automation | Trigger | Does | Needs |
+| | What | Whose account | Where in TeamPulse |
 | --- | --- | --- | --- |
-| New Task Notification | a task is assigned | Slack message to the chosen channel, or Gmail to the assignee | ViaSocket keys + manager's Slack/Gmail connection |
-| External Request → Task Request | `POST /api/inbound/task-requests` with `Authorization: Bearer <intake token>` | creates a **pending task request** (never a task), idempotent by `externalRef` | only the intake token (works without ViaSocket keys) |
-| Weekly Team Report | Embarko schedule, Mondays 09:05 IST | builds the weekly summary, notifies managers in-app, delivers via Slack or Gmail | ViaSocket keys + connection for delivery |
+| A1 | Task assigned to me → Slack DM / channel or Gmail | the person's own | Settings → Profile → My notifications |
+| A2 | Task assigned in my team → team channel / DM me / email assignee / email me | the manager's own | Automation Center → Ready-made |
+| B | Weekly report (Mondays 09:05 IST) → Slack or Gmail; managers: their teams, admins: organization | the manager's / admin's own | Automation Center → Ready-made; Reports |
+| C | Gmail label / Slack channel → **pending** task requests | the manager's own | Automation Center → Ready-made → Gmail / Slack intake |
+| D | Full builder; restricted builders from My Tasks, Team Tasks, Reports | the person's own | Automation Center → Advanced builder; "Automate" buttons |
 
-Activation: get the three keys at https://flow.viasocket.com/embed-keys?name=TeamPulse and set `VIASOCKET_ORG_ID`, `VIASOCKET_PROJECT_ID`, `VIASOCKET_EMBED_SECRET`.
-
-**Status: VIASOCKET-PENDING (live test).** The keys were not available in the build environment, so no call has reached ViaSocket yet. Every server path is tested against a fake gateway with the SDK's shape (ownership checks, run logging, failure → FAILED after 3, unknown never auto-retried, disconnect → NEEDS_SETUP). To finish: set the keys, connect a test Slack and Gmail, use **Share to Slack** on a task, set up New Task Notification and assign a task to yourself, and check the run history shows the provider's message id.
+Isolation: every connection, enabled flow (`script_id`), subscription and flow belongs to one TeamPulse user id; the
+server checks ownership before every run; only the per-user embed token reaches the browser.
+Loops and duplicates: every outgoing message carries "Sent by TeamPulse" and the intake ignores it; Slack bot posts and
+thread replies are ignored; an intake channel can never also be an outgoing channel; each email/message creates at most
+one request (`externalRef` = message id); intake never assigns or approves.
 
 ## M91 (MSG91) alerts
 

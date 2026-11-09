@@ -1,6 +1,6 @@
 # ViaSocket plan — TeamPulse (A, B, C, D)
 
-Status: **PROPOSED — waiting for the yes.** Source of truth: https://viasocket.com/docs/skill.md?format=sdk (skill `2026-11-04.3`),
+Status: **APPROVED with changes (2026-11-09) — BUILT.** Changes from the person: both A1 and A2 (managers can also notify themselves); B one report per manager for their own teams plus an organization-wide report for admins, no duplicates; C both Gmail and Slack; D Slack, Gmail and Google Sheets first, Google Calendar and GitHub secondary. Source of truth: https://viasocket.com/docs/skill.md?format=sdk (skill `2026-11-04.3`),
 with the `viasocket-apps` package (upgrade 0.7.0 → 0.19.0: apps by slug, actions by key + pinned version, triggers by `subscribe`).
 
 ## Scoping (all four)
@@ -15,7 +15,7 @@ with the `viasocket-apps` package (upgrade 0.7.0 → 0.19.0: apps by slug, actio
 ## A. Task assigned → Slack / Gmail
 
 A1 (new, the default): each employee turns on "Notify me" in *Settings → Profile* with **their own** Slack or Gmail.
-A2 (exists): a manager posts every assignment in their team to a team Slack channel, or emails the assignee, from the manager's connection.
+A2: each manager, for tasks they manage: a team Slack channel, a Slack DM to themselves, an email to the assignee, or an email to themselves — from the manager's own connection.
 Who picks the action: TeamPulse's code (on every assignment), from the channel the user chose.
 
 | app | action (key, version) | key of `inputData` | who supplies it | when |
@@ -32,7 +32,7 @@ Who picks the action: TeamPulse's code (on every assignment), from the channel t
 
 ## B. Weekly team report (Mondays 09:05 IST, Embarko schedule)
 
-Each manager (and admin) sets up their own report for **their own scope** (today: one per organization → change to one per manager).
+Each manager gets their own report for **their own teams**; each admin gets the **organization-wide** report. One report row and at most one delivery per person per week (dedupe keys).
 Same two actions as A, from the manager's own connection.
 
 | app | action | key | who supplies it | when |
@@ -79,3 +79,18 @@ externalRef ← message id / channel+ts. Bot messages are ignored (no loops with
    (signed in as you): a Slack workspace with a test channel, and a Gmail account. For C also a Gmail label (e.g.
    "TeamPulse") and a Slack test channel. Not the existing connections of `apps-api-test-user` (other people's).
 4. Your yes before each real send: every test message goes only to you / your test channel.
+
+## Test status (live = against the real viaSocket service)
+
+| what | status |
+| --- | --- |
+| Keys (setup check: listConnections for the test user) | **live OK** |
+| `npx viasocket-apps check` | **0 FAIL, 0 WARN** over 45 files |
+| Catalog: slugs, keys, versions (`listActions`) | **live OK** — Send_Message V107, Send_Email V55, New_Email_Arrives V11, New_Message_Posted_in_Channel_Instant V2 |
+| D — full Embed mounted with a signed token | **live OK** (rendered, `ready` event) |
+| D — contextual builder (`filteredServices`) | **live OK** (only Gmail, Google Calendar, Google Sheets, Slack shown) |
+| Connect popup → stored `auth_id` | UNTESTED — needs the person's own Slack/Gmail sign-in on the live app |
+| listOptions (channels, people, Gmail labels) | UNTESTED — needs a connection |
+| A1/A2/B sends (runAction) | UNTESTED — needs a connection and the person's approval to send |
+| C subscribe + real event | UNTESTED — needs a connection, a label/channel, and a test message |
+| D flow publish → event delivered to the flow | UNTESTED — needs the person to publish a flow |
