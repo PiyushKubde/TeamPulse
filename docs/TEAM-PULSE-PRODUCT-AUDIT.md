@@ -1,0 +1,278 @@
+# TeamPulse — Product Requirements & Implementation Audit
+
+Audit date: 2026-11-09 · Branch `claude/teampulse-mvp` @ `bdee339` · Production https://teampulse.embarko.app (running `b601638`, same application code as `bdee339`; `bdee339` only changed docs) · `main` @ `8b10bf8` (older).
+Method: code inspection, local automated tests, local browser crawl of every screen, production smoke tests, production logs and schedule history, live viaSocket calls with the product's own keys. **No application code was changed for this audit.** No real Slack messages or emails were sent.
+
+Evidence classes used throughout — never mixed:
+- **[LOCAL]** automated tests / browser runs against a local server with an in-memory or temporary database.
+- **[SIMULATED]** tests where an external service (Google, viaSocket, M91) is replaced by a stand-in. Proves TeamPulse's own logic only.
+- **[LIVE-EXT]** a real call to the external service.
+- **[PROD]** a request or browser session against https://teampulse.embarko.app.
+
+---
+
+## 1. Executive Summary
+
+**TeamPulse matches the original product vision in its design and core logic.** The application is built around
+outcomes, not task counts: there is no productivity score anywhere, completion and impact verification are separate,
+estimates are labelled, shared outcomes are de-duplicated, blocked work and external dependencies are recorded as
+documented reasons rather than failures, and learning/prevention are first-class contributions. Roles, organization
+isolation, the task lifecycle, permissions, requests, blockers and reviews are implemented on the server and covered
+by tests that pass.
+
+**What is not yet proven is the production, signed-in experience and the external integrations.** In production,
+only signed-out behaviour, configuration, security responses and the scheduler have been verified; no signed-in
+flow, data persistence across a production restart, real Slack/Gmail run, Gmail/Slack intake event, or M91 alert has
+been exercised. The viaSocket full embed and the restricted contextual builder were rendered live, but no automation
+has completed end-to-end against real accounts. The Gmail/Slack intake maps event fields that have not yet been
+confirmed against a real event.
+
+Verdict in one line: **a complete, coherent MVP in code and local tests, faithful to the vision; not yet a
+verified finished product in production.** Section 10 lists exactly what must happen before calling it finished.
+
+---
+
+## 2. Requirements Comparison
+
+Status: **PASS** fully implemented and verified · **PARTIAL** implemented but incomplete or not fully tested ·
+**FAIL** missing or broken · **NOT VERIFIED** insufficient evidence.
+
+### A. Authentication and organization management
+
+| Feature | Original Requirement | Actual Implementation | Status | Evidence |
+|---|---|---|---|---|
+| Continue with Google | Google OAuth 2.0 / OIDC sign-in | Code flow + PKCE + state + nonce; RS256 ID-token signature checked against Google JWKS; iss/aud/exp/nonce checked | PARTIAL | [SIMULATED] tests 7–8 (forged signature, wrong aud/nonce/iss, expiry rejected). [PROD] `/auth/google` → 302 to accounts.google.com with correct client id, redirect URI, PKCE S256; Google renders its sign-in page (no `invalid_client`/`redirect_uri_mismatch`). A completed production sign-in was **not observed** by the auditor. |
+| Stable identity | Use Google `sub` | `users.google_sub UNIQUE`; email/name/picture refreshed per login | PASS | [SIMULATED] test 7: changed email → same account |
+| New-user registration | New users register | First sign-in creates the user with **no role** | PASS (local) | [LOCAL] tests 7, 32 |
+| Existing-user login | Existing users log in | Same `sub` → same user; session cookie HttpOnly, SameSite=Lax, Secure in prod | PASS (local) | [SIMULATED] test 7 |
+| Organization creation | Create organization | Any signed-in user without an org can create one and becomes its admin (`ALLOW_ORG_CREATION`, default on) | PASS (local) | [LOCAL] test 32 |
+| Invitations | Join via invitation | Invitation bound to email; only that Google-verified email can accept; managers invite employees to their own teams only | PASS (local) | [LOCAL] test 33 |
+| Join approval | Manager/admin approval | Join code → pending request; managers approve as employee into their teams; only admins grant manager/admin | PASS (local) | [LOCAL] test 34 |
+| No domain-based roles | Never grant roles by email domain | Confirmed: no domain logic anywhere | PASS | [LOCAL] test 34; code |
+| Roles | Admin / Manager / Employee | Enforced server-side in `server/access.js`; last-admin protection; deactivation ends sessions | PASS (local) | [LOCAL] tests 26, 35 |
+| Org isolation | No cross-org access | Every query scoped by `org_id`; out-of-scope records answer 404 | PASS (local) | [LOCAL] test 25 (other org's admin sees nothing, cannot assign/comment/change permissions) |
+| Backend authorization | Not frontend-only | All rules in server; frontend only hides | PASS (local) | [LOCAL] tests 10, 25, 26; [PROD] unauthenticated API → 401 |
+
+### B. Manager dashboard
+
+| Feature | Original Requirement | Actual Implementation | Status | Evidence |
+|---|---|---|---|---|
+| Counts | Members, active, pending, in progress, blocked, completed, overdue, unassigned, awaiting review | All present (+ at-risk, requests to decide, impact to verify); each count links to the filtered list | PASS (local) | [LOCAL] test 42; crawl |
+| Team workload | Per-employee load | Table: active, blocked, due ≤3d, overdue, in review; row opens that person's tasks | PASS (local) | [LOCAL] test 42; e2e |
+| Employees requiring attention | Who needs help | "Attention required" lists **tasks** (overdue, ownerless, blocked too long, no progress, not started, awaiting review, at risk) with the person's name; there is no per-person "needs help" view | PARTIAL | code `services/dashboard.js` |
+| Recent activity | Assignments, status, comments, blockers, submissions | Timeline of task events in scope | PASS (local) | crawl, e2e |
+| Verified team impact | Outcomes, not task counts | Verified totals by category/unit/kind (estimates marked), recent verified outcomes | PASS (local) | [LOCAL] test 23; e2e |
+| Actionable, not decorative | — | Every card links to a filtered list or action | PASS | crawl |
+
+### C. Employee dashboard
+
+| Feature | Original Requirement | Actual Implementation | Status | Evidence |
+|---|---|---|---|---|
+| My tasks, pending, blocked, overdue, in review, upcoming deadlines | Show these | All present | PASS (local) | [LOCAL] test 42; e2e |
+| Completed tasks | Show completed | **No completed count or list on the employee dashboard** (only via My Tasks → status filter) | FAIL | code `employeeDashboard` has no completed field |
+| Recent manager feedback | Show feedback | Last reviews of the person's submissions and impact records | PASS (local) | code; crawl |
+| Contributions / impact records | Show personal impact | Recent records with verification status; "Record an outcome" | PASS (local) | e2e |
+| Daily reflection | 5 prompts | Saved per user per day, private | PASS (local) | [LOCAL] test 21; e2e |
+
+### D. Task management
+
+| Feature | Original Requirement | Actual Implementation | Status | Evidence |
+|---|---|---|---|---|
+| Lifecycle | SUGGESTED → ASSIGNED → IN_PROGRESS → BLOCKED → SUBMITTED_FOR_REVIEW → COMPLETED | All statuses exist. **SUGGESTED is never stored on a task**: suggestions are `task_requests` (PENDING/APPROVED/…) and approval creates the task as ASSIGNED. This follows the "keep request status separate" requirement but differs from the literal lifecycle string | PARTIAL (deliberate, documented) | [LOCAL] tests 36, 38; docs/architecture.md |
+| Submitted ≠ completed | Manager approval required | Only an approving review completes; direct status change to COMPLETED refused | PASS (local) | [LOCAL] tests 38, 39 |
+| Cancel / reopen / restore | Supported, recorded | Reasons required; recorded as events | PASS (local) | [LOCAL] tests 38, 39 |
+| Reassignment, priority & deadline changes | With history | Recorded with reasons | PASS (local) | [LOCAL] test 44 |
+| Overdue derived | From due date | Derived; submitted-before-deadline not overdue | PASS | [LOCAL] test 41 |
+| At-risk derived | From deadline + progress | Derived (≤24h & <75%, ≥75% window & <50%, blocked ≤48h) | PASS | [LOCAL] test 41 |
+| Blocked ≠ pending | Distinct | Distinct statuses; blocked needs a blocker record | PASS | [LOCAL] tests 39, 43 |
+| Activity history | All key events | `task_events` for create, assign, status, deadline, priority, comment, blocker, evidence, submission, review | PASS (local) | [LOCAL] test 38 |
+| Evidence | Links / attachments | Links and private uploads (type + magic-byte check, 5 MB, authorized download only) | PASS (local) | [LOCAL] test 19 |
+
+### E. Employee permissions
+
+| Feature | Original Requirement | Actual Implementation | Status | Evidence |
+|---|---|---|---|---|
+| 5 flags per employee | can_create_tasks, can_create_directly, can_self_assign, can_assign_others, approval_required | All five, set by the employee's manager (or admin) | PASS (local) | [LOCAL] test 40 |
+| Suggest-only by default | Without direct permission | Task form becomes a request | PASS (local) | [LOCAL] test 40 |
+| Creation ≠ assignment | Separate controls | Self-assign and assign-others independent; others limited to own team | PASS (local) | [LOCAL] test 40 |
+| Audited | All changes | `audit_log` with before/after | PASS (local) | [LOCAL] test 40 |
+
+### F. Task requests and approvals
+
+| Feature | Original Requirement | Actual Implementation | Status | Evidence |
+|---|---|---|---|---|
+| Suggest / approve / reject / clarify | All three decisions | Reject and clarify need a note; requester answers and resubmits | PASS (local) | [LOCAL] tests 36, 37 |
+| Approval creates official task | Yes | With manager's adjustments; source request linked | PASS (local) | [LOCAL] test 36 |
+| Rejected never becomes a task | Yes | Confirmed | PASS (local) | [LOCAL] test 37 |
+| Request history | Maintained | Decision note, decider, time kept; notifications to requester | PASS (local) | [LOCAL] test 36 |
+
+### G. Blockers and reviews
+
+| Feature | Original Requirement | Actual Implementation | Status | Evidence |
+|---|---|---|---|---|
+| Report / resolve / escalate | With dependency owner | Assignee, manager or dependency owner can resolve; escalation recorded | PASS (local) | [LOCAL] test 43 |
+| Blocker duration visible | To managers | Hours open on task, dashboard, blocker report | PASS (local) | [LOCAL] test 43 |
+| No performance penalty | Blocked ≠ underperformance | No score exists; weekly view marks blocked/external misses as documented reasons | PASS (local) | [LOCAL] test 24 |
+| Completion evidence + review | Approve / request changes | Implemented with review history | PASS (local) | [LOCAL] test 38 |
+
+### H. Performance and impact (critical)
+
+| Feature | Original Requirement | Actual Implementation | Status | Evidence |
+|---|---|---|---|---|
+| 7 impact categories | Revenue, customer, time, reliability, cost, efficiency, knowledge | All seven | PASS | code `validate.js` |
+| Submit / verify / reject with reason | Manager verification | Reject requires reason; no self-verification; edit re-submits | PASS (local) | [LOCAL] test 22 |
+| Evidence attached | Yes | Links + private files | PASS (local) | [LOCAL] tests 19, 22 |
+| Estimates labelled | Yes | `ESTIMATED` vs `MEASURED`; never summed together | PASS (local) | [LOCAL] test 23 |
+| No invented values | Yes | Value requires unit; "none" drops numbers | PASS (local) | [LOCAL] test 23 |
+| Shared outcomes counted once | Yes | `sharedOutcomeKey` | PASS (local) | [LOCAL] test 23 |
+| Completion ≠ impact | Separate | Approving a task creates/verifies no impact | PASS (local) | [LOCAL] test 38 |
+| Research / prevention / learning | Recognised | Outcome types; learning cannot claim a value | PASS (local) | [LOCAL] test 23 |
+| **No productivity score / task-count ranking** | Must not exist | **None found.** Contributions table shows counts of verified/pending records per person (not ranked, not combined into a score). Dashboard workload counts are labelled "planning view, not a performance measure" | PASS (with P2 caution on record counts) | code search; crawl |
+
+### I. M91
+
+| Feature | Original Requirement | Actual Implementation | Status | Evidence |
+|---|---|---|---|---|
+| Real API integration | Official M91 API | Platform API from the official docs: `POST /api/v1/alerts`, `/recipients`, `/alerts/close`, `GET /alerts/:id`, bearer key | PARTIAL | [SIMULATED] contract tests 27–31 (exact URLs/headers/bodies). **No `M91_API_KEY` configured → no live call.** [PROD] health `m91: not_configured` |
+| Alert rules | Assigned, approaching, missed, pending too long, unassigned, critical blocked, submitted for review | All 9 rules, thresholds configurable; M91 per rule (assignment off by default) | PASS (local, in-app) | [LOCAL] tests 1, 2 |
+| Recipients | Employee / manager per rule | As specified | PASS (local) | [LOCAL] test 2 |
+| History, retries, duplicates | Yes | Delivery table, backoff 1/2/4/8 min ×5, dedupe keys, customId per condition | PASS (local) / [SIMULATED] | tests 3, 30 |
+| Callback + idempotency | Yes | Token-authenticated; dedupe on `idempotencyKey`; alert read back before recording (signature not verifiable per docs) | PASS [SIMULATED] | test 4 |
+| Resolution | Close when resolved | Closed on task complete/cancel, blocker resolved, owner assigned | PASS [SIMULATED] | test 6 |
+| External delivery works | — | **Not verified** | NOT VERIFIED | — |
+
+### J. ViaSocket (highest priority)
+
+| Feature | Original Requirement | Actual Implementation | Status | Evidence |
+|---|---|---|---|---|
+| Keys / embed token | Server-signed per user | viasocket-apps 0.19.0; token per TeamPulse user id | PASS | [LIVE-EXT] setup check; full embed rendered with a signed token |
+| Full Embed | Complete builder in TeamPulse | Automation Center → Advanced builder; flow events origin-checked and read back from viaSocket | PARTIAL | [LIVE-EXT] embed rendered + `ready` event for org 4160 / `proj0suIrGwW`. Publishing a flow and syncing it **not tested live** |
+| Selected apps in context | Restricted, contextual | My Tasks / Team Tasks / Reports "Automate" → builder restricted with `filteredServices` | PARTIAL | [LIVE-EXT] My Tasks builder rendered showing **only** Gmail, Google Calendar, Google Sheets, Slack. Team Tasks/Reports variants **not rendered live**. Connected Apps "Build with …" opens the **unrestricted** builder focused on the app (not filtered) |
+| Connected app management | Connect / reconnect / disconnect | Official `connect()` popup; server verifies the auth belongs to the user | PARTIAL | [SIMULATED] test 12. **No live connection made yet** ([PROD] logs show none) |
+| A. Task notifications | Employee own Slack/Gmail; manager own; team channel | A1 personal prefs; A2 per-manager (channel / DM me / email assignee / email me), scoped to tasks the manager manages | PARTIAL | [SIMULATED] tests 13, 14. **No live run** |
+| B. Weekly reports | Per manager; org-wide for admins; no duplicates | One report per manager (teams) and admin (org), report + delivery deduped per week | PARTIAL | [SIMULATED] test 15; [PROD] scheduler ran the job (`ok`), 0 organizations at that time. **No live delivery** |
+| C. Intake | Gmail + Slack → pending requests; dedupe; loop prevention | Subscriptions on manager's own connection; per-subscription bearer token (hashed); dedupe by message id; own/bot/thread messages ignored; intake ≠ outbound channel enforced | PARTIAL | [SIMULATED] test 16. **Field mapping is based on assumed event shapes, not a real event**; no live subscription |
+| D. TeamPulse events → published flows | Users' own flows receive events | Flow URL read back from viaSocket, user-scoped dispatch, run logs | PARTIAL | [SIMULATED] test 17. **No live flow** |
+| Execution history / errors | Shown | TeamPulse-run automations: run log with status, error, retry. **Runs of user-built flows (viaSocket run history) are not shown** | PARTIAL | code |
+| Ownership / isolation | Per user / org | Every connection, script_id, subscription, flow is per TeamPulse user; ownership checked server-side | PASS (local) | [SIMULATED] tests 12–17 |
+| Checker | — | `npx viasocket-apps check`: 0 FAIL, 0 WARN | PASS | [LIVE-EXT] (resolves ids against the live catalog) |
+
+### K. Reports and notifications
+
+| Feature | Original Requirement | Actual Implementation | Status | Evidence |
+|---|---|---|---|---|
+| Reports | Workload, status, overdue, blockers, contributions, verified impact, weekly | All seven | PASS (local) | [LOCAL] test 20; crawl |
+| Date + employee filters | Yes | Yes, scoped to the manager's people | PASS (local) | [LOCAL] test 20 |
+| CSV export | Where practical | All tabular reports; **weekly summary has no CSV** | PARTIAL | code |
+| Manager vs admin weekly | Team vs org | Admin scope = organization | PASS (local) | [SIMULATED] test 15 |
+| Scheduled execution | Safe, no duplicates | Embarko schedules; alerts every 15 min, report Mon 09:05 IST; lease + dedupe | PASS | [PROD] schedule history: 3 scheduled + 1 manual alert runs `ok`; weekly manual run `ok` |
+| In-app notifications | Fallback | Always written; unread counts | PASS (local) | [LOCAL] tests 1, 2 |
+
+### L. Security and data
+
+| Feature | Original Requirement | Actual Implementation | Status | Evidence |
+|---|---|---|---|---|
+| Migrations | Not manual | 3 committed SQL migrations; rebuild with FK check | PASS | [LOCAL] test 18; [PROD] started cleanly after 003 |
+| Persistence after restart | Data survives | SQLite (WAL) in `DATA_DIR` | PASS [LOCAL] / NOT VERIFIED [PROD] | [LOCAL] task, comment and session survived a full process restart. Production: no signed-in data to check |
+| Secrets | Not in Git / frontend / API | None in full Git history, public files, or API presenters | PASS | `git log --all -p` scan: 0 hits; grep of `public/` |
+| File access | Private | Authorized download only; not served statically | PASS | [LOCAL] test 19; [PROD] `/data/teampulse.db` → 404 |
+| Rate limiting, CSRF, validation | Yes | In-memory limits; custom-header CSRF + SameSite; validators | PASS (local) | [LOCAL] test 10 |
+
+---
+
+## 3. Missing Features
+
+1. Employee dashboard: **completed tasks** (count/list) are not shown.
+2. Manager dashboard: no **per-person "needs help" view**; attention is task-based.
+3. **CSV export for the weekly summary.**
+4. **Run history of user-built viaSocket flows** inside TeamPulse (only TeamPulse-run automations are logged).
+5. Connected Apps "Build with …": **not restricted** to the app's curated events (opens the full builder focused on the app).
+
+## 4. Incorrect / Divergent Implementations
+
+1. **SUGGESTED** is not a task status in practice; suggestions live as requests. Consistent with "keep request and task status separate", but not the literal lifecycle. Needs your decision, not necessarily a fix.
+2. **Gmail/Slack intake field mapping** (`parseEvent`) uses assumed field names (`subject`, `from`, `snippet`, `text`, `ts`, …) instead of a real `sampleEvent`, contrary to the skill's rule "map from a real event". It may produce empty titles or miss duplicates on real data.
+3. **Production runs the feature branch** (`b601638`), while `main` is at `8b10bf8`; the GitHub default branch is still `claude/teampulse-mvp`.
+4. Weekly-report job output says "N organization(s)", but N now counts reports per manager/admin.
+
+## 5. UI/UX Issues (found by interacting: local crawl of 162 screen × role × viewport combinations, plus e2e journeys)
+
+| Screen | Issue | Severity |
+|---|---|---|
+| Reports (employee via URL) | Raw "Could not load this page. Only managers and admins can do that." error instead of a friendly page (nav correctly hides it) | P2 |
+| Team Tasks (employee via URL) | Titled "Team tasks" but lists only the employee's own tasks; its **Automate** button opens a manager-only context and fails with 403 | P2 |
+| Task lists, Reports | "Automate" shows even when viaSocket is not configured (fails with a message) | P2 |
+| Automation Center → Connected apps | "Build with GitHub/Calendar/Sheets" opens the full catalog (see §3.5) | P1 |
+| Manager dashboard | "My own work" section repeats the employee view beneath the team view; long page on phones | P2 |
+| All screens | **No JavaScript errors, no stuck loaders, no horizontal scroll at 390 px**; no placeholder or fake statistics found | — |
+| Production signed-in screens | **Not inspected in production** (no auditor sign-in); verified locally only | NOT VERIFIED |
+
+## 6. Integration Status
+
+| Integration | Live-tested [LIVE-EXT/PROD] | Simulated-tested | Untested |
+|---|---|---|---|
+| Google sign-in | Production config: redirect to Google with correct client id, redirect URI, PKCE; Google sign-in page renders | Full flow with signed tokens; negative cases | A completed production sign-in, consent-screen publishing status (testing mode limits who can sign in) |
+| ViaSocket | Keys; catalog slugs/keys/versions; checker 0 FAIL; full embed rendered; My Tasks restricted builder rendered (4 apps only) | Connections ownership, A1/A2, B, C, D dispatch, retries, loops, dedupe | Connect popup, listOptions, any runAction (send), enable, subscribe, real intake event, flow publish + event delivery, Team Tasks/Reports builders |
+| M91 | — (no key) | Contract tests for every request; queue, retries, callbacks, resolution | Any live alert, invite, callback, close |
+
+## 7. Security and Data Risks
+
+| Risk | Impact | Priority |
+|---|---|---|
+| **Credentials were pasted into the chat**: `VIASOCKET_EMBED_SECRET` and two Embarko deploy tokens | Anyone with the transcript can sign viaSocket tokens for any user of the project or redeploy the app | **P0** — rotate the embed secret and both deploy tokens |
+| **No backups** of `DATA_DIR` (Embarko does not back it up); database + uploaded evidence on one host | Total data loss on host failure | **P1** |
+| **In-process event handling**: notifications, A1/A2 sends and context-flow events run after commit in memory; a restart in between loses them (alerts are re-scanned, sends are not) | Missed notifications | **P1** |
+| No Content-Security-Policy on app pages (only on file downloads) | Defence in depth against XSS (all rendering is escaped today) | P2 |
+| Open organization creation (`ALLOW_ORG_CREATION=true`) | Anyone with a Google account can create an org (isolated) | P2 — set `false` once your org exists |
+| Reconnect returns a connection's `auth_id` to its owner's browser | Required by viaSocket `connect()` for in-place reconnect; owner only | P2 note |
+| Rate limits and lease are in-memory / single-instance | Fine on one Embarko instance; not for scale-out | P2 |
+
+No cross-organization access, privilege escalation, or secret leakage in Git/frontend/API was found.
+
+## 8. Test Results (actual runs, 2026-11-09)
+
+| Category | Command | Result |
+|---|---|---|
+| Lint | `npx eslint .` | 0 problems |
+| [LOCAL] + [SIMULATED] unit/API | `npm test` | **44 tests, 44 pass, 0 fail** (Google, M91 and viaSocket tests use stand-ins) |
+| [LOCAL] browser e2e | `node scripts/e2e.mjs` (Chromium, DEV_LOGIN, temp DATA_DIR) | **Passed** — manager/employee journeys, approvals, impact, permissions, reports, CSV, intake token, phone layout |
+| [LOCAL] UI crawl | audit script (not committed), 3 roles × 2 viewports × 27 routes | 162 screens: 0 JS errors, 0 stuck loaders, 0 overflow; 14 expected 403s (employee typing Reports URLs) |
+| [LOCAL] restart persistence | seed → create task + comment → kill → restart → read | task, comment and session kept |
+| [LIVE-EXT] viaSocket checker | `npx -y viasocket-apps@0.19.0 check server public` | 0 FAIL, 0 WARN over 45 files |
+| [LIVE-EXT] viaSocket embed | Playwright, real token, org 4160 / proj0suIrGwW | full builder rendered + `ready`; My Tasks builder rendered with only Gmail, Google Calendar, Google Sheets, Slack |
+| [PROD] smoke | 15 requests (auth, API, cron, webhooks, files) | 15/15 as expected (302/401/404/503) |
+| [PROD] browser | login page desktop + phone | no console errors, no overflow, "Continue with Google" shown, no dev form |
+| [PROD] scheduler | Embarko schedule run history | alerts: 3 scheduled + 1 manual run, all `ok`; weekly: 1 manual run `ok` |
+| [PROD] logs | Embarko logs | clean start; Google/viaSocket configured; M91 not configured; no errors |
+
+## 9. Priority Fix List
+
+**P0 — before presenting as finished**
+1. Rotate the viaSocket embed secret and both Embarko deploy tokens (they appeared in chat).
+2. Live-verify A, B, C on your own Slack/Gmail with your approval for each send; rebuild the intake field mapping from a real `sampleEvent` (Gmail and Slack) before switching intake on.
+3. Production signed-in QA (admin, manager, employee) and a production restart-persistence check.
+
+**P1 — important product requirements**
+4. Restrict Connected Apps "Build with …" to curated events (`filteredServices`).
+5. Show user-built flow run history (viaSocket run history) and errors in TeamPulse.
+6. Employee dashboard: completed tasks; manager dashboard: per-person "needs help" view.
+7. Backups of `DATA_DIR` (database + evidence) off the host.
+8. Durable processing for post-commit sends (persist pending notifications; retry on start).
+9. M91: live test with an `M91_API_KEY` (invite, alert, answer, close).
+10. Merge the verified branch into `main`, deploy from `main`, set `main` as the GitHub default branch.
+11. Verify the Google OAuth consent screen is published for your users (not "Testing").
+
+**P2 — improvements and polish**
+12. Friendly managers-only pages for employees on Reports/Team Tasks URLs; hide "Automate" when viaSocket is off or the role cannot use it.
+13. Weekly summary CSV; fix the weekly job's "organization(s)" wording.
+14. Content-Security-Policy for app pages.
+15. Decide the SUGGESTED semantics (keep as requests, or show "Suggested" in task lists).
+16. `ALLOW_ORG_CREATION=false` once your organization exists.
+
+## 10. Final Verdict
+
+1. **Is TeamPulse built according to the original requirements?** Largely yes. The product principle (value over task count) is implemented faithfully, and every core module exists with server-side rules. Gaps: five missing pieces (§3) and four divergences (§4).
+2. **Is it a complete working MVP?** In code and local tests, yes. In production, it is **not yet demonstrated**: no signed-in production session, no production persistence check, and no completed external integration have been observed.
+3. **Genuinely production-ready:** deployment and scheduling (verified in production); security posture of the API (production smoke + local tests); core task, permission, request, blocker, review, impact and reporting logic (verified locally, same code in production); Google OAuth configuration up to Google's sign-in page.
+4. **Looks complete but is unproven:** every Slack/Gmail automation (A, B), Gmail/Slack intake (C — mapping on assumed fields), TeamPulse events reaching published flows (D), connected-app management, all M91 delivery, and signed-in production screens.
+5. **Must be fixed before presenting as finished:** the three P0 items, plus P1 items 4 (restricted Connected Apps builders) and 10 (deploy from `main`). Everything else can follow as polish.
