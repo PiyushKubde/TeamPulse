@@ -13,8 +13,21 @@ export const EXTERNAL_SOURCES = [] // (db, task, subjectId) => items; empty in p
 const clip = (s, n = 1500) => (s == null ? null : String(s).length > n ? `${String(s).slice(0, n)}…` : String(s))
 const words = (s) => (s ? String(s).trim().split(/\s+/).filter((w) => /[a-z0-9]/i.test(w)).length : 0)
 const hostOf = (url) => { try { return new URL(url).host } catch { return null } }
-// Quality problems in people's own words. "regression test(s)/suite" is validation work, not a regression.
-const QUALITY_RE = /\b(fail(?:ed|ing|s)?\s+tests?|tests?\s+(?:are\s+|were\s+)?fail(?:ed|ing|s)?|regression(?!\s+(?:tests?|suites?|coverage|checks?|testing))|regressed|broke(?:n)?\s|bug\s+(?:was\s+)?(?:re)?introduced|rolled\s+back|rollback)/i
+// Quality problems mentioned in people's text (reviews, comments, submissions). Structured signals come first —
+// a reopening after completion and "changes requested" review decisions are recorded events, not keywords. Text is
+// only a secondary signal, so it is deliberately narrow: "added a regression test", "no regressions", "fixed the
+// failing tests" are not problems. TeamPulse has no structured test results yet (CI data would come in phase 2).
+const QUALITY_RE = /\b(fail(?:ed|ing|s)?\s+tests?|tests?\s+(?:are\s+|were\s+|still\s+)?fail(?:ed|ing|s|ures?)?|test\s+failures?|CI\s+(?:is\s+|was\s+)?(?:failing|red|broken)|regression(?!\s+(?:tests?|suites?|coverage|checks?|testing))|regressed|broke(?:n)?\s|bug\s+(?:was\s+)?(?:re)?introduced|rolled\s+back|rollback)/gi
+const NEGATED = /\b(no|not|without|zero|fixed|fixes|fixing|resolved|resolves|addressed|prevent(?:s|ed|ing)?|avoid(?:s|ed|ing)?)\b[^.;!?]{0,25}$/i
+/** True when the text reports a quality problem that is not negated or described as fixed. Exported for tests. */
+export function reportsQualityProblem(text) {
+  if (!text) return false
+  for (const m of String(text).matchAll(QUALITY_RE)) {
+    const before = String(text).slice(Math.max(0, m.index - 40), m.index)
+    if (!NEGATED.test(before)) return true
+  }
+  return false
+}
 
 export function buildEvidencePack(db, task, subjectId) {
   const role = db.prepare(`SELECT m.role, m.title, t.name AS team FROM memberships m LEFT JOIN teams t ON t.id = m.team_id WHERE m.user_id = ? AND m.org_id = ?`).get(subjectId, task.org_id) || {}
@@ -46,7 +59,7 @@ export function buildEvidencePack(db, task, subjectId) {
       if (d.note) add('update', { at: e.created_at, author: by, text: clip(d.note), progress: d.to }, { label: `Progress note (${d.to}%)`, taskId: task.id })
     } else if (e.type === 'comment') {
       const r = add('comment', { at: e.created_at, author: by, text: clip(d.body) }, { label: `Comment by ${by}`, taskId: task.id })
-      if (QUALITY_RE.test(d.body || '')) signals.qualityConcerns.push({ ref: r, text: clip(d.body, 200) })
+      if (reportsQualityProblem(d.body)) signals.qualityConcerns.push({ ref: r, text: clip(d.body, 200) })
     } else if (e.type === 'reopened') {
       signals.reopened++
       const r = add('event', { at: e.created_at, author: by, text: `Task reopened after completion. Reason: ${d.reason || 'not given'}` }, { label: 'Reopened after completion', taskId: task.id })
@@ -78,12 +91,12 @@ export function buildEvidencePack(db, task, subjectId) {
     const ref = add('submission', { at: s.created_at, author: roleOf(s.submitted_by), selfReported: true, workSummary: clip(s.summary, 3000), outcomeClaimed: clip(s.outcome, 2000), reviewStatus: s.status },
       { label: 'Completion submission', taskId: task.id })
     if (s.submitted_by === subjectId) claims.push({ ref, text: clip(s.outcome, 500) })
-    if (QUALITY_RE.test(`${s.summary} ${s.outcome}`)) signals.qualityConcerns.push({ ref, text: 'Submission mentions failing tests / regression' })
+    if (reportsQualityProblem(`${s.summary} ${s.outcome}`)) signals.qualityConcerns.push({ ref, text: 'Submission mentions failing tests / regression' })
     for (const r of db.prepare(`SELECT * FROM manager_reviews WHERE subject_type = 'submission' AND subject_id = ? ORDER BY created_at`).all(s.id)) {
       const rr = add('review', { at: r.created_at, author: roleOf(r.reviewer_id), decision: r.decision, text: clip(r.comment, 1500) }, { label: `Review: ${r.decision === 'APPROVED' ? 'approved' : 'changes requested'}`, taskId: task.id })
       if (r.decision === 'CHANGES_REQUESTED') signals.changesRequested++
       if (r.decision === 'APPROVED') signals.approved = true
-      if (QUALITY_RE.test(r.comment || '')) signals.qualityConcerns.push({ ref: rr, text: clip(r.comment, 200) })
+      if (reportsQualityProblem(r.comment)) signals.qualityConcerns.push({ ref: rr, text: clip(r.comment, 200) })
     }
   }
   // A later approval after a quality concern settles review-time concerns (not regressions after completion).

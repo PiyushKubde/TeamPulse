@@ -53,6 +53,7 @@ export function rateLimiter({ windowMs, max }) {
 export function createApp({ db, cfg, vs = { configured: false }, m91, google = googleTransport(), listen = true, mailer = null, ai = null }) {
   mailer ||= createMailer(cfg.mail || {}, { db, vs })
   ai ||= createAiProvider(cfg)
+  const aiModeNow = measure.aiMode(cfg, ai)
   seedRubrics(db)
   const app = express()
   app.disable('x-powered-by')
@@ -67,12 +68,13 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     onEvent((e) => contextFlows.onTaskEvent(db, vs, e, cfg.appUrl)),
     onEvent(() => alerts.processDeliveries(db, m91)),
     onEvent((e) => alerts.closeResolvedAlerts(db, m91, e)),
-    onEvent((e) => onWorkEvent(db, ai, e)),
+    onEvent((e) => onWorkEvent(db, ai, e, aiModeNow)),
     onEvent((e) => (e.type === 'assessment.ready' ? notifyInApp(db, { orgId: e.orgId, userId: e.subjectId, kind: 'assessment_ready', title: 'Your work analysis is ready to review', link: `#/tasks/${e.taskId}`, taskId: e.taskId, dedupeKey: `assessment-ready:${e.assessmentId}` }) : null))
   ] : []
   app.locals.stopListening = () => unsubscribe.forEach((fn) => fn())
   app.locals.events = { recoverOutbox }
   app.locals.ai = ai
+  app.locals.aiMode = aiModeNow
 
   const limitAuth = rateLimiter({ windowMs: 60000, max: 30 })
   const limitLogin = rateLimiter({ windowMs: 60000, max: 10 })
@@ -138,7 +140,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   // ---------- health ----------
   app.get('/api/health', h(() => {
     db.prepare('SELECT 1').get()
-    return { ok: true, database: 'ok', google: cfg.google.configured ? 'configured' : 'not_configured', email: mailer.configured ? 'configured' : 'not_configured', viasocket: vs.configured ? 'configured' : 'not_configured', ai: ai.configured ? (ai.simulated ? 'simulated' : 'configured') : 'not_configured', m91: m91.status().state, time: now() }
+    return { ok: true, database: 'ok', google: cfg.google.configured ? 'configured' : 'not_configured', email: mailer.configured ? 'configured' : 'not_configured', viasocket: vs.configured ? 'configured' : 'not_configured', ai: ai.configured ? (ai.simulated ? 'simulated' : 'configured') : 'not_configured', aiMode: aiModeNow.mode, m91: m91.status().state, time: now() }
   }))
 
   // ---------- authentication ----------
@@ -424,15 +426,16 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
 
   // ---------- AI work measurement ----------
   const limitAnalyse = rateLimiter({ windowMs: 3600000, max: 30 })
-  app.get('/api/tasks/:id/assessment', h((req) => measure.getTaskAssessment(db, member(req), ai, req.params.id)))
+  app.get('/api/tasks/:id/assessment', h((req) => measure.getTaskAssessment(db, member(req), ai, req.params.id, aiModeNow)))
+  app.get('/api/tasks/:id/assessment/preview', h((req) => measure.previewAnalysis(db, member(req), ai, req.params.id, aiModeNow)))
   app.post('/api/tasks/:id/assessment/analyse', h((req) => {
     const ctx = member(req)
     limitAnalyse(`analyse:${ctx.user.id}`)
-    const out = measure.analyseTask(db, ctx, ai, req.params.id)
-    return { ...out, view: measure.getTaskAssessment(db, ctx, ai, req.params.id) }
+    const out = measure.analyseTask(db, ctx, ai, req.params.id, { mode: aiModeNow })
+    return { ...out, view: measure.getTaskAssessment(db, ctx, ai, req.params.id, aiModeNow) }
   }))
-  app.post('/api/tasks/:id/assessment/respond', h((req) => { const ctx = member(req); measure.employeeRespond(db, ctx, req.params.id, req.body); return measure.getTaskAssessment(db, ctx, ai, req.params.id) }))
-  app.post('/api/tasks/:id/assessment/review', h((req) => { const ctx = member(req); measure.managerReview(db, ctx, req.params.id, req.body); return measure.getTaskAssessment(db, ctx, ai, req.params.id) }))
+  app.post('/api/tasks/:id/assessment/respond', h((req) => { const ctx = member(req); measure.employeeRespond(db, ctx, req.params.id, req.body); return measure.getTaskAssessment(db, ctx, ai, req.params.id, aiModeNow) }))
+  app.post('/api/tasks/:id/assessment/review', h((req) => { const ctx = member(req); measure.managerReview(db, ctx, req.params.id, req.body); return measure.getTaskAssessment(db, ctx, ai, req.params.id, aiModeNow) }))
   app.get('/api/assessments/:id', h((req) => measure.getAssessmentById(db, member(req), req.params.id)))
   app.get('/api/contribution/team', h((req) => measure.teamOverview(db, member(req), req.query)))
   app.get('/api/contribution/people/:userId', h((req) => measure.personProfile(db, member(req), req.params.userId, req.query)))

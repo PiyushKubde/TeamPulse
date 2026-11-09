@@ -23,11 +23,17 @@ export function createAiProvider(cfg) {
 }
 
 function anthropicProvider(ai) {
-  // baseURL is explicit so a stray ANTHROPIC_BASE_URL in the environment can never redirect evaluation data.
-  const client = new Anthropic({ apiKey: ai.apiKey, baseURL: ai.baseUrl || 'https://api.anthropic.com', timeout: ai.timeoutMs || 120000, maxRetries: 2 })
+  // Everything that could redirect, log or trace evaluation data is pinned here rather than read from the
+  // environment: an explicit key (so ANTHROPIC_AUTH_TOKEN / profiles are never used), an explicit base URL
+  // (ANTHROPIC_BASE_URL ignored), logLevel 'warn' (ANTHROPIC_LOG=debug cannot dump requests) and no OpenTelemetry
+  // (ANTHROPIC_OPEN_TELEMETRY_* cannot switch on content capture).
+  const client = new Anthropic({
+    apiKey: ai.apiKey, baseURL: ai.baseUrl || 'https://api.anthropic.com', timeout: ai.timeoutMs || 120000,
+    maxRetries: ai.maxRetries ?? 2, logLevel: 'warn', openTelemetry: false
+  })
   const model = ai.model || 'claude-opus-5-5'
   return {
-    configured: true, name: 'anthropic', model,
+    configured: true, name: 'anthropic', model, fallbacks: ai.fallbacks !== false, baseUrl: client.baseURL,
     async generate({ system, user, schema }) {
       const params = {
         model, max_tokens: 16000, system,
@@ -43,25 +49,45 @@ function anthropicProvider(ai) {
       } catch (error) {
         throw mapError(error)
       }
-      if (res.stop_reason === 'refusal') throw new ProviderError('refused', 'The model declined to analyse this task.', false)
-      if (res.stop_reason === 'max_tokens') throw new ProviderError('truncated', 'The analysis was cut off before it finished.', true)
-      const text = res.content.filter((b) => b.type === 'text').map((b) => b.text).join('')
-      let output
-      try { output = JSON.parse(text) } catch { throw new ProviderError('invalid_output', 'The model did not return valid JSON.', true) }
-      return { output, model: res.model || model, usage: { input_tokens: res.usage?.input_tokens ?? null, output_tokens: res.usage?.output_tokens ?? null } }
+      return readResponse(res, model)
     }
+  }
+}
+
+/** Turns a Messages API response into { output, model, fallback, usage } or a ProviderError. Exported for tests. */
+export function readResponse(res, requestedModel) {
+  const hops = (res.content || []).filter((b) => b.type === 'fallback').map((b) => ({ from: b.from?.model ?? null, to: b.to?.model ?? null }))
+  const iterations = Array.isArray(res.usage?.iterations) ? res.usage.iterations : []
+  const servedModel = res.model || requestedModel
+  const fallback = { used: hops.length > 0 || iterations.some((x) => x.type === 'fallback_message') || servedModel !== requestedModel, requestedModel, servedModel, hops }
+  if (res.stop_reason === 'refusal') {
+    const cat = res.stop_details?.category ? ` (${res.stop_details.category})` : ''
+    throw new ProviderError('refused', `The model declined to analyse this task${cat}${fallback.used ? ', including the fallback model' : ''}.`, false)
+  }
+  if (res.stop_reason === 'max_tokens') throw new ProviderError('truncated', 'The analysis was cut off before it finished.', true)
+  const text = (res.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('')
+  if (!text.trim()) throw new ProviderError('invalid_output', 'The model returned no text.', true)
+  let output
+  try { output = JSON.parse(text) } catch { throw new ProviderError('invalid_output', 'The model did not return valid JSON.', true) }
+  const u = res.usage || {}
+  return {
+    output, model: servedModel, fallback, requestId: res._request_id ?? null, stopReason: res.stop_reason,
+    usage: { input_tokens: u.input_tokens ?? null, output_tokens: u.output_tokens ?? null, cache_read_input_tokens: u.cache_read_input_tokens ?? null, cache_creation_input_tokens: u.cache_creation_input_tokens ?? null }
   }
 }
 
 function mapError(error) {
   // Most specific first; the SDK has already retried 429/5xx/connection errors twice.
-  if (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError) return new ProviderError('auth', 'The AI provider rejected the API key.', false)
+  if (error instanceof Anthropic.AuthenticationError) return new ProviderError('auth', 'The AI provider rejected the API key (401). Check ANTHROPIC_API_KEY.', false)
+  if (error instanceof Anthropic.PermissionDeniedError) return new ProviderError('forbidden', 'The API key is not allowed to use this model or feature (403). Check the key\'s workspace and AI_MODEL.', false)
+  if (error instanceof Anthropic.NotFoundError) return new ProviderError('not_found', `The AI provider does not know this model or endpoint (404). Check AI_MODEL.`, false)
   if (error instanceof Anthropic.RateLimitError) return new ProviderError('rate_limited', 'The AI provider is rate limiting requests.', true)
   if (error instanceof Anthropic.APIConnectionTimeoutError) return new ProviderError('timeout', 'The AI provider did not answer in time.', true)
   if (error instanceof Anthropic.APIConnectionError) return new ProviderError('network', 'Could not reach the AI provider.', true)
   if (error instanceof Anthropic.InternalServerError) return new ProviderError('provider_error', `The AI provider failed (${error.status}).`, true)
-  if (error instanceof Anthropic.BadRequestError) return new ProviderError('bad_request', 'The AI provider rejected the request.', false)
+  if (error instanceof Anthropic.BadRequestError) return new ProviderError('bad_request', `The AI provider rejected the request (400)${error.error?.error?.message ? `: ${String(error.error.error.message).slice(0, 200)}` : ''}.`, false)
   if (error instanceof Anthropic.APIError) return new ProviderError('provider_error', `The AI provider returned ${error.status ?? 'an error'}.`, (error.status ?? 500) >= 500)
+  if (error instanceof Anthropic.AnthropicError) return new ProviderError('client_error', `The AI client failed: ${String(error.message).slice(0, 200)}`, false)
   return new ProviderError('unknown', 'The AI call failed.', false)
 }
 

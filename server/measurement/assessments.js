@@ -10,7 +10,33 @@ import { audit } from '../services/audit.js'
 import { notifyInApp } from '../services/notify.js'
 import { CATEGORY_LABELS } from '../services/impact.js'
 import { DIMENSIONS, LABELS, RATED } from './rubric.js'
-import { aiStatus, requestAnalysis } from './engine.js'
+import { aiStatus, requestAnalysis, PROMPT_VERSION } from './engine.js'
+import { buildEvidencePack, hashInput, isInsufficient } from './evidence-pack.js'
+import { GUARDRAIL_VERSION } from './guardrails.js'
+import { rubricFor } from './rubric.js'
+
+/** Resolves AI_MODE / AI_SUPERVISED_TASKS ("taskId:owner@email, …") into { mode, tasks: Map(taskId → email|null) }. */
+export function aiMode(cfg, provider) {
+  const ai = cfg.ai || {}
+  const mode = ['off', 'supervised', 'on'].includes(ai.mode) ? ai.mode : provider.simulated ? 'on' : provider.configured ? 'supervised' : 'off'
+  const tasks = new Map()
+  for (const entry of String(ai.supervisedTasks || '').split(',').map((x) => x.trim()).filter(Boolean)) {
+    const [id, email] = entry.split(':').map((x) => x.trim())
+    if (/^[0-9a-f-]{36}$/i.test(id)) tasks.set(id.toLowerCase(), email ? email.toLowerCase() : null)
+  }
+  return { mode, tasks }
+}
+
+function supervisedCheck(db, ctx, mode, task, provider) {
+  // No provider at all: the engine answers (rules for too little evidence, otherwise a clear 503 "not configured").
+  if (mode.mode === 'on' || !provider.configured) return
+  if (mode.mode === 'off') throw new AppError(403, 'ai_off', 'AI analysis is switched off on this server (AI_MODE=off).')
+  if (!isAdmin(ctx)) throw new AppError(403, 'ai_supervised', 'AI analysis is in supervised validation: only an administrator can start it, on a selected task.')
+  if (!mode.tasks.has(task.id)) throw new AppError(403, 'ai_supervised', 'AI analysis is in supervised validation: this task is not one of the selected tasks (AI_SUPERVISED_TASKS). Nothing was sent.')
+  const expected = mode.tasks.get(task.id)
+  const owner = db.prepare('SELECT email FROM users WHERE id = ?').get(task.assignee_id)?.email?.toLowerCase()
+  if (expected && owner !== expected) throw new AppError(409, 'supervised_owner_mismatch', 'This task is not owned by the person named for the supervised test. Nothing was sent.')
+}
 
 const userName = (db, id) => (id ? db.prepare('SELECT name FROM users WHERE id = ?').get(id)?.name ?? null : null)
 export const canSeeSubject = (db, ctx, userId) => userId === ctx.user.id || isAdmin(ctx) || (ctx.role === 'manager' && scopeUserIds(db, ctx).includes(userId))
@@ -44,11 +70,12 @@ function presentAssessment(db, a) {
     .map((f) => ({ id: f.id, action: f.action, actorRole: f.actor_role, by: f.actor_name, dimension: f.dimension, dimensionLabel: f.dimension ? LABELS[f.dimension] : null, fromLevel: levelText(f.dimension, f.from_level), toLevel: levelText(f.dimension, f.to_level), comment: f.comment, at: f.created_at }))
   return {
     id: a.id, taskId: a.task_id, userId: a.user_id, userName: userName(db, a.user_id), isCurrent: Boolean(a.is_current),
-    provider: a.provider, model: a.model, promptVersion: a.prompt_version, rubricVersion: a.rubric_version, simulated: Boolean(ctxj.simulated),
+    provider: a.provider, model: a.model, requestedModel: ctxj.requestedModel ?? null, fallback: ctxj.fallback ?? null, live: a.provider !== 'rules' && !ctxj.simulated,
+    promptVersion: a.prompt_version, rubricVersion: a.rubric_version, guardrailVersion: ctxj.guardrailVersion ?? null, simulated: Boolean(ctxj.simulated),
     periodStart: a.period_start, periodEnd: a.period_end, createdAt: a.created_at,
     evidenceState: a.evidence_state, understanding: a.understanding, summary: a.summary,
     complexity: dims.complexity, dimensions: RATED.map((k) => dims[k]),
-    impact: { claimed: named(impact.claimed), estimated: (impact.estimated || []).map((e) => ({ ...e, evidence: resolve(e.refs || []) })), evidenceSupported: named(impact.evidenceSupported), verified: named(impact.verified) },
+    impact: { basis: impact.basis ?? null, claimed: named(impact.claimed), estimated: (impact.estimated || []).map((e) => ({ ...e, evidence: resolve(e.refs || []) })), evidenceSupported: named(impact.evidenceSupported), verified: named(impact.verified) },
     missing: json(a.missing_json, []),
     context: {
       blockers: (ctxj.blockers || []).map((b) => ({ ...b, label: refs[b.ref]?.label })), blockedOutside: ctxj.blockedOutside, delivered: ctxj.delivered,
@@ -69,16 +96,22 @@ function subjectOf(db, ctx, taskId) {
   return { task, subjectId: task.assignee_id }
 }
 
-export function getTaskAssessment(db, ctx, provider, taskId) {
+export function getTaskAssessment(db, ctx, provider, taskId, mode = { mode: 'on', tasks: new Map() }) {
   let s
   try { s = subjectOf(db, ctx, taskId) } catch (error) { if (error.status === 404 && error.message.startsWith('Assessment')) return { hidden: true }; throw error }
   const { task, subjectId } = s
-  const ai = aiStatus(provider)
+  const ai = { ...aiStatus(provider, mode), selectedForSupervisedTest: mode.mode === 'supervised' ? mode.tasks.has(task.id) : null }
   if (!subjectId) return { available: false, reason: 'This task has no owner yet.', ai }
   const current = db.prepare('SELECT * FROM contribution_assessments WHERE task_id = ? AND user_id = ? AND is_current = 1').get(task.id, subjectId)
   const lastRun = db.prepare('SELECT * FROM ai_evaluation_runs WHERE task_id = ? AND subject_user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(task.id, subjectId)
+  // Earlier analyses stay as they were, with the people's responses to them (shown so a re-analysis never hides a
+  // manager's adjustment or an employee's dispute).
   const history = db.prepare('SELECT id, provider, model, evidence_state, employee_status, manager_status, created_at FROM contribution_assessments WHERE task_id = ? AND user_id = ? AND is_current = 0 ORDER BY created_at DESC').all(task.id, subjectId)
-    .map((h) => ({ id: h.id, provider: h.provider, model: h.model, evidenceState: h.evidence_state, employeeStatus: h.employee_status, managerStatus: h.manager_status, createdAt: h.created_at }))
+    .map((h) => ({
+      id: h.id, provider: h.provider, model: h.model, evidenceState: h.evidence_state, employeeStatus: h.employee_status, managerStatus: h.manager_status, createdAt: h.created_at,
+      responses: db.prepare(`SELECT f.action, f.actor_role, f.dimension, f.from_level, f.to_level, f.comment, f.created_at, u.name FROM assessment_feedback f JOIN users u ON u.id = f.actor_id WHERE f.assessment_id = ? ORDER BY f.created_at`).all(h.id)
+        .map((f) => ({ action: f.action, actorRole: f.actor_role, by: f.name, dimension: f.dimension, dimensionLabel: f.dimension ? LABELS[f.dimension] : null, fromLevel: levelText(f.dimension, f.from_level), toLevel: levelText(f.dimension, f.to_level), comment: f.comment, at: f.created_at }))
+    }))
   const mine = subjectId === ctx.user.id
   return {
     available: true, ai, subjectName: userName(db, subjectId), isMine: mine,
@@ -86,7 +119,8 @@ export function getTaskAssessment(db, ctx, provider, taskId) {
     assessment: current ? presentAssessment(db, current) : null,
     history,
     can: {
-      analyse: (mine || canManageTask(db, ctx, task)) && task.status !== 'CANCELLED',
+      analyse: task.status !== 'CANCELLED' && (mode.mode === 'on' || !provider.configured ? (mine || canManageTask(db, ctx, task)) : mode.mode === 'supervised' && isAdmin(ctx) && mode.tasks.has(task.id)),
+      preview: mine || canManageTask(db, ctx, task),
       respond: mine && Boolean(current),
       review: Boolean(current) && canReviewSubject(db, ctx, subjectId)
     }
@@ -100,12 +134,37 @@ export function getAssessmentById(db, ctx, id) {
   return presentAssessment(db, a)
 }
 
-export function analyseTask(db, ctx, provider, taskId, { trigger = 'manual' } = {}) {
+export function analyseTask(db, ctx, provider, taskId, { trigger = 'manual', mode = { mode: 'on', tasks: new Map() } } = {}) {
   const { task, subjectId } = subjectOf(db, ctx, taskId)
   if (!subjectId) throw invalid('Assign the task before analysing it.')
   if (subjectId !== ctx.user.id && !canManageTask(db, ctx, task)) throw forbidden('Only the person doing the task or their manager can analyse it.')
   if (task.status === 'CANCELLED') throw invalid('A cancelled task is not analysed.')
-  return requestAnalysis(db, provider, { task, subjectId, actorId: ctx.user.id, trigger })
+  supervisedCheck(db, ctx, mode, task, provider)
+  return requestAnalysis(db, provider, { task, subjectId, actorId: ctx.user.id, trigger, notify: mode.mode === 'on' })
+}
+
+/**
+ * Exactly what would be sent to the AI for this task — built from existing TeamPulse data only, nothing fetched,
+ * nothing written, no model call. For checking a task before a supervised test.
+ */
+export function previewAnalysis(db, ctx, provider, taskId, mode = { mode: 'on', tasks: new Map() }) {
+  const { task, subjectId } = subjectOf(db, ctx, taskId)
+  if (!subjectId) throw invalid('This task has no owner yet.')
+  if (subjectId !== ctx.user.id && !canManageTask(db, ctx, task)) throw forbidden('Only the person doing the task or their manager can preview its analysis input.')
+  const { pack, facts } = buildEvidencePack(db, task, subjectId)
+  const insufficient = isInsufficient(facts)
+  const rubric = rubricFor(db, task.org_id)
+  const body = JSON.stringify(pack)
+  let blockedBy = null
+  try { supervisedCheck(db, ctx, mode, task, provider) } catch (error) { blockedBy = error.message }
+  return {
+    taskId: task.id, subject: userName(db, subjectId), insufficient, wouldCallModel: !insufficient && provider.configured,
+    provider: insufficient ? 'rules' : provider.name, model: insufficient ? null : provider.model, simulated: Boolean(provider.simulated),
+    promptVersion: PROMPT_VERSION, guardrailVersion: GUARDRAIL_VERSION, rubricVersion: rubric.version,
+    inputHash: hashInput({ pack, prompt: PROMPT_VERSION, guardrails: GUARDRAIL_VERSION, rubric: rubric.version, provider: insufficient ? 'rules' : provider.name, model: insufficient ? null : provider.model }),
+    bytes: Buffer.byteLength(body), itemCounts: pack.items.reduce((m, i) => ({ ...m, [i.kind]: (m[i.kind] || 0) + 1 }), {}),
+    externalSources: 0, filesOpened: 0, mode: mode.mode, blockedBy, pack
+  }
 }
 
 function currentFor(db, task, subjectId) {

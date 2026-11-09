@@ -5,8 +5,30 @@
 // or invent numbers. Every adjustment is recorded as a note shown to the manager.
 import { RATED } from './rubric.js'
 
-const SELF_REPORTED = new Set(['task', 'submission', 'update', 'context'])
+// Bump on any change to these rules: part of the dedupe hash, stored with every run and assessment.
+export const GUARDRAIL_VERSION = 'guardrails-2026-11-v4'
 const LEVEL_OF = { L1: 1, L2: 2, L3: 3, L4: 4 }
+const SELF_CAP = 0.6
+
+/** Human-written text in the pack (no ids, no timestamps), for checking that numbers really appear in the evidence. */
+function evidenceText(pack) {
+  const t = pack.task
+  const parts = [t.title, t.description, t.expectedOutcome]
+  for (const i of pack.items) {
+    parts.push(i.text, i.workSummary, i.outcomeClaimed, i.before, i.workPerformed, i.result, i.label, i.dependency, i.resolution)
+    if (i.value) parts.push(String(i.value.amount), i.value.unit)
+  }
+  return parts.filter(Boolean).join('\n')
+}
+const numberIn = (n, text) => new RegExp(`(^|[^\\d.])${n.replace('.', '\\.')}(?![\\d])`).test(text)
+
+/** Impact basis, decided from records — never from the model. */
+export function impactBasis(facts) {
+  if (facts.impacts.some((i) => i.verification === 'VERIFIED')) return 'verified'
+  if (facts.impacts.some((i) => i.verification === 'PENDING' && i.evidenceCount > 0)) return 'evidence_supported'
+  if (facts.impacts.length || facts.claims.length) return 'claimed'
+  return 'none'
+}
 
 function missingInfo(facts, task) {
   const out = []
@@ -27,7 +49,7 @@ export function insufficientAssessment(facts, task) {
     summary: 'No assessment possible from the available evidence. This says nothing about the quality of the work — only that it is not documented.',
     complexity: { state: 'insufficient_evidence', level: null, confidence: null, reason, refs: [], source: 'rules' },
     dimensions: Object.fromEntries(RATED.map((k) => [k, { state: 'insufficient_evidence', level: null, confidence: null, reason, refs: [], source: 'rules' }])),
-    impact: impactBlock(facts, []),
+    impact: { ...impactBlock(facts, []), basis: impactBasis(facts) },
     missing: missingInfo(facts, task),
     notes: ['Rules: evidence below the minimum, so the AI was not asked (nothing to analyse, nothing guessed).'],
     blockerNote: '', sharedNote: ''
@@ -48,7 +70,20 @@ export function applyGuardrails(output, { pack, facts, task }) {
   const notes = []
   const known = new Set(Object.keys(facts.refs))
   const kindOf = (ref) => facts.refs[ref]?.kind
-  const packText = JSON.stringify(pack)
+  const itemOf = new Map(pack.items.map((i) => [i.ref, i]))
+  // Corroboration = something other than the employee's own account: an artefact (link/file), a blocker, an outcome
+  // record that is verified or has evidence, a review WITH a comment (a bare approval says nothing about difficulty),
+  // a system-recorded event, help recorded on a teammate's task, or words written by someone else.
+  const corroborates = (ref) => {
+    const it = itemOf.get(ref)
+    if (!it) return false
+    if (['evidence', 'blocker', 'event', 'help', 'external'].includes(it.kind)) return true
+    if (it.kind === 'review') return Boolean(it.text)
+    if (it.kind === 'impact') return it.verification === 'verified' || it.evidenceItems > 0
+    return it.author !== 'employee' && !it.selfReported
+  }
+  const selfReported = (ref) => !corroborates(ref)
+  const corpus = evidenceText(pack)
   const cleanRefs = (list, where) => {
     const ok = [...new Set(list.filter((r) => known.has(r)))]
     const bad = list.filter((r) => !known.has(r))
@@ -68,9 +103,9 @@ export function applyGuardrails(output, { pack, facts, task }) {
   }
   if (complexity.state === 'assessed') {
     const workRefs = complexity.refs.filter((r) => kindOf(r) !== 'task')
-    const corroborating = complexity.refs.filter((r) => !SELF_REPORTED.has(kindOf(r)))
+    const corroborating = complexity.refs.filter(corroborates)
     if (complexity.level >= 3 && !workRefs.length) lower(complexity, 2, 'L3+ needs evidence from the work itself; a title or priority label is not enough.')
-    else if (complexity.level === 4 && !corroborating.length) lower(complexity, 3, 'L4 needs corroboration beyond the employee\'s own description (evidence, a review, a blocker, an outcome record).')
+    else if (complexity.level >= 3 && !corroborating.length) lower(complexity, 2, 'L3+ needs corroboration beyond the employee\'s own description (an artefact, a review comment, a blocker, a verified or evidenced outcome, or someone else\'s words).')
   }
   if (complexity.state !== 'assessed') complexity.level = null
 
@@ -82,9 +117,20 @@ export function applyGuardrails(output, { pack, facts, task }) {
     if (x.state === 'assessed' && (!x.level || !x.refs.length)) {
       notes.push(`${k.replace('_', '-')} had no valid supporting evidence, so it is marked insufficient.`)
       Object.assign(x, { state: 'insufficient_evidence', level: null })
+    } else if (x.state === 'assessed' && x.refs.every((r) => r === 'task')) {
+      // The task description says what was asked, not how the work went.
+      notes.push(`${k.replace('_', '-')} cited only the task description, which describes the request, not the work; marked insufficient.`)
+      Object.assign(x, { state: 'insufficient_evidence', level: null })
     }
     if (x.state !== 'assessed') x.level = null
     dims[k] = x
+  }
+
+  // High problem-solving / collaboration ratings need something beyond the employee's own account (ownership is
+  // exempt: the employee's own progress updates and blocker reports ARE evidence of ownership).
+  for (const k of ['problem_solving', 'collaboration']) {
+    const d = dims[k]
+    if (d.state === 'assessed' && d.level >= 4 && !d.refs.some(corroborates)) lower(d, 3, `${k.replace('_', '-')} above 3 needs corroboration beyond the employee's own description.`)
   }
 
   // Quality reflects reviews and regressions, whatever the model said.
@@ -117,10 +163,18 @@ export function applyGuardrails(output, { pack, facts, task }) {
     i.reason = `${i.reason} [Shared outcome: ${shared.length} record(s) involve other contributors; the impact is not attributed to this person alone.]`
   }
 
+  // Model-reported confidence is not calibrated; where only the employee's own account supports a rating it is capped.
+  let capped = 0
+  for (const d of [complexity, ...Object.values(dims)]) {
+    if (d.state === 'assessed' && d.source === 'ai' && d.confidence > SELF_CAP && d.refs.length && d.refs.every(selfReported)) { d.confidence = SELF_CAP; capped++ }
+  }
+  if (capped) notes.push(`Confidence capped at ${SELF_CAP} on ${capped} rating(s) supported only by the employee's own account (nothing corroborating).`)
+  dims.impact.basis = impactBasis(facts)
+
   // Estimated outcomes: known references only, and no number that is not in the evidence.
   const estimated = []
   for (const e of output.estimated_outcomes) {
-    const nums = (e.description.match(/\d+(?:[.,]\d+)?/g) || []).filter((n) => !packText.includes(n))
+    const nums = (e.description.match(/\d+(?:[.,]\d+)?/g) || []).filter((n) => !numberIn(n, corpus))
     if (nums.length) { notes.push(`Dropped an estimated outcome with numbers not found in the evidence (${nums.join(', ')}).`); continue }
     estimated.push({ text: e.description, refs: cleanRefs(e.basis_refs, 'estimated outcome'), label: 'AI estimate — not verified' })
   }
@@ -133,7 +187,7 @@ export function applyGuardrails(output, { pack, facts, task }) {
     summary: output.contribution_summary,
     complexity,
     dimensions: dims,
-    impact: impactBlock(facts, estimated),
+    impact: { ...impactBlock(facts, estimated), basis: dims.impact.basis },
     missing: [...new Set([...output.missing_information, ...missingInfo(facts, task)])].slice(0, 12),
     notes,
     blockerNote: output.blocker_note,

@@ -52,7 +52,11 @@ export function loadConfig(overrides = {}) {
       model: env.AI_MODEL || 'claude-opus-5-5',
       effort: env.AI_EFFORT || 'medium',
       timeoutMs: Number(env.AI_TIMEOUT_MS) || 120000,
-      fallbacks: env.AI_FALLBACKS !== 'off'
+      fallbacks: env.AI_FALLBACKS !== 'off',
+      // off | supervised | on. Default: supervised for a real provider (only AI_SUPERVISED_TASKS, admins only, no
+      // automatic runs, no notifications); on for the development simulator; off otherwise.
+      mode: (env.AI_MODE || '').toLowerCase(),
+      supervisedTasks: env.AI_SUPERVISED_TASKS || ''
     },
     ...overrides
   }

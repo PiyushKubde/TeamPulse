@@ -22,7 +22,7 @@ console.log(`[config] ViaSocket: ${vs.configured ? 'configured' : 'not configure
 console.log(`[config] M91: ${m91.status().state} — ${m91.status().message}`)
 console.log(`[config] Scheduled jobs: ${cfg.cronSecret ? 'CRON_SECRET set' : 'no CRON_SECRET (scheduled routes refuse all calls)'}${cfg.localScheduler ? '; local scheduler on' : ''}`)
 console.log(`[config] Email (verification, password reset): ${mailer.configured ? `configured via ${mailer.provider}` : 'NOT configured — email sign-up and password reset are unavailable (set MAIL_PROVIDER, see .env.example)'}`)
-console.log(`[config] AI work analysis: ${ai.configured ? `${ai.simulated ? 'SIMULATED (development only, not AI)' : `${ai.name}, model ${ai.model}`}` : `not configured — ${ai.reason}`}`)
+console.log(`[config] AI work analysis: ${ai.configured ? `${ai.simulated ? 'SIMULATED (development only, not AI)' : `${ai.name}, model ${ai.model}`}; mode ${app.locals.aiMode.mode}${app.locals.aiMode.mode === 'supervised' ? ` (${app.locals.aiMode.tasks.size} selected task(s))` : ''}` : `not configured — ${ai.reason}`}`)
 if (cfg.devLogin) console.log('[config] DEV_LOGIN is on: anyone can sign in by email. Local development only.')
 
 // Events left PENDING by a previous process (crash, restart, redeploy) are replayed now; their handlers are idempotent.
