@@ -38,6 +38,8 @@ for (const [app, scope, label, kind, key] of [['github', { repo: 'demo/checkout'
   tokens[kind] = { sub, token }
 }
 for (const [app, identity] of [['github', 'priya-gh'], ['slack', 'U0PRIYA01']]) db.prepare(`INSERT INTO external_identities (id, org_id, user_id, app, identity, source, created_at) VALUES (?, ?, ?, ?, ?, 'declared', ?)`).run(randomUUID(), org, priya, app, identity, now)
+// A blocker reported 30 hours ago: a real "unresolved blocker" condition for the signals.
+db.prepare(`UPDATE blockers SET reported_at = ?`).run(new Date(Date.now() - 30 * 3600000).toISOString())
 db.close()
 
 const server = spawn('node', ['--disable-warning=ExperimentalWarning', 'server/index.js'], { env, stdio: ['ignore', 'pipe', 'inherit'] })
@@ -80,7 +82,7 @@ try {
 
   step = 'employee: evidence workspace'
   const e = await session('priya@demo.teampulse')
-  await e.click('nav >> text=My work evidence')
+  await e.click('nav >> text=My Evidence')
   await e.waitForSelector('h1:has-text("My work evidence")')
   ok(await e.isVisible('text=Collecting'), 'source status shown')
   ok(await e.isVisible(`text=${ref} Cache catalog lookups`), 'PR suggested for confirmation')
@@ -104,7 +106,7 @@ try {
 
   step = 'manager: team intelligence and evidence review'
   const m = await session('manager@demo.teampulse')
-  await m.click('nav >> text=Team intelligence')
+  await m.click('nav >> text=Team Intelligence')
   await m.waitForSelector('h1:has-text("Team intelligence")')
   ok(await m.isVisible('h2:has-text("Open blockers")'), 'blockers section'); ok(await m.isVisible('text=outside their control'), 'external blocker marked')
   await shot(m, 'ev4-intelligence')
@@ -117,6 +119,52 @@ try {
   await m.waitForSelector('text=Saved.')
   await shot(m, 'ev5-review')
 
+  step = 'employee: AI Work Assistant'
+  await e.click('nav >> text=AI Work Assistant')
+  await e.waitForSelector('h1:has-text("AI Work Assistant")')
+  await e.click('#analyse-day')
+  await e.waitForSelector('h2:has-text("Your day")')
+  ok(await e.isVisible('.digest-summary'), 'day summary')
+  ok(await e.isVisible('h3:has-text("Next priorities")'), 'next priorities')
+  await e.click('#ask-box button.chip:has-text("What should I focus on next?")')
+  await e.waitForSelector('.answer h3:has-text("Focus next")')
+  await e.fill('#q-mine', 'Find evidence for checkout latency')
+  await e.click('#ask-box button[type=submit]')
+  await e.waitForSelector('.answer h3:has-text("Evidence for")')
+  ok(await e.isVisible('.answer >> text=Cache catalog lookups'), 'found the linked PR')
+  await e.fill('#q-mine', 'Compose a haiku')
+  await e.click('#ask-box button[type=submit]')
+  await e.waitForSelector('.answer h3:has-text("I can answer these")')
+  await shot(e, 'ev7-assistant')
+
+  step = 'employee: contribution journey'
+  await e.click('nav >> text=Contributions')
+  await e.waitForSelector('h1:has-text("My contributions")')
+  await e.click('a.journey-card:has-text("Cut checkout API p95")')
+  await e.waitForSelector('.stage-strip')
+  ok(await e.isVisible('ol.journey >> text=GitHub: PR #77'), 'GitHub step in the timeline')
+  ok(await e.isVisible('text=Not part of this work'), 'correction available')
+  ok(await e.isVisible('h2:has-text("What is missing")'), 'missing links shown')
+  await shot(e, 'ev8-journey')
+
+  step = 'manager: copilot, reviews, signals'
+  await m.click('nav >> text=Team Intelligence')
+  await m.waitForSelector('#copilot button.chip')
+  await m.click('#copilot button.chip:has-text("Who is blocked and why?")')
+  await m.waitForSelector('.answer >> text=Dev Patel: Migrate billing DB')
+  ok(await m.isVisible('.answer >> text=outside their control'), 'external blocker explained')
+  await shot(m, 'ev9-copilot')
+  await m.click('nav >> text=Contribution Reviews')
+  await m.waitForSelector('h1:has-text("Contribution reviews")')
+  await m.waitForSelector('#team-signals >> text=Unresolved blocker')
+  await m.click('#team-signals li:has-text("Unresolved blocker") >> button:has-text("Dismiss")')
+  await m.fill('#cf-reason', 'Vendor ticket escalated by me this morning.')
+  await m.click('#cf-ok')
+  await m.waitForSelector('text=Dismissed.')
+  await shot(m, 'ev10-reviews')
+  await m.click('nav >> text=Team Dashboard')
+  await m.waitForSelector('h2:has-text("Where to intervene")')
+
   step = 'phone width'
   const p = await session('priya@demo.teampulse', { width: 390, height: 844 })
   await p.goto(`${base}/#/evidence?state=all`); await p.waitForSelector('h1:has-text("My work evidence")')
@@ -125,6 +173,11 @@ try {
   const pm = await session('manager@demo.teampulse', { width: 390, height: 844 })
   await pm.goto(`${base}/#/contribution`); await pm.waitForSelector('h1:has-text("Team intelligence")')
   ok(await overflow(pm) <= 1, `team intelligence fits a phone (${await overflow(pm)}px)`)
+  for (const [page, url, sel] of [[p, '#/assistant?run=1', 'h2:has-text("Your day")'], [p, `#/journey/${task}`, '.stage-strip'], [p, '#/contributions', 'h1:has-text("My contributions")'], [pm, '#/reviews', 'h1:has-text("Contribution reviews")'], [pm, '#/dashboard', 'h2:has-text("Where to intervene")']]) {
+    await page.goto(`${base}/${url}`); await page.waitForSelector(sel)
+    ok(await overflow(page) <= 1, `${url} fits a phone (${await overflow(page)}px)`)
+  }
+  await shot(p, 'ev11-phone-journey')
 } catch (err) {
   problems.unshift(`FAILED at "${step}": ${err.message}`)
   if (current) problems.push(`page (${current.url()}): ${(await current.innerText('body').catch(() => '')).slice(0, 600)}`)

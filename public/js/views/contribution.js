@@ -3,6 +3,7 @@
 import { api, html, raw, modal, bindForm, toast, errorText, ago, d, empty, loading } from '../ui.js'
 import { app } from '../app.js'
 import { renderEvidenceReview } from './evidence.js'
+import { questionBox } from './assistant.js'
 
 const CX = { 1: 'Routine', 2: 'Standard', 3: 'Complex', 4: 'Highly complex' }
 const STATE_TEXT = { insufficient_evidence: 'Not enough evidence', not_applicable: 'Not applicable' }
@@ -191,9 +192,10 @@ export async function renderContribution(main, q) {
   const rv = t.evidenceReview
   const toReview = rv.disputed + rv.unknownAuthor + rv.sharedPending
   main.innerHTML = html`<div class="page-head"><div><h1>Team intelligence</h1><p>What your people's work involved and achieved — complexity, quality, ownership, problem-solving, collaboration, verified impact and the evidence behind them. ${t.note}</p></div>
-      <a class="btn ghost" href="#/contribution/${app.me.id}">My contribution</a></div>
+      <div class="row"><a class="btn ghost" href="#/reviews">Contribution reviews</a></div></div>
     ${periodTabs('#/contribution', days)}
     <div class="tabs"><a href="#/contribution?days=${days}" ${tab === 'team' ? raw('aria-current="page"') : ''}>Team</a><a href="#/contribution?days=${days}&tab=review" ${tab === 'review' ? raw('aria-current="page"') : ''}>Evidence to review${toReview ? html` <span class="count">${toReview}</span>` : ''}</a></div>
+    ${tab === 'team' ? html`<section class="card copilot" style="margin-bottom:16px"><div class="card-head"><div><h2>Ask about your team</h2><p>Manager Copilot — answers from your team’s records, each linked to the task, contribution or evidence behind it.</p></div></div><div id="copilot"></div></section>` : ''}
     ${tab === 'review' ? html`<section class="card"><div class="card-head"><div><h2>Evidence to review</h2><p>${rv.disputed} disputed · ${rv.unknownAuthor} with an unknown author · ${rv.sharedPending} shared links. Decide whose work it is; nothing is credited until then.</p></div></div><div id="review-box">${loading()}</div></section>` : html`
     <div class="grid two">
       <section class="card"><div class="card-head"><div><h2>Significant contributions</h2><p>Complex (L3+) work or verified outcomes, most recent first — with the reason. Not a ranking.</p></div></div>
@@ -211,6 +213,8 @@ export async function renderContribution(main, q) {
       </tbody></table></div>` : empty('Nobody to show yet', 'People in the teams you manage appear here once their work has been analysed.')}
     </section>`}`.toString()
   main.querySelectorAll('tr.clickable').forEach((tr) => tr.addEventListener('click', (e) => { if (!e.target.closest('a')) location.hash = tr.dataset.href }))
+  const cp = main.querySelector('#copilot')
+  if (cp) api('/api/assistant/suggestions').then((sg) => questionBox(cp, { team: true, suggestions: sg.team })).catch(() => cp.remove())
   const rb = main.querySelector('#review-box')
   if (rb) renderEvidenceReview(rb)
 }
@@ -226,6 +230,7 @@ export async function renderPerson(main, userId, q) {
   main.innerHTML = html`<div class="small muted" style="margin-bottom:6px">${app.isManager ? html`<a href="#/contribution">← All people</a>` : html`<a href="#/dashboard">← Dashboard</a>`}</div>
     <div class="page-head"><div><h1>${me ? 'My contribution' : p.person.name}</h1><p>${p.person.title || p.person.role}${p.person.team ? ` · ${p.person.team}` : ''}</p></div></div>
     ${periodTabs(`#/contribution/${userId}`, days)}
+    <p class="small" style="margin:-6px 0 12px"><a href="#/contributions?userId=${userId}">See ${me ? 'your' : 'their'} work as contribution journeys →</a></p>
     <div class="notice">${p.note}</div>
     ${p.canReview ? html`<div class="row" style="margin-bottom:12px"><button class="btn small" id="analyse-person">Analyse ${p.person.name}'s recent work</button><span class="small muted">Uses their tasks and the evidence linked to them. Results appear on each task.</span></div>` : me ? html`<div class="row" style="margin-bottom:12px"><a class="btn small" href="#/evidence">My work evidence and “Analyse my work”</a></div>` : ''}
     <section class="card"><h2 style="margin-bottom:6px">In short</h2><p>${p.narrative}</p>

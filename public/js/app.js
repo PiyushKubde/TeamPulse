@@ -11,6 +11,9 @@ import { renderReports } from './views/reports.js'
 import { renderSettings } from './views/settings.js'
 import { renderContribution, renderPerson } from './views/contribution.js'
 import { renderEvidence } from './views/evidence.js'
+import { renderAssistant } from './views/assistant.js'
+import { renderContributions, renderJourney } from './views/journeys.js'
+import { renderReviews } from './views/reviews.js'
 
 const ICONS = {
   dashboard: 'M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z',
@@ -21,6 +24,8 @@ const ICONS = {
   automations: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z',
   alerts: 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0',
   reports: 'M18 20V10M12 20V4M6 20v-6',
+  reviews: 'M9 11l3 3L22 4M3 5h6M3 12h4M3 19h12',
+  assistant: 'M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4L12 3zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z',
   evidence: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
   intelligence: 'M12 2a7 7 0 0 0-4 12.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A7 7 0 0 0 12 2zM9 21h6',
   settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z'
@@ -37,17 +42,21 @@ export const app = {
   counts: {}
 }
 
+// Navigation by role. Managers see their team first, then their own work; nothing is listed twice.
 const NAV = [
-  { key: 'dashboard', label: 'Dashboard', href: '#/dashboard', icon: 'dashboard' },
-  { key: 'my-tasks', label: 'My Tasks', href: '#/my-tasks', icon: 'mine' },
-  { key: 'team-tasks', label: 'Team Tasks', href: '#/team-tasks', icon: 'team', manager: true },
-  { key: 'requests', label: 'Task Requests', href: '#/requests', icon: 'requests', count: 'requests' },
-  { key: 'impact', label: 'Performance & Impact', href: '#/impact', icon: 'impact' },
-  { key: 'evidence', label: 'My work evidence', href: '#/evidence', icon: 'evidence' },
-  { key: 'intelligence', label: 'Team intelligence', href: '#/contribution', icon: 'intelligence', manager: true },
-  { key: 'automations', label: 'Automation Center', href: '#/automations', icon: 'automations' },
-  { key: 'alerts', label: 'Alerts & Notifications', href: '#/alerts', icon: 'alerts', count: 'unread' },
+  { key: 'dashboard', label: 'Dashboard', managerLabel: 'Team Dashboard', href: '#/dashboard', icon: 'dashboard' },
+  { key: 'team-tasks', label: 'Team Work', href: '#/team-tasks', icon: 'team', manager: true },
+  { key: 'intelligence', label: 'Team Intelligence', href: '#/contribution', icon: 'intelligence', manager: true },
+  { key: 'reviews', label: 'Contribution Reviews', href: '#/reviews', icon: 'reviews', manager: true, count: 'reviews' },
   { key: 'reports', label: 'Reports', href: '#/reports', icon: 'reports', manager: true },
+  { section: 'My work', manager: true },
+  { key: 'my-tasks', label: 'My Work', href: '#/my-tasks', icon: 'mine' },
+  { key: 'evidence', label: 'My Evidence', href: '#/evidence', icon: 'evidence' },
+  { key: 'assistant', label: 'AI Work Assistant', href: '#/assistant', icon: 'assistant' },
+  { key: 'contributions', label: 'Contributions', href: '#/contributions', icon: 'impact' },
+  { key: 'requests', label: 'Task Requests', href: '#/requests', icon: 'requests', count: 'requests' },
+  { key: 'automations', label: 'Connected Apps', managerLabel: 'Automation Center', href: '#/automations', icon: 'automations' },
+  { key: 'alerts', label: 'Alerts', href: '#/alerts', icon: 'alerts', count: 'unread' },
   { key: 'settings', label: 'Settings', href: '#/settings', icon: 'settings' }
 ]
 
@@ -57,7 +66,7 @@ function shell(active) {
     <aside class="sidebar" aria-label="Main navigation">
       <a class="brand" href="#/dashboard">${LOGO}<span>TeamPulse</span></a>
       <div class="org-name" title="${m.orgName}">${m.orgName}</div>
-      <nav class="nav" id="nav">${NAV.filter((n) => !n.manager || app.isManager).map((n) => html`<a href="${n.href}" ${n.key === active ? raw('aria-current="page"') : ''}>${icon(n.icon)}<span>${n.label}</span>${n.count && app.counts[n.count] ? html`<span class="count">${app.counts[n.count]}</span>` : ''}</a>`)}</nav>
+      <nav class="nav" id="nav">${NAV.filter((n) => !n.manager || app.isManager).map((n) => n.section ? html`<div class="nav-section">${n.section}</div>` : html`<a href="${n.href}" ${n.key === active ? raw('aria-current="page"') : ''}>${icon(n.icon)}<span>${app.isManager && n.managerLabel ? n.managerLabel : n.label}</span>${n.count && app.counts[n.count] ? html`<span class="count">${app.counts[n.count]}</span>` : ''}</a>`)}</nav>
       <div class="sidebar-foot">${avatar(app.me.name, app.me.pictureUrl)}<div class="who"><b>${app.me.name}</b><span>${m.role}</span></div>
         <button class="btn small ghost" id="logout" title="Sign out">Sign out</button></div>
     </aside>
@@ -72,7 +81,8 @@ async function refreshCounts() {
   if (!app.session?.membership) return
   try {
     const [n, r] = await Promise.all([api('/api/notifications?unread=true'), app.isManager ? api('/api/requests?status=PENDING') : Promise.resolve([])])
-    app.counts = { unread: n.unread, requests: r.filter((x) => x.requestedBy !== app.me.id).length }
+    const sig = app.isManager ? await api('/api/signals?scope=team').catch(() => []) : []
+    app.counts = { unread: n.unread, requests: r.filter((x) => x.requestedBy !== app.me.id).length, reviews: sig.filter((x) => x.severity !== 'low').length }
     const nav = document.getElementById('nav')
     if (nav) nav.querySelectorAll('a').forEach((a) => {
       const item = NAV.find((x) => x.href === a.getAttribute('href'))
@@ -90,11 +100,15 @@ const ROUTES = [
   [/^#\/team-tasks$/, 'team-tasks', () => (main, q) => renderTaskList(main, { view: 'team', q })],
   [/^#\/tasks\/([0-9a-f-]{36})$/, 'my-tasks', (m) => (main) => renderTaskDetail(main, m[1])],
   [/^#\/requests$/, 'requests', () => renderRequests],
-  [/^#\/impact$/, 'impact', () => renderImpact],
-  [/^#\/impact\/([0-9a-f-]{36})$/, 'impact', (m) => (main) => renderImpactDetail(main, m[1])],
+  [/^#\/impact$/, 'contributions', () => renderImpact],
+  [/^#\/impact\/([0-9a-f-]{36})$/, 'contributions', (m) => (main) => renderImpactDetail(main, m[1])],
   [/^#\/contribution$/, 'intelligence', () => renderContribution],
   [/^#\/evidence$/, 'evidence', () => renderEvidence],
-  [/^#\/contribution\/([0-9a-f-]{36})$/, 'impact', (m) => (main, q) => renderPerson(main, m[1], q)],
+  [/^#\/assistant$/, 'assistant', () => renderAssistant],
+  [/^#\/contributions$/, 'contributions', () => renderContributions],
+  [/^#\/journey\/([0-9a-f-]{36})$/, 'contributions', (m) => (main) => renderJourney(main, m[1])],
+  [/^#\/reviews$/, 'reviews', () => renderReviews],
+  [/^#\/contribution\/([0-9a-f-]{36})$/, 'contributions', (m) => (main, q) => renderPerson(main, m[1], q)],
   [/^#\/automations$/, 'automations', () => renderAutomations],
   [/^#\/alerts$/, 'alerts', () => renderAlerts],
   [/^#\/reports$/, 'reports', () => renderReports],

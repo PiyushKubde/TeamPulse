@@ -48,7 +48,7 @@ try {
   await shot(m, '01-manager-dashboard')
 
   step = 'team tasks + filters'
-  await m.click('nav >> text=Team Tasks')
+  await m.click('nav >> text=Team Work')
   await m.waitForSelector('h1:has-text("Team tasks")')
   await m.waitForSelector('a:has-text("Migrate billing DB")')
   await m.selectOption('#f-condition', 'overdue')
@@ -69,7 +69,7 @@ try {
   const newTaskUrl = m.url()
 
   step = 'review submission'
-  await m.click('nav >> text=Team Tasks')
+  await m.click('nav >> text=Team Work')
   await m.click('text=Automate weekly invoice reconciliation')
   await m.click('[data-act=review]')
   await m.fill('#r-c', 'Great work — ship it')
@@ -87,7 +87,7 @@ try {
   await m.waitForSelector('h1:has-text("Add canary deploys")')
 
   step = 'verify impact'
-  await m.click('nav >> text=Performance')
+  await m.click('nav >> text=Contributions'); await m.click('a.btn:has-text("Outcomes")')
   await m.waitForSelector('text=Contributions by person')
   await m.click('text=Prevented a disk-full outage')
   await m.click('#verify')
@@ -116,7 +116,7 @@ try {
   await m.click('nav >> text=Automation Center')
   await m.waitForSelector('text=ViaSocket is not configured')
   ok(await m.isVisible('text=Slack') && await m.isVisible('text=GitHub'), 'curated apps listed')
-  await m.click('text=Ready-made automations')
+  await m.click('.tabs a:has-text("Ready-made automations")')
   await m.waitForSelector('text=New Task Notification')
   await m.click('[data-intake]')
   await m.waitForSelector('#tok')
@@ -139,7 +139,7 @@ try {
   step = 'employee dashboard'
   const { page: e } = await session('dev@demo.teampulse')
   await e.waitForSelector('text=Daily reflection')
-  ok(!(await e.isVisible('nav >> text=Team Tasks')), 'employee has no Team Tasks nav')
+  ok(!(await e.isVisible('nav >> text=Team Work')), 'employee has no Team Work nav')
   ok(!(await e.isVisible('nav >> text=Reports')), 'employee has no Reports nav')
   await e.fill('#r-contribution', 'Unblocked the billing migration plan')
   await e.click('#reflection button[type=submit]')
@@ -174,7 +174,7 @@ try {
   await e.waitForSelector('text=E2E suggestion: dashboards for queue depth')
 
   step = 'employee records impact'
-  await e.click('nav >> text=Performance')
+  await e.click('nav >> text=Contributions'); await e.click('a.btn:has-text("Outcomes")')
   await e.click('#new-impact')
   await e.fill('#i-t', 'E2E: rate limiter blocked credential stuffing')
   await e.selectOption('#i-c', 'RELIABILITY')
@@ -200,7 +200,7 @@ try {
   ok(await p.isVisible('#nav-toggle'), 'menu button on phone')
   await shot(p, '09-mobile-dashboard')
   await p.click('#nav-toggle')
-  await p.click('nav >> text=Team Tasks')
+  await p.click('nav >> text=Team Work')
   await p.waitForSelector('h1:has-text("Team tasks")')
   const overflow2 = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   ok(overflow2 <= 1, `team tasks fits the phone width (overflow ${overflow2}px)`)

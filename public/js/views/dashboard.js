@@ -1,6 +1,7 @@
 import { api, html, avatar, ago, dt, statusBadge, prioBadge, conditionBadges, progressBar, verifyBadge, empty, bindForm, toast, requestBadge, errorText } from '../ui.js'
 import { app } from '../app.js'
 import { openTaskForm } from './tasks.js'
+import { renderSignals } from './assistant.js'
 
 const stat = (label, value, { tone = '', href = null } = {}) => href
   ? html`<a class="stat ${value ? tone : ''}" href="${href}"><div class="label">${label}</div><div class="value">${value}</div></a>`
@@ -41,10 +42,12 @@ export async function renderDashboard(main) {
   main.innerHTML = html`
     <div class="page-head"><div><h1>${m ? 'Team dashboard' : 'My dashboard'}</h1><p>${m ? 'Where the team stands, where people need help, and the outcomes they delivered. Task counts are operational only.' : 'Your work, what needs you, and the difference you made.'}</p></div>
       <div class="row"><button class="btn" id="new-task">${app.session.membership.creationMode === 'direct' ? 'New task' : 'Suggest a task'}</button></div></div>
+    ${m ? html`<section class="card intervene" id="dash-signals" style="margin-bottom:16px"></section>` : html`<section class="card today-card" style="margin-bottom:16px"><div class="card-head"><div><h2>Today</h2><p>What you are doing, what you accomplished, and what needs your attention.</p></div><a class="btn" href="#/assistant?run=1">Analyse my day</a></div><div id="dash-signals"></div></section>`}
     ${m ? managerSection(m) : ''}
-    ${m ? html`<div class="section-title"><h2>My own work</h2></div>` : ''}
+    ${m ? html`<div class="section-title"><h2>My own work</h2><a class="btn small ghost" href="#/assistant?run=1">Analyse my day</a></div>` : ''}
     ${personalSection(p, !m)}
   `
+  renderSignals(document.getElementById('dash-signals'), m ? { scope: 'team', limit: 6, title: 'Where to intervene' } : { scope: 'mine', limit: 5 })
   document.getElementById('new-task').addEventListener('click', () => openTaskForm())
   const cd = document.getElementById('contrib-dash')
   if (cd) {
