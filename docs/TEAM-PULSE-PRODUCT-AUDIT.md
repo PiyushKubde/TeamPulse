@@ -359,8 +359,7 @@ environment keys; value never read).
 | Encrypted at rest off-host | **PASS** — the file fetched through its public link starts with the `TPB1` encrypted format; no gzip header, no SQLite header, no readable JSON | byte check of the downloaded file |
 | **Backup restoration with the configured key** | **PASS** — the app downloaded its own off-host copy, decrypted it with `BACKUP_ENCRYPTION_KEY`, restored it into a temporary folder, `integrity_check` ok, row counts equal to the snapshot | job output "off-host uploaded; restore verified"; server log "restore VERIFIED" |
 | Bug found and fixed in production | First run failed: Embarko storage `400 file_type_not_allowed` for `.enc`. Fixed (`538b4b6`): upload as `.gz` (content still ciphertext) + automatic retry of failed off-host copies | job output before/after |
-| **Persistence across restart** | **PASS** — restart via environment apply (new deployment v11). The new process read the backup record written by the previous process at 09:11:47 and the same counts (1 organization, 2 users) | job output after restart: "last backup 2026-11-09T09:11:47.347Z (off-host uploaded; restore verified); db: 1 org(s), 2 user(s)…" |
-| Persistence across redeploys | **PASS** — 1 organization, 2 users before and after v9 → v10 → v11 | job outputs |
+| **Persistence across restart** | **PASS (via redeploy)** — v9 (`963cfe0`, port 23228) wrote a backup record at 09:10:01 whose off-host upload failed; v10 (`538b4b6`, a new build and a **new process**, port 30747) read that record at 09:11:44 and retried because of it. Counts unchanged (1 organization, 2 users). **Correction:** an earlier line claimed the "v11 restart" proved this; v11 was an environment apply with no changes — the logs show the same single process (port 30747) before and after, so v11 was **not** a restart | Embarko deployments list (v9 963cfe0 09:09:09, v10 538b4b6 09:11:13, v11 538b4b6 09:12:12); job outputs 09:10 / 09:11; app log (one process start) |
 | Notification persistence (outbox) | Mechanism deployed; production outbox had 0 pending to replay. **Replay itself verified locally only** (crash simulated → recovered once, no duplicates) — no production event has occurred to replay | job output "outbox replayed 0"; [LOCAL] reliability test |
 | Signed-in admin / manager / employee journeys | **NOT VERIFIED in production** — requires the owner's Google accounts (2 users exist in production) | — |
 | Session persistence across restart (production) | **NOT VERIFIED** — sessions are rows in the same database, which persisted; a signed-in check needs the owner | — |
@@ -373,3 +372,24 @@ environment keys; value never read).
 2. Owner connects test Slack and Gmail on production and approves each test send (A, B), creates a Gmail label and a Slack channel with one test message each (C), and publishes one flow from an "Automate" button (D).
 3. `M91_API_KEY` for live M91 alerts (optional; disabled until provided).
 4. Credential rotation: skipped by owner decision (recorded risk: the viaSocket embed secret and the Embarko deploy tokens appeared in a chat transcript).
+
+
+## Final production verification (2026-11-09, 09:17 UTC)
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| 1 | Automatic 15-minute alert job on v11 | **PASS** — run at **2026-11-09T09:15:40.485Z**, trigger `schedule`, outcome `ok`, HTTP 200, 308 ms, on deployment v11 / code `538b4b6` (v11 finished 09:12:14) | Embarko schedule runs (total 10 runs; every run `ok`, 7 of them on the 15-minute schedule) |
+| 2 | Timestamp, status, logs | **PASS** — app log: one clean process start (config lines, "listening"), one backup line, **no errors or warnings** | `/apps/teampulse/logs` |
+| 3 | No duplicate alerts | **PARTIAL** — consecutive runs raised 0 alerts and no duplicates appeared, but production has **no tasks**, so no alert condition exists to prove de-duplication live. De-duplication is proven [LOCAL]: second scan raises nothing (alerts test 2); changed deadline raises exactly once more | job outputs; `npm test` |
+| 3b | No duplicate backups | **PASS** — exactly **one** off-host backup file; runs at 09:12:46 and 09:15:40 reported "last backup 09:11:47 … restore verified" and made no new one | storage listing; job outputs |
+| 4 | Backup retry | **PASS (live)** — 09:10:00 off-host upload failed (`file_type_not_allowed`); the next run (09:11:44, new build) retried immediately instead of waiting 23 h, uploaded, and the restore check passed | job outputs 09:10 / 09:11 |
+| 4b | Latest backup record accessible | **PASS** — the 09:11:47 record (off-host uploaded, restore verified) read back by the 09:12 and 09:15 runs | job outputs |
+| — | Restart persistence | **PASS via the v9 → v10 redeploy** (above). A further dedicated restart (redeploy) was stopped by the session's safety check and not retried | — |
+
+### Production readiness
+
+**Verified in production [PROD]:** deployment of `main` (`538b4b6`), health, security responses (unauthenticated API, cron, webhooks, files, dev login refused), Google OAuth configuration up to Google's sign-in page, scheduled jobs (alerts every 15 minutes, weekly report), encrypted off-host backups with a passing restore check using the configured key, backup retry, persistence across a redeploy, no duplicate backups.
+
+**Verified locally only [LOCAL]/[SIMULATED]:** all signed-in product logic (roles, isolation, tasks, permissions, requests, blockers, reviews, impact, reports, dashboards) — 53/53 tests, browser e2e, 162-screen crawl; alert de-duplication; outbox replay after a crash; automation and intake rules with stand-ins.
+
+**Awaiting real accounts:** signed-in admin/manager/employee journeys and session persistence in production (owner's Google accounts); Slack/Gmail notifications (A), weekly report delivery (B), Gmail/Slack intake (C), events reaching user-built flows (D) — owner's connected test accounts and approval per send; M91 — an API key.
