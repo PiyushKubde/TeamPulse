@@ -17,17 +17,42 @@ export async function renderSettings(main, tab) {
 
 async function profile(sb) {
   const s = app.session
-  sb.innerHTML = html`<section class="card" style="max-width:640px"><dl class="kv"><dt>Name</dt><dd>${s.user.name}</dd><dt>Email</dt><dd>${s.user.email} ${s.user.emailVerified ? html`<span class="badge ok">verified by Google</span>` : ''}</dd>
+  sb.innerHTML = html`<section class="card" style="max-width:640px"><dl class="kv"><dt>Name</dt><dd>${s.user.name}</dd><dt>Email</dt><dd>${s.user.email} ${s.user.emailVerified ? html`<span class="badge ok">verified</span>` : ''}</dd>
     <dt>Organization</dt><dd>${s.membership.orgName}</dd><dt>Role</dt><dd style="text-transform:capitalize">${s.membership.role}</dd></dl>
-    <p class="small muted" style="margin-top:8px">Name, email and picture come from your Google account and refresh each time you sign in.</p>
+    ${s.user.signIn?.google ? html`<p class="small muted" style="margin-top:8px">Name, email and picture come from your Google account and refresh each time you sign in with Google.</p>` : ''}
+    <h3 style="margin:18px 0 6px">Sign-in methods</h3><div id="signin"></div>
     <form id="pf" style="margin-top:14px"><div class="form-error"></div><div class="field"><label for="ph">Phone for urgent alerts (optional)</label><input id="ph" name="phone" type="tel" value="${s.user.phone || ''}" placeholder="+919876543210"><div class="hint">Used only for important alerts through M91 when your admin turns them on.</div></div><button class="btn" type="submit">Save</button></form>
     <h3 style="margin:18px 0 6px">My notifications</h3><div id="my-notif">${raw('<div class="loading">Loading…</div>')}</div>
     ${app.role === 'employee' ? html`<h3 style="margin:18px 0 8px">My task permissions</h3><ul class="list">${PERMS.map(([k, l]) => html`<li><span class="badge ${s.membership.permissions[k] ? 'ok' : 'outline'}">${s.membership.permissions[k] ? 'Yes' : 'No'}</span><div class="grow">${l}</div></li>`)}</ul>` : ''}</section>`
   renderMyNotifications(sb.querySelector('#my-notif'))
+  renderSignInMethods(sb.querySelector('#signin'))
   bindForm(sb.querySelector('#pf'), (d) => api('/api/profile', { method: 'PATCH', body: { phone: d.phone || null } }), { onSuccess: (out) => {
     const M = { reachable: 'Saved. M91 can reach this phone.', invited: 'Saved. Accept the TeamPulse invitation in the M91 app to receive urgent alerts.', invite_failed: `Saved, but the M91 invitation failed: ${out.m91Error || ''}` }
     toast(M[out.m91] || 'Saved.'); reloadSession()
   } })
+}
+
+function renderSignInMethods(box) {
+  const s = app.session
+  const m = s.user.signIn || {}
+  box.innerHTML = html`<ul class="list">
+    <li><span class="badge ${m.google ? 'ok' : 'outline'}">${m.google ? 'On' : 'Off'}</span><div class="grow">Google<div class="small muted">${m.google ? 'Linked to your Google account.' : 'Sign in once with Continue with Google using this same email to link it.'}</div></div></li>
+    <li><span class="badge ${m.password ? 'ok' : 'outline'}">${m.password ? 'On' : 'Off'}</span><div class="grow">Email and password</div>
+      ${m.password ? html`<button class="btn small ghost" id="chpw">Change password</button>` : s.emailAuth?.available ? html`<button class="btn small ghost" id="addpw">Add password sign-in</button>` : html`<span class="small muted">Not available on this server</span>`}</li></ul>`.toString()
+  box.querySelector('#addpw')?.addEventListener('click', async (e) => {
+    e.target.disabled = true
+    try { const r = await api('/api/account/password-link', { method: 'POST' }); toast(r.message, { error: !r.ok }) } catch (err) { toast(errorText(err), { error: true }) } finally { e.target.disabled = false }
+  })
+  box.querySelector('#chpw')?.addEventListener('click', () => {
+    modal(html`<h2 id="modal-title">Change password</h2><form id="cpf" class="stack" novalidate><div class="form-error"></div>
+      <div><label for="cp0">Current password</label><input id="cp0" name="currentPassword" type="password" required autocomplete="current-password" maxlength="128"></div>
+      <div><label for="cp1">New password</label><input id="cp1" name="password" type="password" required minlength="12" maxlength="128" autocomplete="new-password"><div class="hint">At least 12 characters, three kinds of characters (or 20+ characters).</div></div>
+      <div><label for="cp2">Confirm new password</label><input id="cp2" name="confirmPassword" type="password" required maxlength="128" autocomplete="new-password"></div>
+      <p class="small muted">Other devices will be signed out.</p>
+      <div class="row end"><button class="btn ghost" data-close>Cancel</button><button class="btn" type="submit">Change password</button></div></form>`.toString(), (body, close) => {
+      bindForm(body.querySelector('#cpf'), (d) => api('/api/account/password', { method: 'POST', body: d }), { onSuccess: () => { close(true); toast('Password changed. Other devices were signed out.') } })
+    })
+  })
 }
 
 async function organization(sb, reload) {

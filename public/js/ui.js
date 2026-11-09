@@ -37,7 +37,7 @@ export async function api(path, { method = 'GET', body, headers = {}, rawBody } 
   let data = null
   try { data = text ? JSON.parse(text) : null } catch { data = text }
   if (!res.ok) {
-    if (res.status === 401 && !path.startsWith('/api/session')) { location.hash = '#/login'; }
+    if (res.status === 401 && data?.error?.code === 'unauthenticated' && !path.startsWith('/api/session')) { location.hash = '#/login'; }
     throw new ApiError(res.status, data)
   }
   return data

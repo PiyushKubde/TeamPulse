@@ -113,7 +113,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* Forms */
 label { display: block; font-weight: 550; font-size: 13px; margin-bottom: 4px; }
 .hint { color: var(--text-3); font-size: 12px; font-weight: 400; margin-top: 3px; }
-input[type=text], input[type=email], input[type=url], input[type=number], input[type=date], input[type=datetime-local], input[type=search], input[type=tel], select, textarea {
+input[type=text], input[type=email], input[type=password], input[type=url], input[type=number], input[type=date], input[type=datetime-local], input[type=search], input[type=tel], select, textarea {
   width: 100%; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit;
 }
 textarea { min-height: 76px; resize: vertical; }
@@ -205,3 +205,5 @@ dialog .modal-inner > h2 { margin-bottom: 14px; }
 }
 .shell > div { min-width: 0; }
 .filters select, .filters input { max-width: 100%; }
+.divider { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: var(--muted, #6b7280); font-size: 13px; }
+.divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--border); }

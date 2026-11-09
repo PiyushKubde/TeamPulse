@@ -1,6 +1,6 @@
 // TeamPulse browser app. Talks only to this server's /api; the server decides every permission.
 import { api, html, raw, esc, avatar, loading, errorBlock, toast } from './ui.js'
-import { renderLogin, renderWelcome } from './views/onboarding.js'
+import { renderLogin, renderWelcome, renderSignup, renderForgot, renderReset, renderVerify } from './views/onboarding.js'
 import { renderDashboard } from './views/dashboard.js'
 import { renderTaskList, renderTaskDetail } from './views/tasks.js'
 import { renderRequests } from './views/requests.js'
@@ -100,9 +100,17 @@ async function route() {
   if (!app.session) app.session = await api('/api/session')
   const s = app.session
   if (path.startsWith('#/invite/')) sessionStorage.setItem('tp_invite', path.slice('#/invite/'.length))
-  if (!s.user) { currentShellKey = null; return renderLogin(root, q) }
+  // Links from emails work whether or not someone is signed in on this browser.
+  if (path.startsWith('#/verify/')) { currentShellKey = null; return renderVerify(root, path.slice('#/verify/'.length)) }
+  if (path.startsWith('#/reset/')) { currentShellKey = null; return renderReset(root, path.slice('#/reset/'.length)) }
+  if (!s.user) {
+    currentShellKey = null
+    if (path === '#/signup') return renderSignup(root)
+    if (path === '#/forgot') return renderForgot(root)
+    return renderLogin(root, q)
+  }
   if (!s.membership) { currentShellKey = null; return renderWelcome(root) }
-  if (path === '' || path === '#/' || path === '#/login' || path === '#/welcome' || path.startsWith('#/invite/')) { location.replace('#/dashboard'); return }
+  if (path === '' || path === '#/' || path === '#/login' || path === '#/signup' || path === '#/forgot' || path === '#/welcome' || path.startsWith('#/invite/')) { location.replace('#/dashboard'); return }
   const hit = ROUTES.map(([re, key, fn]) => { const m = path.match(re); return m ? { key, view: fn(m) } : null }).find(Boolean)
   const key = hit?.key || 'dashboard'
   if (currentShellKey === null) {
@@ -135,6 +143,12 @@ async function route() {
 }
 
 export function rerender() { route().catch((e) => toast(e.message, { error: true })) }
+/** Go somewhere after the signed-in state changed: one render with a fresh session (no stale render racing it). */
+export function navigate(hash, { replace = false } = {}) {
+  app.session = null; currentShellKey = null
+  if (location.hash === hash) rerender()
+  else if (replace) { history.replaceState(null, '', hash); rerender() } else location.hash = hash
+}
 export async function reloadSession() { app.session = await api('/api/session'); currentShellKey = null; rerender() }
 
 window.addEventListener('hashchange', rerender)
