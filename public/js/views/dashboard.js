@@ -1,4 +1,4 @@
-import { api, html, avatar, ago, dt, statusBadge, prioBadge, conditionBadges, progressBar, verifyBadge, empty, bindForm, toast, requestBadge, errorText } from '../ui.js'
+import { api, html, raw, avatar, ago, dt, statusBadge, prioBadge, conditionBadges, progressBar, verifyBadge, empty, bindForm, toast, requestBadge, errorText, icon, due, prov } from '../ui.js'
 import { app } from '../app.js'
 import { openTaskForm } from './tasks.js'
 import { renderSignals } from './assistant.js'
@@ -37,17 +37,18 @@ const taskLine = (t, extra = '') => html`<li><div class="grow"><a href="#/tasks/
 
 export async function renderDashboard(main) {
   const data = await api('/api/dashboard')
+  if (!data.manager) return renderEmployeeOverview(main, data.personal)
   const m = data.manager
   const p = data.personal
   main.innerHTML = html`
-    <div class="page-head"><div><h1>${m ? 'Team dashboard' : 'My dashboard'}</h1><p>${m ? 'Where the team stands, where people need help, and the outcomes they delivered. Task counts are operational only.' : 'Your work, what needs you, and the difference you made.'}</p></div>
-      <div class="row"><button class="btn" id="new-task">${app.session.membership.creationMode === 'direct' ? 'New task' : 'Suggest a task'}</button></div></div>
-    ${m ? html`<section class="card intervene" id="dash-signals" style="margin-bottom:16px"></section>` : html`<section class="card today-card" style="margin-bottom:16px"><div class="card-head"><div><h2>Today</h2><p>What you are doing, what you accomplished, and what needs your attention.</p></div><a class="btn" href="#/assistant?run=1">Analyse my day</a></div><div id="dash-signals"></div></section>`}
-    ${m ? managerSection(m) : ''}
-    ${m ? html`<div class="section-title"><h2>My own work</h2><a class="btn small ghost" href="#/assistant?run=1">Analyse my day</a></div>` : ''}
-    ${personalSection(p, !m)}
+    <div class="page-head"><div><h1>Team dashboard</h1><p>Where the team stands, where people need help, and the outcomes they delivered. Task counts are operational only.</p></div>
+      <div class="row"><button class="btn" id="new-task">${icon('plus')}${app.session.membership.creationMode === 'direct' ? 'New task' : 'Suggest a task'}</button></div></div>
+    <section class="card intervene" id="dash-signals" style="margin-bottom:16px"></section>
+    ${managerSection(m)}
+    <div class="section-title"><h2>My own work</h2><a class="btn small ghost" href="#/assistant?run=1">${icon('sparkles')}Analyse my day</a></div>
+    ${personalSection(p, false)}
   `
-  renderSignals(document.getElementById('dash-signals'), m ? { scope: 'team', limit: 6, title: 'Where to intervene' } : { scope: 'mine', limit: 5 })
+  renderSignals(document.getElementById('dash-signals'), { scope: 'team', limit: 6, title: 'Where to intervene' })
   document.getElementById('new-task').addEventListener('click', () => openTaskForm())
   const cd = document.getElementById('contrib-dash')
   if (cd) {
@@ -60,8 +61,166 @@ export async function renderDashboard(main) {
         : empty('No analysed work yet', 'Work is analysed when it is submitted for review.')).toString()
     }).catch((e) => { cd.querySelector('.loading').outerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString() })
   }
+  bindReflection(p)
+}
+
+function bindReflection(p) {
   const f = document.getElementById('reflection')
   if (f) bindForm(f, (d) => api('/api/reflections', { method: 'PUT', body: { day: p.reflection.day, ...d } }), { onSuccess: (r) => { toast('Reflection saved.'); document.getElementById('refl-saved').textContent = `Saved ${ago(r.savedAt)}` } })
+}
+
+// ------------------------------------------------------------------------------------------------ employee overview
+// "What should I focus on, what have I accomplished, and what contribution have I made?" — from records only.
+const tzMinutes = () => -new Date().getTimezoneOffset()
+const greeting = () => { const h = new Date().getHours(); return h < 5 ? 'Working late' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening' }
+const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || 'there'
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+const failed = (r) => r.status === 'rejected'
+
+const RANK = (t) => (t.overdue ? 0 : t.status === 'BLOCKED' ? 1 : t.atRisk ? 2 : t.status === 'IN_PROGRESS' ? 3 : t.status === 'SUBMITTED_FOR_REVIEW' ? 5 : 4)
+const byUrgency = (a, b) => RANK(a) - RANK(b) || (Date.parse(a.dueAt || '9999-12-31') - Date.parse(b.dueAt || '9999-12-31'))
+
+function taskCard(t) {
+  const sub = t.expectedOutcome || t.description || ''
+  return html`<a class="task-card" href="#/tasks/${t.id}">
+    <div class="row between nowrap" style="gap:8px">${statusBadge(t.status)}${prioBadge(t.priority)}</div>
+    <div class="t">${t.title}</div>
+    ${sub ? html`<div class="note" title="${sub}">${sub}</div>` : ''}
+    <div class="foot">${progressBar(t.progress)}<span class="pct">${t.progress}%</span></div>
+    <div class="meta">${due(t)}${t.status === 'BLOCKED' && t.blockedHours !== null ? html`<span class="due late">${icon('blocked', 'xs')}Blocked ${t.blockedHours}h</span>` : ''}${!t.dueAt && t.status !== 'BLOCKED' ? html`<span>No deadline</span>` : ''}</div>
+  </a>`
+}
+
+function hero(p, tasks, attention) {
+  const inProgress = tasks.filter((t) => t.status === 'IN_PROGRESS').length
+  const notStarted = tasks.filter((t) => t.status === 'ASSIGNED').length
+  const parts = []
+  if (inProgress) parts.push(html`<b>${plural(inProgress, 'task')} in progress</b>`)
+  if (notStarted) parts.push(html`<b>${notStarted} not started</b>`)
+  if (p.blocked.length) parts.push(html`<b>${p.blocked.length} blocked</b>`)
+  if (attention) parts.push(html`<b>${attention} waiting on you</b>`)
+  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+  const lede = parts.length
+    ? html`You have ${parts.map((x, i) => html`${i ? (i === parts.length - 1 ? ' and ' : ', ') : ''}${x}`)}. Here is where your attention matters most today.`
+    : html`Nothing is assigned to you right now. Suggest a task, or connect your apps so the work you do shows up here.`
+  return html`<header class="hero"><div><div class="eyebrow">${icon('calendar', 'xs')}${today}</div><h1>${greeting()}, ${firstName(app.me.name)}</h1><p class="lede">${lede}</p></div>
+    <div class="row"><a class="btn" href="#/assistant?run=1">${icon('sparkles')}Analyse my day</a><button class="btn ghost" id="new-task">${icon('plus')}${app.session.membership.creationMode === 'direct' ? 'New task' : 'Suggest a task'}</button></div></header>`
+}
+
+function focusCard(digest) {
+  if (failed(digest)) return html`<section class="card focus-card"><div class="notice err">${errorText(digest.reason)}</div></section>`
+  const items = digest.value.priorities.slice(0, 4)
+  return html`<section class="card focus-card" aria-labelledby="focus-h"><div class="card-head"><div><h2 id="focus-h"><span class="card-icon brand">${icon('target')}</span>Today’s focus</h2><p>Ordered by urgency: requested changes, deadlines, blockers, then what to continue.</p></div>${prov('fact', 'From your tasks')}</div>
+    ${items.length ? html`<ol class="focus-list">${items.map((x) => html`<li><div style="min-width:0"><a href="${x.href}">${x.text}</a><div class="why">${x.why}</div></div></li>`)}</ol>`
+      : empty('You are clear for today', 'No requested changes, deadlines or blockers. A good moment to pick up something new or record an outcome.', html`<a class="btn small ghost" href="#/requests">${icon('plus')}Suggest a task</a>`, 'checkCircle')}
+    <div class="card-foot"><span class="muted">Want the full picture of your day?</span><a href="#/assistant?run=1">Analyse my day ${icon('arrowRight', 'xs')}</a></div></section>`
+}
+
+function inProgressCard(tasks) {
+  if (failed(tasks)) return html`<section class="card"><div class="notice err">${errorText(tasks.reason)}</div></section>`
+  const list = tasks.value.filter((t) => t.status !== 'SUBMITTED_FOR_REVIEW').sort(byUrgency)
+  return html`<section class="card" aria-labelledby="wip-h"><div class="card-head"><div><h2 id="wip-h"><span class="card-icon">${icon('trending')}</span>Work in progress</h2><p>Your open tasks, most urgent first.</p></div><a class="btn small subtle" href="#/my-tasks">All my tasks${icon('arrowRight', 'sm')}</a></div>
+    ${list.length ? html`<div class="task-cards">${list.slice(0, 6).map(taskCard)}</div>${list.length > 6 ? html`<p class="small muted" style="margin:12px 0 0">${list.length - 6} more in <a href="#/my-tasks">My Tasks</a>.</p>` : ''}`
+      : empty('No open tasks', 'When work is assigned to you, it appears here with its deadline and progress.', '', 'tasks')}</section>`
+}
+
+function attentionCard(p) {
+  const rows = [
+    ...p.awaitingMe.map((a) => html`<li><span class="lead-icon warn">${icon('alert')}</span><div class="grow"><a class="ttl" href="#/tasks/${a.task.id}">${a.task.title}</a><div class="small muted">${a.detail}</div></div></li>`),
+    ...p.clarifications.map((r) => html`<li><span class="lead-icon brand">${icon('help')}</span><div class="grow"><a class="ttl" href="#/requests">${r.title}</a><div class="small muted">Your manager asked for clarification${r.decisionNote ? `: “${r.decisionNote}”` : ''}</div></div>${requestBadge(r.status)}</li>`)
+  ]
+  return html`<section class="card" aria-labelledby="att-h"><div class="card-head"><div><h2 id="att-h"><span class="card-icon warn">${icon('alert')}</span>Needs your attention</h2><p>Things only you can move forward.</p></div></div>
+    ${rows.length ? html`<ul class="mini-list">${rows}</ul>` : ''}
+    <div id="my-signals" ${rows.length ? raw('style="margin-top:14px"') : ''}></div></section>`
+}
+
+function blockersCard(p) {
+  return html`<section class="card" aria-labelledby="blk-h"><div class="card-head"><div><h2 id="blk-h"><span class="card-icon bad">${icon('blocked')}</span>Blockers</h2><p>Work waiting on someone or something.</p></div></div>
+    ${p.blocked.length ? html`<ul class="mini-list">${p.blocked.map((t) => html`<li><span class="lead-icon bad">${icon('blocked')}</span><div class="grow"><a class="ttl" href="#/tasks/${t.id}">${t.title}</a>
+      <div class="meta">${t.blockedHours !== null ? html`<span>Blocked for ${t.blockedHours}h</span>` : ''}${due(t)}</div></div><a class="btn small ghost" href="#/tasks/${t.id}">Update</a></li>`)}</ul>
+      <div class="principle" style="margin-top:14px">${icon('shield')}<span>If something outside your control is blocking you, say so on the blocker. It is shown as a reason, never counted against you.</span></div>`
+      : html`<p class="small muted" style="margin:0">Nothing is blocking you. If you get stuck, report a blocker on the task so your manager can help.</p>`}</section>`
+}
+
+function evidenceCard(evidence) {
+  if (failed(evidence)) return html`<section class="card"><div class="notice err">${errorText(evidence.reason)}</div></section>`
+  const pending = evidence.value.flatMap((e) => e.links.filter((l) => l.status === 'suggested').map((l) => ({ e, l }))).slice(0, 4)
+  const none = !evidence.value.length
+  return html`<section class="card" aria-labelledby="ev-h" id="ev-confirm"><div class="card-head"><div><h2 id="ev-h"><span class="card-icon teal">${icon('evidence')}</span>Evidence to confirm</h2><p>TeamPulse noticed these in your connected apps. Nothing counts until you confirm it.</p></div></div>
+    ${pending.length ? html`<ul class="mini-list">${pending.map(({ e, l }) => html`<li data-ev-link="${l.id}"><span class="lead-icon teal">${icon('evidence')}</span><div class="grow">
+        <div class="ttl">${e.title}</div>
+        <div class="meta"><span>${e.appLabel}</span><span class="sep"></span><span>${ago(e.occurredAt)}</span></div>
+        <div class="row" style="margin-top:6px;gap:6px">${prov('suggested', 'Suggested match')}<span class="small">for <a href="#/tasks/${l.taskId}">${l.taskTitle}</a></span></div>
+        ${l.explanation ? html`<div class="small muted" style="margin-top:4px">${l.explanation}</div>` : ''}
+        <div class="row" style="margin-top:8px;gap:6px"><button class="btn small" data-ev-act="CONFIRM">${icon('check')}It belongs here</button><button class="btn small ghost" data-ev-act="REJECT">Not this task</button></div></div></li>`)}</ul>
+      <div class="card-foot"><span class="muted">Confirmed evidence is used when your work is analysed.</span><a href="#/evidence">My Work Evidence ${icon('arrowRight', 'xs')}</a></div>`
+      : none ? empty('No app evidence yet', 'Connect GitHub, Slack, Gmail, Calendar or Sheets, choose what to collect, and your work shows up here for you to confirm.', html`<a class="btn small ghost" href="#/evidence">${icon('apps')}Set up My Work Evidence</a>`, 'evidence')
+        : empty('Nothing to confirm', 'All suggested matches have been decided.', html`<a class="btn small subtle" href="#/evidence">My Work Evidence</a>`, 'checkCircle')}</section>`
+}
+
+function completedCard(p) {
+  return html`<section class="card" aria-labelledby="done-h"><div class="card-head"><div><h2 id="done-h"><span class="card-icon ok">${icon('checkCircle')}</span>Recently completed</h2><p>Approved work. Completion is not impact — record what changed.</p></div><a class="btn small subtle" href="#/my-tasks?status=COMPLETED">All${icon('arrowRight', 'sm')}</a></div>
+    ${p.completed.length ? html`<ul class="mini-list">${p.completed.slice(0, 5).map((t) => html`<li><div class="grow"><a class="ttl" href="#/tasks/${t.id}">${t.title}</a><div class="small muted">Completed ${ago(t.completedAt)}</div></div><a class="btn small ghost" href="#/impact?new=1&taskId=${t.id}" title="Completion is not impact: record what changed">Record outcome</a></li>`)}</ul>`
+      : html`<p class="small muted" style="margin:0">Nothing completed yet. Tasks you finish and your manager approves appear here.</p>`}</section>`
+}
+
+const VERIFY_PROV = { VERIFIED: () => prov('verified'), PENDING: () => prov('unverified', 'Awaiting verification'), REJECTED: () => html`<span class="badge bad">Not verified</span>` }
+function contributionsCard(p, digest) {
+  const highlights = failed(digest) ? [] : digest.value.highlights
+  const has = highlights.length || p.impact.length || p.feedback.length
+  return html`<section class="card" aria-labelledby="mat-h"><div class="card-head"><div><h2 id="mat-h"><span class="card-icon brand">${icon('award')}</span>Contributions that mattered</h2><p>What changed because of your work — and who has confirmed it.</p></div><a class="btn small subtle" href="#/contributions">Journeys${icon('arrowRight', 'sm')}</a></div>
+    ${has ? html`<ul class="mini-list">
+      ${highlights.map((h) => html`<li><span class="lead-icon brand">${icon('sparkles')}</span><div class="grow"><a class="ttl" href="${h.href}">${h.text}</a><div class="small muted">Today: ${h.why}</div></div>${prov('fact', 'Recorded')}</li>`)}
+      ${p.impact.map((r) => html`<li><span class="lead-icon ok">${icon('award')}</span><div class="grow"><a class="ttl" href="#/impact/${r.id}">${r.title}</a><div class="small muted">${r.categoryLabel}</div></div>${(VERIFY_PROV[r.verificationStatus] || (() => verifyBadge(r.verificationStatus)))()}</li>`)}
+      ${p.feedback.slice(0, 3).map((f) => html`<li><span class="lead-icon">${icon('message')}</span><div class="grow"><a class="ttl" href="${f.impactId ? `#/impact/${f.impactId}` : `#/tasks/${f.taskId}`}">${f.title}</a>
+        <div class="small muted">${f.reviewer} ${['APPROVED', 'VERIFIED'].includes(f.decision) ? 'approved it' : 'asked for changes'}${f.comment ? ` — “${f.comment}”` : ''} · ${ago(f.createdAt)}</div></div></li>`)}
+    </ul>` : empty('Your contributions will show here', 'When you deliver work and record what it changed, it appears here — verified by your manager, never ranked.', html`<a class="btn small ghost" href="#/impact?new=1">${icon('plus')}Record an outcome</a>`, 'award')}</section>`
+}
+
+function nextStepsCard(digest) {
+  if (failed(digest) || !digest.value.missing.length) return ''
+  return html`<section class="card" aria-labelledby="next-h"><div class="card-head"><div><h2 id="next-h"><span class="card-icon">${icon('help')}</span>Missing context</h2><p>Small additions that make your work visible.</p></div>${prov('missing', 'Not recorded yet')}</div>
+    <ul class="mini-list">${digest.value.missing.map((m) => html`<li><div class="grow"><a class="ttl" href="${m.href}">${m.text}</a><div class="small muted">${m.action}</div></div></li>`)}</ul></section>`
+}
+
+function reflectionCard(p) {
+  const saved = Boolean(p.reflection.savedAt)
+  return html`<details class="card reflect" ${saved ? '' : raw('open')}><summary><div><h2 id="refl-h"><span class="card-icon">${icon('note')}</span>Daily reflection</h2><p class="small muted" style="margin:3px 0 0">Private to you. Five quick prompts — skip any.</p></div>
+      <span class="row" style="gap:8px"><span class="small muted" id="refl-saved">${saved ? `Saved ${ago(p.reflection.savedAt)}` : ''}</span><span class="chev">${icon('chevronDown')}</span></span></summary>
+    <form id="reflection" aria-labelledby="refl-h"><div class="form-error"></div><div class="reflect-grid">
+      ${[['contribution', 'What was my most important contribution today?'], ['changeMade', 'What changed because of my work?'], ['blockedBy', 'What blocked me?'], ['learned', 'What did I learn?'], ['tomorrow', 'What will I focus on tomorrow?']].map(([k, label]) => html`<div class="field"><label for="r-${k}">${label}</label><textarea id="r-${k}" name="${k}" rows="2" maxlength="2000">${p.reflection[k]}</textarea></div>`)}</div>
+      <button class="btn ghost" type="submit">Save reflection</button></form></details>`
+}
+
+// Position of a section when the overview collapses to one column (phones, narrow windows).
+const o = (n, section) => (section ? html`<div style="--o:${n}">${section}</div>` : '')
+
+async function renderEmployeeOverview(main, p) {
+  const [tasks, digest, evidence] = await Promise.allSettled([
+    api('/api/tasks?view=mine&status=ASSIGNED,IN_PROGRESS,BLOCKED,SUBMITTED_FOR_REVIEW'),
+    api(`/api/assistant/day?tz=${tzMinutes()}`),
+    api('/api/work-evidence?view=mine')
+  ])
+  const openTasks = failed(tasks) ? [] : tasks.value
+  main.innerHTML = html`${hero(p, openTasks, p.awaitingMe.length + p.clarifications.length)}
+    <div class="overview">
+      <div class="col">${o(1, focusCard(digest))}${o(3, inProgressCard(tasks))}${o(6, contributionsCard(p, digest))}${o(8, completedCard(p))}</div>
+      <div class="col">${o(2, attentionCard(p))}${o(4, evidenceCard(evidence))}${o(5, blockersCard(p))}${o(7, nextStepsCard(digest))}</div>
+    </div>
+    <div style="margin-top:16px">${reflectionCard(p)}</div>
+    <p class="principle" style="margin-top:24px">${icon('heart')}<span>TeamPulse shows what your work achieved, not how busy you were. There are no scores, rankings or activity counts — and you can correct anything that is wrong.</span></p>`.toString()
+  document.getElementById('new-task').addEventListener('click', () => openTaskForm())
+  renderSignals(document.getElementById('my-signals'), { scope: 'mine', limit: 4 })
+  bindReflection(p)
+  main.querySelectorAll('[data-ev-act]').forEach((b) => b.addEventListener('click', async () => {
+    const li = b.closest('[data-ev-link]')
+    li.querySelectorAll('button').forEach((x) => { x.disabled = true })
+    try {
+      await api(`/api/work-evidence-links/${li.dataset.evLink}`, { method: 'POST', body: { action: b.dataset.evAct } })
+      toast(b.dataset.evAct === 'CONFIRM' ? 'Linked — it now counts as part of that work.' : 'Removed the suggestion.')
+      li.remove()
+    } catch (e) { toast(errorText(e), { error: true }); li.querySelectorAll('button').forEach((x) => { x.disabled = false }) }
+  }))
 }
 
 function managerSection(m) {
