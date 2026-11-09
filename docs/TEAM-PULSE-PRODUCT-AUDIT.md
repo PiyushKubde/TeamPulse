@@ -500,3 +500,49 @@ A bug found by the browser run and fixed: "added a regression test" was read as 
 | — | viaSocket data policy | **UNRESOLVED and enforced:** nothing goes to viaSocket AI until `AI_VIASOCKET_POLICY_CONFIRMED=true`, and Anthropic is not substituted | docs/viasocket-ai-data-policy.md, 1b |
 
 Tests: `npm test` 106/106; `test:e2e`, `test:e2e:auth`, `test:e2e:measurement` pass; eval dry run 14/14; `npm audit` 0.
+
+
+# Sprint 2 — AI work intelligence and viaSocket evidence (2026-11-09, feature branch, not deployed)
+
+Design: [docs/work-evidence.md](work-evidence.md). M91 channel mode: [docs/integrations.md](integrations.md#channel-mode-send-link--configured-for-new-test).
+
+## Found before building
+
+- **Already reusable:**
+  - per-user viaSocket connections (`app_connections`, ownership checked against `listConnections`);
+  - a proven event pipeline, the Gmail/Slack intake: `user.subscribe` with a handler that posts to TeamPulse with a per-subscription bearer token;
+  - the live-options scope picker (`listOptions`);
+  - Phase 1/1.1 measurement (evidence pack, guardrails, gates, history);
+  - M91 alert rules and queue.
+- **Missing:** any external evidence model, identities, evidence-to-task matching, and an evidence UI.
+- **Triggers:** read live from the catalog (`user.listActions`, `catalog.versions`) for all five apps; nothing was invented. Missing triggers are listed in work-evidence.md.
+
+## Built
+
+| Area | Result |
+| --- | --- |
+| Schema | Migration 008 (additive): identities, sources, subscriptions, inbox, evidence, task links, sync runs; all org-scoped |
+| Collectors | GitHub (6 event kinds), Slack (2), Gmail (2, label-scoped), Calendar (1), Sheets (1). Real keys and versions; real-sample check before switch-on |
+| Collection | Webhook with per-subscription token; inbox with dedupe and retry; checkpoints; rate limit; health checks; disconnect stops collection; no external writes |
+| Privacy | Chosen scopes only; no DMs; Gmail label only, quoted text stripped, attachment metadata only; private, declined and out-of-office calendar entries ignored; the collector can remove evidence |
+| Attribution | Identities (one owner per org); self / member / external / unknown, never guessed; "not mine" disputes; manager resolution; shared links |
+| Matching | Explicit reference, resource, text-and-time; AI only proposes; nothing auto-confirmed; decisions never overwritten; no tasks created from messages |
+| Measurement | Linked evidence grouped into the existing pack; candidates never citable; observed facts separate from interpretation; new guardrails (v5); prompt v3; rubric v2; provider gates unchanged |
+| Employee UX | "My work evidence": sources and status, evidence to confirm / linked / not linked, identities, **Analyse my work**; "From connected apps" on task pages |
+| Manager UX | **Team intelligence**: significant contributions with reasons, open blockers (outside-control marked), evidence review (resolve attribution / shared ownership), people in alphabetical order, "analyse this person" |
+| M91 | New intervention rules (attribution review, assessment dispute); channel mode via send link for "New test" (owner-confirmed; no alert sent) |
+
+## Bugs found by the tests
+
+1. Slack identities never matched: stored upper-case, compared lower-case.
+2. `DELETE /api/evidence/:id` collided with the existing task-attachment route, so the new API moved to `/api/work-evidence`.
+3. The rate-limit test exhausted a subscription that later checks still needed.
+
+## Tests (actual)
+
+| Suite | Result |
+| --- | --- |
+| `npm test` | **119/119**: 11 evidence tests across all five integrations and the required scenarios, 2 M91 channel tests, and all earlier tests |
+| `test:e2e`, `test:e2e:auth`, `test:e2e:measurement`, `test:e2e:evidence` (incl. phone width) | pass |
+| `eval:measurement --dry-run` | 14/14 |
+| Live viaSocket triggers, live AI, live M91 | **not run**: stand-ins and real webhook deliveries only |

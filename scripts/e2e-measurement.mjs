@@ -97,12 +97,12 @@ try {
 
   step = 'manager: team overview and profile'
   await m.goto(`${base}/#/contribution`)
-  await m.waitForSelector('h1:has-text("Contribution analysis")')
+  await m.waitForSelector('h1:has-text("Team intelligence")')
   ok(await m.isVisible('text=Not a ranking'), 'not-a-ranking note')
   const names = await m.$$eval('table tbody tr td:first-child b', (els) => els.map((x) => x.textContent))
   ok(JSON.stringify(names) === JSON.stringify([...names].sort((a, b) => a.localeCompare(b))), `alphabetical: ${names.join(', ')}`)
   await shot(m, 'm3-team')
-  await m.click('text=Priya Sharma')
+  await m.click('table >> a:has-text("Priya Sharma")')
   await m.waitForSelector('h2:has-text("In short")')
   ok(await m.isVisible('text=1× L4'), 'complexity mix in profile')
   await shot(m, 'm4-profile')

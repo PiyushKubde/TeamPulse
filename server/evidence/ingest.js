@@ -1,4 +1,4 @@
-// Ingestion: viaSocket delivers each trigger event to POST /api/evidence/events/:subscriptionId with that
+// Ingestion: viaSocket delivers each trigger event to POST /api/work-evidence/events/:subscriptionId with that
 // subscription's bearer token. The raw event is written to the inbox first (deduplicated by content hash), then
 // normalized, attributed and stored; anything that fails stays in the inbox and is retried by the scheduled job.
 // Collection never starts an AI analysis.
@@ -17,7 +17,9 @@ export const MAX_ATTEMPTS = 5
 /** Who an external identity belongs to in this organization: declared/connection identities, then member emails. */
 export function resolveIdentity(db, orgId, app, identity) {
   if (!identity) return null
-  const id = String(identity).trim().toLowerCase()
+  const raw = String(identity).trim()
+  // Slack user ids are stored as Slack writes them (upper case); logins and emails in lower case.
+  const id = app === 'slack' ? raw.toUpperCase() : raw.toLowerCase()
   const hit = db.prepare('SELECT user_id FROM external_identities WHERE org_id = ? AND app = ? AND identity = ?').get(orgId, app, id)
   if (hit) return hit.user_id
   if (id.includes('@')) {
@@ -129,7 +131,7 @@ export function acceptEvent(db, sub, payload, method = 'trigger') {
   return { status: out.status.toLowerCase(), inboxId: id }
 }
 
-/** POST /api/evidence/events/:id — authenticated by the subscription's own bearer token (only its hash is stored). */
+/** POST /api/work-evidence/events/:id — authenticated by the subscription's own bearer token (only its hash is stored). */
 export function receiveEvidenceEvent(db, id, bearer, body) {
   const sub = typeof id === 'string' && /^[0-9a-f-]{36}$/.test(id) ? db.prepare('SELECT * FROM evidence_subscriptions WHERE id = ?').get(id) : null
   const given = Buffer.from(sha(String(bearer || '')))

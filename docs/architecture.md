@@ -22,6 +22,7 @@ organizations ─┬─ teams (manager_id → users)
                ├─ weekly_reports (org, team, week UNIQUE)
                └─ audit_log
 users (google_sub UNIQUE nullable, email, email_verified, name, picture_url, phone, password_hash …) ── auth_tokens (006)
+Work evidence (008, additive): external_identities · evidence_sources ── evidence_subscriptions ── evidence_inbox · external_evidence ── evidence_task_links · evidence_sync_runs  (docs/work-evidence.md)
 AI work measurement (007, additive): evaluation_rubrics · ai_evaluation_runs ── contribution_assessments ─┬─ assessment_dimensions (ai/rules/manager rows)
                                                                                                          └─ assessment_feedback (append-only history)
 sessions (token_hash), oauth_states (state_hash, nonce, PKCE verifier)

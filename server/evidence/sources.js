@@ -112,7 +112,7 @@ export async function createSource(db, vs, ctx, body, { appUrl }) {
     // 2. Subscribe the trigger on the person's own connection.
     const subId = uuid()
     const token = `tpv_${randomBytes(24).toString('base64url')}`
-    const url = `${appUrl}/api/evidence/events/${subId}`
+    const url = `${appUrl}/api/work-evidence/events/${subId}`
     const handler = `const res = await axios.post(${JSON.stringify(url)}, { event: context.req.body }, { headers: { authorization: ${JSON.stringify(`Bearer ${token}`)} } })
 return res.data`
     let created

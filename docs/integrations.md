@@ -49,6 +49,25 @@ Severity per rule: deadline missed and critical task blocked → `HIGH` (M91 pho
 Buttons: "I’m on it" (`SHARED`, closes it) and "Seen" (`PERSONAL`); free-text replies on. The answer appears in *Alerts → M91 alert history* and on the task's history.
 Failure handling: 429, 5xx and network errors retry with backoff (1, 2, 4, 8 min; 5 attempts); 4xx (not invited, not accepted, validation) fail without retry and say why; people without a phone are `SKIPPED`; admins can retry from the history page.
 
-**To activate:** in the M91 app create an API key (*Settings → API keys*, `m91sk_…`), set `M91_API_KEY` and a random `M91_CALLBACK_TOKEN` (e.g. `openssl rand -hex 24`), make sure `APP_URL` is the https address, then turn on M91 in *Settings → Alert settings*. Each person adds their phone in *Settings → Profile* and accepts the invitation in the M91 app.
+### Channel mode (send link) — configured for "New test"
+
+Contract: https://m91-api.msg91.com/llms.txt (read 2026-11-09). With `M91_SEND_LINK` set, TeamPulse alerts **one M91 channel** instead of individual phones:
+
+| Step | Call | TeamPulse |
+| --- | --- | --- |
+| Connection test | `GET <link>` (no `title` → raises nothing) | used once to confirm the channel: **"New test"** (public), confirmed by the owner on 2026-11-09 |
+| Raise an alert | `POST <link> {title, description, severity, responseOptions, other, isAutoClose, customId, callbackUrl}` | same queue, retries and per-rule M91 switch; the title names the person it is about; `customId` is per **condition** (not per person), so one condition rings the channel once |
+| Read back / close | `GET <link>/alerts/:id`, `POST <link>/close {alertId}` | as in person mode |
+
+- **No invites:** no phone is needed and nobody is invited. People join the channel in the M91 app.
+- **The link is a credential:** anyone holding it can alert the channel. It lives only in the server's environment, never in source or Git, and redaction removes it from logs and stored errors.
+- **Precedence:** it takes precedence over `M91_API_KEY`.
+- **Activation:**
+  1. Set `M91_SEND_LINK` (and `M91_CALLBACK_TOKEN` for answers) in the app's environment.
+  2. Turn on M91 in *Settings → Alert settings*.
+  3. Choose which rules use M91.
+- **Status:** tested against a stand-in (`test/m91-channel.test.js`). **No real alert has been sent.** Before relying on it, send M91's quickstart test alert (LOW, auto-close) and check that `delivered > 0`; the owner chose to do this later.
+
+**To activate (person mode):** in the M91 app create an API key (*Settings → API keys*, `m91sk_…`), set `M91_API_KEY` and a random `M91_CALLBACK_TOKEN` (e.g. `openssl rand -hex 24`), make sure `APP_URL` is the https address, then turn on M91 in *Settings → Alert settings*. Each person adds their phone in *Settings → Profile* and accepts the invitation in the M91 app.
 
 **Status:** request/response shapes are covered by contract tests (stubbed `fetch`, `test/m91.test.js`) and the lifecycle by API tests. A live alert has not been sent: no `M91_API_KEY` was available.

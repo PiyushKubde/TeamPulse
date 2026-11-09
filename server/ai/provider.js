@@ -211,7 +211,7 @@ function simulatedProvider() {
       const items = pack.items || []
       const text = (i) => [i.text, i.workSummary, i.outcomeClaimed, i.result, i.workPerformed].filter(Boolean).join(' ')
       const deep = items.filter((i) => DEEP.test(text(i)) || DEEP.test(pack.task.description || ''))
-      const work = items.filter((i) => ['submission', 'update', 'evidence', 'review', 'impact'].includes(i.kind))
+      const work = items.filter((i) => ['submission', 'update', 'evidence', 'review', 'impact'].includes(i.kind) || (i.kind === 'external' && i.author === 'employee'))
       const refsOf = (list) => list.slice(0, 4).map((i) => i.ref)
       const level = deep.length >= 2 ? 'L4' : deep.length ? 'L3' : work.length ? 'L2' : 'L1'
       const s = pack.signals
@@ -232,6 +232,8 @@ function simulatedProvider() {
             collaboration: help.length ? dim('assessed', 4, '[Simulated] Helped teammates.', refsOf(help)) : ins('[Simulated] No collaboration recorded.')
           },
           contribution_summary: `[Simulated] ${level} work. This is a development simulation, not an AI analysis.`,
+          observed_facts: items.filter((i) => i.kind === 'external' && i.verification === 'system_recorded').slice(0, 3).map((i) => ({ fact: `[Simulated] ${i.app}: ${i.title}`, refs: [i.ref] })),
+          evidence_matches: [],
           estimated_outcomes: [],
           missing_information: [],
           blocker_note: s.blockersOutsideEmployeeControl.length ? '[Simulated] A blocker outside the employee\'s control affected this work.' : '',

@@ -3,6 +3,7 @@ import { app } from '../app.js'
 import { eventText } from './dashboard.js'
 import { openContextBuilder } from './automations.js'
 import { renderAssessmentCard } from './contribution.js'
+import { renderTaskExternalEvidence } from './evidence.js'
 
 let assignableCache = null
 async function assignable() {
@@ -181,6 +182,7 @@ export async function renderTaskDetail(main, id) {
             ${e.createdBy === app.me.name ? html`<button class="btn small link" data-del-evidence="${e.id}" aria-label="Remove">Remove</button>` : ''}</li>`)}</ul>` : html`<p class="muted small">No evidence attached.</p>`}
           ${t.isMine || t.canManage ? html`<div class="row" style="margin-top:8px"><button class="btn small ghost" data-act="add-link">Add link</button><label class="btn small ghost" style="margin:0">Upload file<input type="file" id="ev-file" hidden accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.csv,.zip,.docx,.xlsx,.pptx"></label></div><div class="hint">Files are private to people who can see this task. Max 5 MB.</div>` : ''}
         </section>
+        <section class="card" id="ext-evidence"></section>
         ${d.impact.length ? html`<section class="card"><h2 style="margin-bottom:8px">Recorded impact</h2><ul class="list">${d.impact.map((r) => html`<li><a href="#/impact/${r.id}">${r.title}</a></li>`)}</ul></section>` : ''}
         <section class="card"><div class="card-head"><h2>Share</h2></div><p class="small muted">Post this task to a Slack channel through your own connected Slack (ViaSocket).</p><button class="btn small ghost" data-act="share">Share to Slack</button></section>
       </div>
@@ -188,6 +190,8 @@ export async function renderTaskDetail(main, id) {
 
   const aiCard = main.querySelector('#ai-card')
   if (aiCard) renderAssessmentCard(aiCard, id)
+  const ext = main.querySelector('#ext-evidence')
+  if (ext) renderTaskExternalEvidence(ext, id)
   const reload = () => renderTaskDetail(main, id).catch((e) => toast(errorText(e), { error: true }))
   const run = async (fn, msg) => { try { await fn(); if (msg) toast(msg); app.refreshCounts(); reload() } catch (e) { toast(errorText(e), { error: true }) } }
   bindForm(main.querySelector('#comment'), (b) => api(`/api/tasks/${id}/comments`, { method: 'POST', body: b }), { onSuccess: reload })

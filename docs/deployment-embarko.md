@@ -34,7 +34,8 @@ Embarko sets `PORT`, `DATA_DIR`, `APP_NAME` and `CRON_SECRET` itself — do not 
 | `NODE_ENV` | `production` (also implied on Embarko) |
 | `ALLOW_ORG_CREATION` | `true` for the first admin to create the org; then `false` if only invitations/join codes should be used |
 | `VIASOCKET_ORG_ID`, `VIASOCKET_PROJECT_ID`, `VIASOCKET_EMBED_SECRET` | optional, enables the Automation Center |
-| `M91_API_KEY`, `M91_CALLBACK_TOKEN` | optional, M91 phone alerts (see docs/integrations.md) |
+| `M91_SEND_LINK` | optional, the send link of the team's M91 channel (secret; channel mode — takes precedence over `M91_API_KEY`) |
+| `M91_API_KEY`, `M91_CALLBACK_TOKEN` | optional, M91 per-person alerts / answers (see docs/integrations.md) |
 | `AI_PROVIDER=viasocket` (optional `AI_VIASOCKET_SERVICE`, `AI_VIASOCKET_MODEL`), `ANTHROPIC_API_KEY` as the backup (optional `AI_MODEL`, `AI_EFFORT`, `AI_TIMEOUT_MS`, `AI_FALLBACKS`), `AI_MODE`, `AI_SUPERVISED_TASKS` | optional, AI contribution analysis (see docs/ai-work-measurement.md). Never set `AI_PROVIDER=mock` here (it is ignored in production) |
 | `MAIL_PROVIDER`, `MAIL_FROM`, `MAIL_FROM_NAME`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` | optional, email/password sign-in (see docs/email-auth.md); test real delivery before relying on it |
 

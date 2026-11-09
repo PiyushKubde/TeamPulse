@@ -2,6 +2,7 @@
 // Plain language for employees; the reasons and evidence behind every level for managers. Never a score or a rank.
 import { api, html, raw, modal, bindForm, toast, errorText, ago, d, empty, loading } from '../ui.js'
 import { app } from '../app.js'
+import { renderEvidenceReview } from './evidence.js'
 
 const CX = { 1: 'Routine', 2: 'Standard', 3: 'Complex', 4: 'Highly complex' }
 const STATE_TEXT = { insufficient_evidence: 'Not enough evidence', not_applicable: 'Not applicable' }
@@ -184,19 +185,34 @@ const mix = (m) => html`<span class="row" style="gap:4px">${['L4', 'L3', 'L2', '
 export async function renderContribution(main, q) {
   if (!app.isManager) { location.replace(`#/contribution/${app.me.id}`); return }
   const { days, from } = range(q)
+  const tab = q.get('tab') === 'review' ? 'review' : 'team'
   main.innerHTML = loading().toString()
-  const t = await api(`/api/contribution/team?from=${encodeURIComponent(from)}`)
-  main.innerHTML = html`<div class="page-head"><div><h1>Contribution analysis</h1><p>What each person's work involved — complexity, quality, ownership, problem-solving, collaboration and verified impact. ${t.note}</p></div>
+  const t = await api(`/api/contribution/intelligence?from=${encodeURIComponent(from)}`)
+  const rv = t.evidenceReview
+  const toReview = rv.disputed + rv.unknownAuthor + rv.sharedPending
+  main.innerHTML = html`<div class="page-head"><div><h1>Team intelligence</h1><p>What your people's work involved and achieved — complexity, quality, ownership, problem-solving, collaboration, verified impact and the evidence behind them. ${t.note}</p></div>
       <a class="btn ghost" href="#/contribution/${app.me.id}">My contribution</a></div>
     ${periodTabs('#/contribution', days)}
-    <section class="card"><div class="card-head"><div><h2>Your people</h2><p>Alphabetical. Open a person to see the reasons and evidence behind each assessment.</p></div><span class="badge ok" title="${t.team.note}">${t.team.verifiedOutcomes} verified team outcome(s)</span></div>
+    <div class="tabs"><a href="#/contribution?days=${days}" ${tab === 'team' ? raw('aria-current="page"') : ''}>Team</a><a href="#/contribution?days=${days}&tab=review" ${tab === 'review' ? raw('aria-current="page"') : ''}>Evidence to review${toReview ? html` <span class="count">${toReview}</span>` : ''}</a></div>
+    ${tab === 'review' ? html`<section class="card"><div class="card-head"><div><h2>Evidence to review</h2><p>${rv.disputed} disputed · ${rv.unknownAuthor} with an unknown author · ${rv.sharedPending} shared links. Decide whose work it is; nothing is credited until then.</p></div></div><div id="review-box">${loading()}</div></section>` : html`
+    <div class="grid two">
+      <section class="card"><div class="card-head"><div><h2>Significant contributions</h2><p>Complex (L3+) work or verified outcomes, most recent first — with the reason. Not a ranking.</p></div></div>
+        ${t.significant.length ? html`<ul class="list">${t.significant.map((x) => html`<li><div class="grow" style="min-width:0"><div class="row" style="gap:6px"><a href="#/contribution/${x.userId}"><b>${x.name}</b></a>${x.complexity ? html`<span class="badge brand">${x.complexity}</span>` : ''}${x.verifiedOutcomes ? html`<span class="badge ok">${x.verifiedOutcomes} verified outcome(s)</span>` : ''}${x.externalEvidence ? html`<span class="badge outline">evidence from apps</span>` : ''}${x.sharedWithOthers ? html`<span class="badge outline">shared work</span>` : ''}${x.simulated ? html`<span class="badge warn">simulated</span>` : ''}</div>
+          <a href="#/tasks/${x.taskId}">${x.taskTitle}</a><div class="small muted">${x.complexityReason || ''}</div></div></li>`)}</ul>` : empty('Nothing yet', 'Analysed complex work and verified outcomes appear here.')}</section>
+      <section class="card"><div class="card-head"><div><h2>Open blockers</h2><p>Blockers outside a person's control are context, never a fault.</p></div></div>
+        ${t.blockers.length ? html`<ul class="list">${t.blockers.map((b) => html`<li><div class="grow" style="min-width:0"><div class="row" style="gap:6px"><a href="#/contribution/${b.userId}"><b>${b.name}</b></a>${b.outsideControl ? html`<span class="badge info">outside their control</span>` : ''}${b.escalated ? html`<span class="badge warn">escalated</span>` : ''}</div>
+          <a href="#/tasks/${b.taskId}">${b.taskTitle}</a><div class="small muted">${b.description} · since ${ago(b.since)}</div></div></li>`)}</ul>` : empty('No open blockers', 'Nobody in your teams is blocked.')}</section>
+    </div>
+    <section class="card" style="margin-top:16px"><div class="card-head"><div><h2>Your people</h2><p>Alphabetical. Open a person to see the reasons and evidence behind each assessment.</p></div><span class="badge ok" title="${t.team.note}">${t.team.verifiedOutcomes} verified team outcome(s)</span></div>
       ${t.people.length ? html`<div class="table-wrap"><table><thead><tr><th>Person</th><th>Analysed work (complexity)</th><th class="num">Verified outcomes</th><th class="num hide-sm">Blocked by others</th><th class="num">Awaiting your review</th><th class="num">Disputes</th></tr></thead><tbody>
         ${t.people.map((p) => html`<tr class="clickable" data-href="#/contribution/${p.userId}"><td><a href="#/contribution/${p.userId}"><b>${p.name}</b></a><div class="small muted">${p.title || p.role}${p.team ? ` · ${p.team}` : ''}</div></td>
           <td>${mix(p.complexityMix)}</td><td class="num">${p.verifiedOutcomes}${p.sharedOutcomes ? html` <span class="small muted">(${p.sharedOutcomes} shared)</span>` : ''}</td>
           <td class="num hide-sm">${p.blockedByOthers || 0}</td><td class="num">${p.awaitingYourReview ? html`<span class="badge warn">${p.awaitingYourReview}</span>` : 0}</td><td class="num">${p.disputes ? html`<span class="badge warn">${p.disputes}</span>` : 0}</td></tr>`)}
       </tbody></table></div>` : empty('Nobody to show yet', 'People in the teams you manage appear here once their work has been analysed.')}
-    </section>`.toString()
+    </section>`}`.toString()
   main.querySelectorAll('tr.clickable').forEach((tr) => tr.addEventListener('click', (e) => { if (!e.target.closest('a')) location.hash = tr.dataset.href }))
+  const rb = main.querySelector('#review-box')
+  if (rb) renderEvidenceReview(rb)
 }
 
 export async function renderPerson(main, userId, q) {
@@ -211,6 +227,7 @@ export async function renderPerson(main, userId, q) {
     <div class="page-head"><div><h1>${me ? 'My contribution' : p.person.name}</h1><p>${p.person.title || p.person.role}${p.person.team ? ` · ${p.person.team}` : ''}</p></div></div>
     ${periodTabs(`#/contribution/${userId}`, days)}
     <div class="notice">${p.note}</div>
+    ${p.canReview ? html`<div class="row" style="margin-bottom:12px"><button class="btn small" id="analyse-person">Analyse ${p.person.name}'s recent work</button><span class="small muted">Uses their tasks and the evidence linked to them. Results appear on each task.</span></div>` : me ? html`<div class="row" style="margin-bottom:12px"><a class="btn small" href="#/evidence">My work evidence and “Analyse my work”</a></div>` : ''}
     <section class="card"><h2 style="margin-bottom:6px">In short</h2><p>${p.narrative}</p>
       <div class="row" style="margin-top:8px">${mix(p.complexityMix)}${p.reviews.awaitingManager && !me ? html`<span class="badge warn">${p.reviews.awaitingManager} awaiting review</span>` : ''}${p.reviews.awaitingEmployee && me ? html`<span class="badge info">${p.reviews.awaitingEmployee} waiting for your confirmation</span>` : ''}</div></section>
     <div class="grid two" style="margin-top:16px">${Object.entries(p.dimensions).map(dimCard)}</div>
@@ -232,3 +249,16 @@ export async function renderPerson(main, userId, q) {
       </tbody></table></div>` : empty('No analysed work in this period', me ? 'Your work is analysed when you submit it for review, or when you press “Analyse my work” on a task.' : 'Work is analysed when it is submitted for review.')}
     </section>`.toString()
 }
+
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest?.('#analyse-person')
+  if (!b) return
+  const userId = location.hash.match(/#\/contribution\/([0-9a-f-]{36})/)?.[1]
+  if (!userId) return
+  b.disabled = true
+  try {
+    const r = await api('/api/contribution/analyse', { method: 'POST', body: { userId } })
+    const done = r.results.filter((x) => x.status !== 'not_analysed').length
+    toast(`${done} of ${r.tasks} task(s) sent for analysis${r.results.find((x) => x.reason) ? ` — ${r.results.find((x) => x.reason).reason}` : ''}`)
+  } catch (err) { toast(errorText(err), { error: true }) } finally { b.disabled = false }
+})

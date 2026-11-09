@@ -103,7 +103,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   // cookie is SameSite=Lax. Token-authenticated machine endpoints are exempt.
   app.use('/api', (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store')
-    const machine = req.path.startsWith('/inbound/') || req.path.startsWith('/webhooks/') || req.path.startsWith('/viasocket/events/') || req.path.startsWith('/evidence/events/')
+    const machine = req.path.startsWith('/inbound/') || req.path.startsWith('/webhooks/') || req.path.startsWith('/viasocket/events/') || req.path.startsWith('/work-evidence/events/')
     if (!machine && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.get('x-requested-with') !== 'TeamPulse') {
       return next(new AppError(403, 'csrf', 'Missing request header.'))
     }
@@ -447,27 +447,27 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
 
   // ---------- sprint 2: external evidence ----------
   const limitEvidenceIn = rateLimiter({ windowMs: 60000, max: 120 })
-  app.post('/api/evidence/events/:id', h((req) => {
+  app.post('/api/work-evidence/events/:id', h((req) => {
     limitEvidenceIn(`evidence:${req.params.id}`)
     const auth = req.get('authorization') || ''
     return receiveEvidenceEvent(db, req.params.id, auth.startsWith('Bearer ') ? auth.slice(7).trim() : null, req.body)
   }))
-  app.get('/api/evidence/catalog', h((req) => { member(req); return { configured: vs.configured, apps: evidenceSources.catalog() } }))
-  app.get('/api/evidence/sources', h((req) => evidenceSources.listSources(db, member(req), { userId: req.query.userId })))
-  app.get('/api/evidence/scope-options', h((req) => evidenceSources.scopeOptions(db, vs, member(req), { app: req.query.app, connectionId: req.query.connectionId, parent: req.query.parent, search: req.query.search })))
-  app.post('/api/evidence/sources', h((req) => evidenceSources.createSource(db, vs, member(req), req.body, { appUrl: cfg.appUrl })))
-  app.post('/api/evidence/sources/:id/status', h((req) => evidenceSources.setSourceStatus(db, vs, member(req), req.params.id, req.body)))
-  app.get('/api/evidence/identities', h((req) => evidenceSources.listIdentities(db, member(req), req.query.userId || undefined)))
-  app.post('/api/evidence/identities', h((req) => evidenceSources.addIdentity(db, member(req), req.body)))
-  app.delete('/api/evidence/identities/:id', h((req) => evidenceSources.removeIdentity(db, member(req), req.params.id)))
-  app.get('/api/evidence', h((req) => evidenceSvc.listEvidence(db, member(req), req.query)))
-  app.get('/api/evidence/:id', h((req) => evidenceSvc.getEvidence(db, member(req), req.params.id)))
-  app.delete('/api/evidence/:id', h((req) => evidenceSvc.removeEvidence(db, member(req), req.params.id)))
-  app.post('/api/evidence/:id/links', h((req) => evidenceSvc.linkToTask(db, member(req), req.params.id, req.body)))
-  app.post('/api/evidence/:id/dispute', h((req) => evidenceSvc.disputeAttribution(db, member(req), req.params.id, req.body)))
-  app.post('/api/evidence/:id/attribution', h((req) => evidenceSvc.resolveAttribution(db, member(req), req.params.id, req.body)))
-  app.post('/api/evidence-links/:id', h((req) => evidenceSvc.decideLink(db, member(req), req.params.id, req.body)))
-  app.post('/api/evidence-links/:id/share', h((req) => evidenceSvc.setShare(db, member(req), req.params.id, req.body)))
+  app.get('/api/work-evidence/catalog', h((req) => { member(req); return { configured: vs.configured, apps: evidenceSources.catalog() } }))
+  app.get('/api/work-evidence/sources', h((req) => evidenceSources.listSources(db, member(req), { userId: req.query.userId })))
+  app.get('/api/work-evidence/scope-options', h((req) => evidenceSources.scopeOptions(db, vs, member(req), { app: req.query.app, connectionId: req.query.connectionId, parent: req.query.parent, search: req.query.search })))
+  app.post('/api/work-evidence/sources', h((req) => evidenceSources.createSource(db, vs, member(req), req.body, { appUrl: cfg.appUrl })))
+  app.post('/api/work-evidence/sources/:id/status', h((req) => evidenceSources.setSourceStatus(db, vs, member(req), req.params.id, req.body)))
+  app.get('/api/work-evidence/identities', h((req) => evidenceSources.listIdentities(db, member(req), req.query.userId || undefined)))
+  app.post('/api/work-evidence/identities', h((req) => evidenceSources.addIdentity(db, member(req), req.body)))
+  app.delete('/api/work-evidence/identities/:id', h((req) => evidenceSources.removeIdentity(db, member(req), req.params.id)))
+  app.get('/api/work-evidence', h((req) => evidenceSvc.listEvidence(db, member(req), req.query)))
+  app.get('/api/work-evidence/:id', h((req) => evidenceSvc.getEvidence(db, member(req), req.params.id)))
+  app.delete('/api/work-evidence/:id', h((req) => evidenceSvc.removeEvidence(db, member(req), req.params.id)))
+  app.post('/api/work-evidence/:id/links', h((req) => evidenceSvc.linkToTask(db, member(req), req.params.id, req.body)))
+  app.post('/api/work-evidence/:id/dispute', h((req) => evidenceSvc.disputeAttribution(db, member(req), req.params.id, req.body)))
+  app.post('/api/work-evidence/:id/attribution', h((req) => evidenceSvc.resolveAttribution(db, member(req), req.params.id, req.body)))
+  app.post('/api/work-evidence-links/:id', h((req) => evidenceSvc.decideLink(db, member(req), req.params.id, req.body)))
+  app.post('/api/work-evidence-links/:id/share', h((req) => evidenceSvc.setShare(db, member(req), req.params.id, req.body)))
   app.get('/api/tasks/:id/external-evidence', h((req) => evidenceSvc.taskEvidence(db, member(req), req.params.id)))
 
   app.get('/api/contribution/people/:userId', h((req) => measure.personProfile(db, member(req), req.params.userId, req.query)))
