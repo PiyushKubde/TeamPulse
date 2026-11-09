@@ -80,6 +80,18 @@ export async function createIntake(db, vs, ctx, body, { appUrl }) {
   if (teamId && !db.prepare('SELECT 1 FROM teams WHERE id = ? AND org_id = ?').get(teamId, ctx.orgId)) throw notFound('Team')
   if (teamId && ctx.role === 'manager' && !ctx.managedTeamIds.includes(teamId)) throw forbidden('Requests can go only to a team you manage.')
   const inputData = inputFor(app, target)
+  // Mapping is only trusted once it has read a real message from this exact label/channel (sampleEvent).
+  let sample
+  try {
+    const authType = (await vs.versions(conn.service_id))?.service?.auth_type || 'Auth2.0'
+    sample = await vs.sampleEvent(t.triggerId, conn.auth_id, authType, inputData)
+  } catch (error) {
+    throw viasocketError(error, `read a sample ${t.app} message`)
+  }
+  const mapped = parseEvent(app, sample)
+  console.log(`[intake] ${app} sample before switch-on: keys ${keyPaths(sample).slice(0, 40).join(', ')}; ${mapped.title && mapped.externalRef ? 'mapped' : 'NOT mapped'}`)
+  if (!sample || !Object.keys(sample).length) throw new AppError(409, 'no_sample', `No message found in that ${app === 'gmail' ? 'label' : 'channel'} yet. Send one test message there, then switch the intake on.`)
+  if (!mapped.title || !mapped.externalRef) throw new AppError(409, 'unmapped_sample', `TeamPulse could not read a title and a message id from the latest ${t.app} message, so the intake was not switched on. Fields seen: ${keyPaths(sample).slice(0, 15).join(', ')}.`)
   const dup = db.prepare(`SELECT 1 FROM intake_subscriptions WHERE org_id = ? AND owner_id = ? AND app = ? AND status IN ('ACTIVE','PAUSED') AND input_data = ?`).get(ctx.orgId, ctx.user.id, app, JSON.stringify(inputData))
   if (dup) throw conflict('You already have an intake on that label or channel.', 'intake_exists')
 

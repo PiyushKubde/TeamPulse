@@ -23,6 +23,17 @@ export function createViasocketGateway({ orgId, projectId, secret }) {
     runAction: (scriptId, actionKey, inputData, version) => viasocket.runAction(scriptId, actionKey, inputData, { version }),
     sampleEvent: (triggerId, authId, authType, inputData) => viasocket.sampleEvent(triggerId, authId, authType, inputData),
     subscribe: (userId, app, triggerKey, params) => user(userId).subscribe(app, triggerKey, params),
-    updateSubscription: (userId, scriptId, params) => user(userId).updateSubscription(scriptId, params)
+    updateSubscription: (userId, scriptId, params) => user(userId).updateSubscription(scriptId, params),
+    // Runs of one of this user's flows, last 30 days (https://viasocket.com/docs/automations.md?format=sdk, runHistory).
+    // The user-scoped token is derived per call and never stored; viaSocket answers 403 for another user's flow.
+    flowRuns: async (userId, scriptId, { page = 1, limit = 20 } = {}) => {
+      const reg = await fetch('https://flow-api.viasocket.com/users/register', { headers: { authorization: await user(userId).token() }, signal: AbortSignal.timeout(15000) })
+      const regBody = await reg.json().catch(() => ({}))
+      if (!reg.ok || !regBody?.data?.token) { const e = new Error(regBody?.message || `automation token: ${reg.status}`); e.status = reg.status; throw e }
+      const res = await fetch(`https://flow-api.viasocket.com/logs/orgId/${orgId}?projectId=${projectId}&scriptId=${encodeURIComponent(scriptId)}&page=${page}&limit=${limit}`, { headers: { proxy_auth_token: regBody.data.token }, signal: AbortSignal.timeout(15000) })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok || body?.success === false) { const e = new Error(body?.message || `runHistory: ${res.status}`); e.status = res.status; throw e }
+      return body.data
+    }
   }
 }

@@ -135,3 +135,19 @@ export function listEmbedFlows(db, ctx) {
   return db.prepare('SELECT flow_id, title, status, context, updated_at FROM embed_flows WHERE user_id = ? AND org_id = ? ORDER BY updated_at DESC').all(ctx.user.id, ctx.orgId)
     .map((f) => ({ flowId: f.flow_id, title: f.title, status: f.status, context: f.context, updatedAt: f.updated_at }))
 }
+
+/** The run history of one of the user's own flows (the flow must be recorded as theirs here, and viaSocket checks it too). */
+export async function embedFlowRuns(db, vs, ctx, flowId) {
+  requireViasocket(vs)
+  const f = db.prepare('SELECT * FROM embed_flows WHERE user_id = ? AND org_id = ? AND flow_id = ?').get(ctx.user.id, ctx.orgId, String(flowId || ''))
+  if (!f) throw notFound('Flow')
+  let data
+  try { data = await vs.flowRuns(ctx.user.id, f.flow_id, { limit: 20 }) } catch (error) { throw viasocketError(error, 'read this flow’s runs') }
+  const list = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : Array.isArray(data?.logs) ? data.logs : Array.isArray(data?.rows) ? data.rows : []
+  const pick = (o, ...ks) => ks.map((k) => o?.[k]).find((x) => x !== undefined && x !== null)
+  return list.slice(0, 20).map((r) => {
+    const status = String(pick(r, 'status', 'flowStatus', 'state') ?? '').toLowerCase()
+    const failed = /fail|error/.test(status) || r?.isSuccess === false || r?.success === false
+    return { id: String(pick(r, 'id', '_id', 'flowHitId', 'hitId') ?? ''), at: pick(r, 'createdAt', 'created_at', 'timestamp', 'time') ?? null, status: failed ? 'failed' : status || 'unknown', error: failed ? String(pick(r, 'error', 'errorMessage', 'message') ?? '').slice(0, 200) || null : null }
+  })
+}

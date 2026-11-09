@@ -110,3 +110,11 @@ export async function onTaskEvent(db, vs, e, appUrl) {
     }
   }
 }
+
+/** The contexts this person may build from, optionally only those offering one app (for Connected Apps). */
+export function listContexts(ctx, app) {
+  return Object.entries(CONTEXTS)
+    .filter(([, c]) => !c.managersOnly || isManager(ctx))
+    .filter(([, c]) => !app || c.apps[app])
+    .map(([key, c]) => ({ key, label: c.label, where: c.where, apps: Object.keys(c.apps) }))
+}

@@ -75,8 +75,19 @@ export function buildReport(db, ctx, type, q = {}) {
           value: r.valueType === 'NONE' ? '' : r.measurableValue, unit: r.measurementUnit || '', valueKind: r.valueType === 'NONE' ? 'none' : r.valueType.toLowerCase(), verifiedAt: r.verifiedAt }))
       return { title: 'Verified impact', columns: ['person', 'title', 'category', 'outcomeType', 'result', 'value', 'unit', 'valueKind', 'verifiedAt'], rows, from, to }
     }
-    case 'weekly':
-      return weeklySummary(db, ctx, q)
+    case 'weekly': {
+      const w = weeklySummary(db, ctx, q)
+      const rows = [
+        ...w.verifiedOutcomes.map((r) => ({ section: 'Verified outcome', person: r.person, item: r.title, detail: [r.category, r.value, r.result].filter(Boolean).join(' · '), status: r.verificationStatus })),
+        ...w.significantContributions.map((r) => ({ section: 'Contribution', person: r.person, item: r.title, detail: [r.category, r.value].filter(Boolean).join(' · '), status: r.verificationStatus })),
+        ...w.learning.map((r) => ({ section: 'Learning', person: r.person, item: r.title, detail: r.result, status: r.verificationStatus })),
+        ...w.qualityImprovements.map((r) => ({ section: 'Quality improvement', person: r.person, item: r.title, detail: r.category, status: r.verificationStatus })),
+        ...w.reusableWork.map((r) => ({ section: 'Reusable work', person: r.person, item: r.title, detail: r.category, status: r.verificationStatus })),
+        ...w.unresolvedBlockers.map((b) => ({ section: 'Unresolved blocker', person: b.assignee || '', item: b.task, detail: `${b.description}${b.dependency ? ` · waiting on ${b.dependency}` : ''}`, status: `open ${b.hoursOpen}h` })),
+        ...w.missedCommitments.map((m) => ({ section: 'Missed commitment', person: m.assignee, item: m.task, detail: m.reasons.join('; ') || 'no reason recorded', status: m.countedAgainstPerson ? 'no documented reason' : 'documented reason' }))
+      ]
+      return { ...w, columns: ['section', 'person', 'item', 'detail', 'status'], rows }
+    }
     default:
       throw invalid('Unknown report.')
   }

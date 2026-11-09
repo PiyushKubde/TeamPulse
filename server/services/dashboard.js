@@ -47,9 +47,28 @@ export function managerDashboard(db, ctx) {
       active: mine.length, inProgress: mine.filter((t) => t.status === 'IN_PROGRESS').length, blocked: mine.filter((t) => t.status === 'BLOCKED').length,
       inReview: mine.filter((t) => t.status === 'SUBMITTED_FOR_REVIEW').length, overdue: mine.filter((t) => t.overdue).length,
       dueSoon: mine.filter((t) => !t.overdue && t.hoursUntilDue !== null && t.hoursUntilDue <= 72).length,
-      critical: mine.filter((t) => t.priority === 'CRITICAL').length
+      critical: mine.filter((t) => t.priority === 'CRITICAL').length,
+      atRiskCount: mine.filter((t) => t.atRisk).length
     }
   })
+  // Per person: signals that someone may need help — never a performance ranking (blocked/external work is a reason, not a fault).
+  const at = Date.now()
+  const median = (xs) => { const v = [...xs].sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : 0 }
+  const typicalLoad = median(workload.filter((w) => w.role === 'employee').map((w) => w.active))
+  const needsHelp = workload.map((w) => {
+    const mine = open.filter((t) => t.assigneeId === w.userId)
+    const blocked = mine.filter((t) => t.status === 'BLOCKED')
+    const stalled = mine.filter((t) => t.status === 'IN_PROGRESS' && at - Date.parse(t.lastProgressAt || t.startedAt || t.statusChangedAt) > th.noProgressHours * 3600000)
+    const notStarted = mine.filter((t) => t.status === 'ASSIGNED' && t.assignedAt && at - Date.parse(t.assignedAt) > th.notStartedHours * 3600000)
+    const reasons = []
+    if (w.overdue) reasons.push({ kind: 'overdue', severity: 3, text: `${w.overdue} overdue` })
+    if (blocked.length) reasons.push({ kind: 'blocked', severity: 3, text: `${blocked.length} blocked (longest ${Math.max(...blocked.map((t) => t.blockedHours || 0))}h)` })
+    if (stalled.length) reasons.push({ kind: 'stalled', severity: 2, text: `${stalled.length} without progress for ${th.noProgressHours}h+` })
+    if (notStarted.length) reasons.push({ kind: 'not_started', severity: 1, text: `${notStarted.length} not started after ${th.notStartedHours}h` })
+    if (w.atRiskCount) reasons.push({ kind: 'at_risk', severity: 2, text: `${w.atRiskCount} at risk` })
+    if (w.active >= Math.max(6, typicalLoad * 2)) reasons.push({ kind: 'load', severity: 1, text: `${w.active} active tasks (team typical: ${typicalLoad})` })
+    return { userId: w.userId, name: w.name, pictureUrl: w.pictureUrl, teamName: w.teamName, active: w.active, reasons, severity: reasons.reduce((n, r) => n + r.severity, 0) }
+  }).filter((p) => p.reasons.length).sort((a, b) => b.severity - a.severity)
   const since = new Date(Date.now() - 30 * 86400000).toISOString()
   const impact = contributionSummary(db, ctx, { status: 'VERIFIED', from: since })
   return {
@@ -69,6 +88,7 @@ export function managerDashboard(db, ctx) {
       pendingImpact: listImpact(db, ctx, { status: 'PENDING' }).filter((r) => r.userId !== ctx.user.id).length
     },
     workload,
+    needsHelp,
     attention: attention(db, ctx, open, th),
     activity: recentActivity(db, ctx),
     impact: {
@@ -107,8 +127,10 @@ export function employeeDashboard(db, ctx) {
       blocked: mine.filter((t) => t.status === 'BLOCKED').length,
       overdue: mine.filter((t) => t.overdue).length,
       inReview: mine.filter((t) => t.status === 'SUBMITTED_FOR_REVIEW').length,
-      dueSoon: active.filter((t) => !t.overdue && t.hoursUntilDue !== null && t.hoursUntilDue <= 72).length
+      dueSoon: active.filter((t) => !t.overdue && t.hoursUntilDue !== null && t.hoursUntilDue <= 72).length,
+      completed: mine.filter((t) => t.status === 'COMPLETED').length
     },
+    completed: mine.filter((t) => t.status === 'COMPLETED').sort((a, b) => Date.parse(b.completedAt) - Date.parse(a.completedAt)).slice(0, 6),
     awaitingMe,
     clarifications,
     upcoming: active.filter((t) => t.dueAt && !t.overdue).sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt)).slice(0, 8),
