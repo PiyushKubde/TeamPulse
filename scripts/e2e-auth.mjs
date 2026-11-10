@@ -69,7 +69,7 @@ try {
   page.on('console', (m) => { if (m.type() === 'error' && !/favicon|embed\.viasocket|net::|status of 4\d\d/.test(m.text())) problems.push(`${step}: console ${m.text()}`) })
 
   step = 'login page'
-  await page.goto(base)
+  await page.goto(`${base}/#/login`)
   await page.waitForSelector('#pw-login')
   for (const t of ['Continue with Google', 'Forgot password?', 'Create account']) ok(await page.isVisible(`text=${t}`), `login shows "${t}"`)
   ok(await page.isVisible('#li-email') && await page.isVisible('#li-pw') && await page.isVisible('#pw-login button:has-text("Sign in")'), 'email, password, Sign in')
@@ -125,7 +125,7 @@ try {
   step = 'login with new password; phone width'
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 } })
   const p = await phone.newPage()
-  await p.goto(base); await p.waitForSelector('#pw-login')
+  await p.goto(`${base}/#/login`); await p.waitForSelector('#pw-login')
   const overflow = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   ok(overflow <= 1, `login fits a phone (overflow ${overflow}px)`)
   await p.fill('#li-email', EMAIL); await p.fill('#li-pw', PW); await p.click('#pw-login button[type=submit]')

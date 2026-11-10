@@ -63,7 +63,7 @@ async function session(email, { theme = 'light', viewport = { width: 1366, heigh
   const page = await ctx.newPage()
   page.on('pageerror', (e) => problems.push(`[${email} ${theme}] ${step}: page error ${e.message}`))
   page.on('console', (m) => { if (m.type() === 'error' && !/favicon|embed\.viasocket|net::|status of 4\d\d|status of 503|fonts\./.test(m.text())) problems.push(`[${email} ${theme}] ${step}: console ${m.text()}`) })
-  await page.goto(base)
+  await page.goto(`${base}/#/login`)
   await page.getByText('Local development sign-in').click()
   await page.fill('#dev-email', email)
   await page.click('#dev-login button[type=submit]')

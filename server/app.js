@@ -504,6 +504,9 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   }))
 
   app.use('/api', (req, res, next) => next(new AppError(404, 'not_found', 'No such API route.')))
+  /* Path-based entry points for the landing → SPA hash routes */
+  app.get('/login', (_req, res) => res.redirect(302, '/#/login'))
+  app.get('/signup', (_req, res) => res.redirect(302, '/#/signup'))
   app.use(express.static(join(ROOT, 'public'), { index: 'index.html', maxAge: cfg.production ? '1h' : 0 }))
 
   // Errors: a stable JSON shape; internal errors are logged without user data and never leak details.

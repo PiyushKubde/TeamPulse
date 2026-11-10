@@ -27,7 +27,7 @@ async function session(email, viewport = { width: 1366, height: 900 }) {
   const page = await ctx.newPage()
   page.on('pageerror', (e) => problems.push(`[${email}] ${step}: page error ${e.message}`))
   page.on('console', (m) => { if (m.type() === 'error' && !/favicon|embed\.viasocket|ERR_TUNNEL|ERR_NAME|net::/.test(m.text())) problems.push(`[${email}] ${step}: console ${m.text()}`) })
-  await page.goto(base)
+  await page.goto(`${base}/#/login`)
   await page.getByText('Local development sign-in').click()
   await page.fill('#dev-email', email)
   await page.click('#dev-login button[type=submit]')
