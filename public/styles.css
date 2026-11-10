@@ -764,7 +764,8 @@ a.decision:not(.open) .d-value { font-size: var(--fs-base); color: var(--ok-ink)
 .lp-btn-lg { padding: 13px 28px; font-size: 15px; border-radius: 10px; }
 .lp-menu-btn { display: none; background: none; border: none; cursor: pointer; color: #151515; padding: 6px; border-radius: 6px; transition: background .15s; margin-left: auto; }
 .lp-menu-btn:hover { background: rgba(0,0,0,.05); }
-.lp-mobile-nav { display: flex; flex-direction: column; gap: 2px; padding: 12px 24px 16px; border-top: 1px solid #E7E7E5; }
+/* Mobile nav is hidden on desktop regardless of the [hidden] attribute */
+.lp-mobile-nav { display: none; flex-direction: column; gap: 2px; padding: 12px 24px 16px; border-top: 1px solid #E7E7E5; }
 .lp-mobile-cta { margin-top: 10px; justify-content: center; }
 
 /* Section shared */
@@ -894,6 +895,7 @@ a.decision:not(.open) .d-value { font-size: var(--fs-base); color: var(--ok-ink)
 @media (max-width: 768px) {
   .lp-nav-links, .lp-nav-cta { display: none; }
   .lp-menu-btn { display: flex; }
+  .lp-mobile-nav:not([hidden]) { display: flex; }
   .lp-hero { padding: 48px 0 40px; }
   .lp-problem-inner { grid-template-columns: 1fr; gap: 40px; }
   .lp-cap-grid { grid-template-columns: 1fr; }
