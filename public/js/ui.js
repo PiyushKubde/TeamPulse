@@ -190,6 +190,10 @@ const ICON = {
   dot: '<circle cx="12" cy="12" r="4"/>',
   heart: 'M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7z',
   refresh: 'M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5',
+  github: 'M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22',
+  hash: 'M4 9h16M4 15h16M10 3 8 21M16 3l-2 18',
+  mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>',
+  table: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>',
   note: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8'
 }
 /** An inline SVG icon. size: '' (18px) | 'sm' (15px) | 'xs' (13px). */
@@ -197,6 +201,10 @@ export const icon = (name, size = '') => {
   const d = ICON[name] || ICON.dot
   return raw(`<svg class="i ${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${d.startsWith('<') ? d : `<path d="${d}"/>`}</svg>`)
 }
+
+const APP_TILE = { github: ['github', 'GitHub'], slack: ['hash', 'Slack'], gmail: ['mail', 'Gmail'], 'google-calendar': ['calendar', 'Google Calendar'], 'google-sheets': ['table', 'Google Sheets'] }
+/** A source application's tile: one icon per app, the same everywhere evidence appears. */
+export const appTile = (slug, size = '') => html`<span class="app-icon ${slug} ${size}" title="${(APP_TILE[slug] || [])[1] || slug}">${icon((APP_TILE[slug] || ['dot'])[0])}</span>`
 
 // ---------- theme (light | dark | system), stored per browser; applied before first paint by index.html ----------
 export function themePref() { return document.documentElement.dataset.themePref || 'system' }

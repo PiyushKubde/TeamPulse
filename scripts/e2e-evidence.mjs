@@ -173,7 +173,7 @@ try {
   const pm = await session('manager@demo.teampulse', { width: 390, height: 844 })
   await pm.goto(`${base}/#/contribution`); await pm.waitForSelector('h1:has-text("Team intelligence")')
   ok(await overflow(pm) <= 1, `team intelligence fits a phone (${await overflow(pm)}px)`)
-  for (const [page, url, sel] of [[p, '#/assistant?run=1', 'h2:has-text("Your day")'], [p, `#/journey/${task}`, '.stage-strip'], [p, '#/contributions', 'h1:has-text("My contributions")'], [pm, '#/reviews', 'h1:has-text("Contribution reviews")'], [pm, '#/dashboard', 'h2:has-text("Where to intervene")']]) {
+  for (const [page, url, sel] of [[p, '#/assistant?run=1', 'h2:has-text("Your day")'], [p, `#/journey/${task}`, '.stage-strip'], [p, '#/contributions', 'h1:has-text("My contributions")'], [p, '#/my-tasks', 'h1:has-text("My tasks")'], [p, '#/evidence', 'h1:has-text("My work evidence")'], [p, `#/tasks/${task}`, '.task-head'], [pm, '#/reviews', 'h1:has-text("Contribution reviews")'], [pm, '#/dashboard', 'h2:has-text("Where to intervene")']]) {
     await page.goto(`${base}/${url}`); await page.waitForSelector(sel)
     ok(await overflow(page) <= 1, `${url} fits a phone (${await overflow(page)}px)`)
   }
