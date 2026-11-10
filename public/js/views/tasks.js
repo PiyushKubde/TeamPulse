@@ -1,4 +1,4 @@
-import { api, html, raw, esc, modal, bindForm, toast, errorText, confirmDialog, ago, dt, statusBadge, prioBadge, conditionBadges, progressBar, empty, toLocalInput, fromLocalInput, STATUS_LABEL } from '../ui.js'
+import { api, html, raw, esc, modal, bindForm, toast, errorText, confirmDialog, ago, dt, statusBadge, prioBadge, conditionBadges, progressBar, empty, toLocalInput, fromLocalInput, STATUS_LABEL, icon, due, avatar, prov } from '../ui.js'
 import { app } from '../app.js'
 import { eventText } from './dashboard.js'
 import { openContextBuilder } from './automations.js'
@@ -14,6 +14,18 @@ let teamsCache = null
 const teams = () => (teamsCache ||= api('/api/teams'))
 
 // ---------- list ----------
+/** One task as a card: what it is, why it matters, where it stands. Used by My Tasks and the overview. */
+export function taskCard(t) {
+  const sub = t.expectedOutcome || t.description || ''
+  return html`<a class="task-card" href="#/tasks/${t.id}">
+    <div class="row between nowrap" style="gap:8px">${statusBadge(t.status)}${prioBadge(t.priority)}</div>
+    <div class="t">${t.title}</div>
+    ${sub ? html`<div class="note" title="${sub}">${sub}</div>` : ''}
+    <div class="foot">${progressBar(t.progress)}<span class="pct">${t.progress}%</span></div>
+    <div class="meta">${due(t)}${t.status === 'BLOCKED' && t.blockedHours !== null ? html`<span class="due late">${icon('blocked', 'xs')}Blocked ${t.blockedHours}h</span>` : ''}${t.atRisk && !t.overdue ? html`<span class="badge warn">At risk</span>` : ''}${t.teamName ? html`<span>${t.teamName}</span>` : ''}${!t.dueAt && t.status !== 'BLOCKED' ? html`<span>No deadline</span>` : ''}</div>
+  </a>`
+}
+
 export async function renderTaskList(main, { view, q }) {
   assignableCache = null
   teamsCache = null
@@ -24,11 +36,23 @@ export async function renderTaskList(main, { view, q }) {
   const [tasks, people, teamList] = await Promise.all([api(`/api/tasks?${params}`), isTeam ? api('/api/members') : [], isTeam ? teams() : []])
   const base = isTeam ? '#/team-tasks' : '#/my-tasks'
   const sel = (name, opts, label) => html`<label class="sr" style="position:absolute;left:-999px" for="f-${name}">${label}</label><select id="f-${name}" name="${name}"><option value="">${label}</option>${opts.map(([v, l]) => html`<option value="${v}" ${q.get(name) === v ? raw('selected') : ''}>${l}</option>`)}</select>`
+  const hasFilter = [...q.keys()].length > 0
+  const TABS = [['', 'Open'], ['IN_PROGRESS', 'In progress'], ['BLOCKED', 'Blocked'], ['SUBMITTED_FOR_REVIEW', 'In review'], ['COMPLETED', 'Completed']]
+  const tabHref = (v) => `${base}${v ? `?status=${v}` : ''}`
+  const open = tasks.filter((t) => !['COMPLETED', 'CANCELLED'].includes(t.status))
+  const groups = !isTeam && !q.get('status') && !q.get('q') ? [
+    ['Needs attention', 'alert', 'warn', tasks.filter((t) => t.overdue || t.status === 'BLOCKED' || t.atRisk)],
+    ['In progress', 'trending', '', tasks.filter((t) => t.status === 'IN_PROGRESS' && !(t.overdue || t.atRisk))],
+    ['Up next', 'clock', '', tasks.filter((t) => t.status === 'ASSIGNED' && !(t.overdue || t.atRisk))],
+    ['Waiting for review', 'reviews', 'brand', tasks.filter((t) => t.status === 'SUBMITTED_FOR_REVIEW' && !(t.overdue || t.atRisk))],
+    ['Completed', 'checkCircle', 'ok', tasks.filter((t) => t.status === 'COMPLETED')]
+  ].filter(([, , , l]) => l.length) : null
   main.innerHTML = html`
-    <div class="page-head"><div><h1>${isTeam ? 'Team tasks' : 'My tasks'}</h1><p>${isTeam ? 'Everything your teams are working on. Overdue and at-risk are calculated from deadlines and progress.' : 'Tasks assigned to you.'}</p></div>
-      <div class="row">${app.session.integrations?.viasocket && (!isTeam || app.isManager) ? html`<button class="btn ghost" id="automate" title="${isTeam ? 'When a task in my team is completed…' : 'When a task is assigned to me…'}">Automate</button>` : ''}<button class="btn" id="new-task">${app.session.membership.creationMode === 'direct' ? 'New task' : 'Suggest a task'}</button></div></div>
-    <form class="filters" id="filters" role="search">
-      <input type="search" name="q" value="${q.get('q') || ''}" placeholder="Search title or description" aria-label="Search tasks">
+    <div class="page-head"><div><div class="eyebrow">${icon(isTeam ? 'team' : 'tasks', 'xs')}${isTeam ? 'Team' : 'My work'}</div><h1>${isTeam ? 'Team tasks' : 'My tasks'}</h1><p>${isTeam ? 'Everything your teams are working on. Overdue and at-risk are calculated from deadlines and progress.' : 'What is assigned to you, most urgent first — and why it matters.'}</p></div>
+      <div class="row">${app.session.integrations?.viasocket && (!isTeam || app.isManager) ? html`<button class="btn ghost" id="automate" title="${isTeam ? 'When a task in my team is completed…' : 'When a task is assigned to me…'}">${icon('apps')}Automate</button>` : ''}<button class="btn" id="new-task">${icon('plus')}${app.session.membership.creationMode === 'direct' ? 'New task' : 'Suggest a task'}</button></div></div>
+    <nav class="tabs" aria-label="Task status">${TABS.map(([v, l]) => html`<a href="${tabHref(v)}" ${(q.get('status') || '') === v && !q.get('condition') ? raw('aria-current="page"') : ''}>${l}</a>`)}</nav>
+    <form class="filters toolbar" id="filters" role="search">
+      <div class="search-box">${icon('search', 'sm')}<input type="search" name="q" value="${q.get('q') || ''}" placeholder="Search title or description" aria-label="Search tasks"></div>
       ${sel('status', Object.entries(STATUS_LABEL).filter(([k]) => k !== 'SUGGESTED'), 'Any status')}
       ${sel('priority', [['CRITICAL', 'Critical'], ['HIGH', 'High'], ['MEDIUM', 'Medium'], ['LOW', 'Low']], 'Any priority')}
       ${sel('condition', [['overdue', 'Overdue'], ['at_risk', 'At risk'], ...(isTeam ? [['unassigned', 'Unassigned']] : [])], 'Any condition')}
@@ -37,14 +61,19 @@ export async function renderTaskList(main, { view, q }) {
       ${sel('sort', [['due', 'Sort: due date'], ['priority', 'Sort: priority'], ['updated', 'Sort: recently updated'], ['created', 'Sort: newest'], ['title', 'Sort: title']], 'Sort: due date')}
       <label class="check small" style="margin:0"><input type="checkbox" name="closed" value="1" ${q.get('closed') === '1' ? raw('checked') : ''}> Show cancelled</label>
       <button class="btn ghost small" type="submit">Apply</button>
-      ${[...q.keys()].length ? html`<a class="btn link small" href="${base}">Clear</a>` : ''}
+      ${hasFilter ? html`<a class="btn link small" href="${base}">Clear</a>` : ''}
     </form>
-    ${tasks.length ? html`<div class="table-wrap"><table><thead><tr><th>Task</th><th>Status</th><th>Priority</th>${isTeam ? html`<th>Owner</th>` : ''}<th>Due</th><th class="hide-sm">Progress</th></tr></thead><tbody>
-      ${tasks.map((t) => html`<tr class="clickable" data-href="#/tasks/${t.id}"><td><a href="#/tasks/${t.id}"><b>${t.title}</b></a><div class="row small" style="margin-top:2px">${conditionBadges(t)}${t.teamName ? html`<span class="muted">${t.teamName}</span>` : ''}</div></td>
-        <td>${statusBadge(t.status)}${t.blockedHours !== null ? html`<div class="small muted">${t.blockedHours}h</div>` : ''}</td><td>${prioBadge(t.priority)}</td>
-        ${isTeam ? html`<td>${t.assigneeName || html`<span class="muted">—</span>`}</td>` : ''}
-        <td class="nowrap">${t.dueAt ? html`<span title="${dt(t.dueAt)}">${ago(t.dueAt)}</span>` : html`<span class="muted">—</span>`}</td><td class="hide-sm" style="width:110px">${progressBar(t.progress)}<div class="small muted">${t.progress}%</div></td></tr>`)}
-    </tbody></table></div>` : empty(isTeam ? 'No tasks match' : 'No tasks here', isTeam ? 'Try other filters, or create a task.' : 'When someone assigns you a task it appears here. You can also suggest one.')}`
+    ${!tasks.length ? (hasFilter ? empty('No tasks match', 'Try other filters, or clear them.', html`<a class="btn small ghost" href="${base}">Clear filters</a>`, 'search')
+      : isTeam ? empty('No team tasks yet', 'Create a task and assign it, or approve a task request.', '', 'tasks') : empty('Nothing assigned to you', 'When someone assigns you a task it appears here. You can also suggest one, or connect your apps so the work you already do shows up.', html`<a class="btn small ghost" href="#/evidence">${icon('evidence')}My Work Evidence</a>`, 'tasks'))
+    : isTeam ? html`<div class="table-wrap"><table class="task-table"><thead><tr><th>Task</th><th>Status</th><th class="hide-sm">Priority</th><th>Owner</th><th>Due</th><th class="hide-sm">Progress</th></tr></thead><tbody>
+      ${tasks.map((t) => html`<tr class="clickable" data-href="#/tasks/${t.id}"><td><a href="#/tasks/${t.id}"><b>${t.title}</b></a><div class="meta" style="margin-top:3px">${conditionBadges(t)}${t.teamName ? html`<span>${t.teamName}</span>` : ''}</div></td>
+        <td>${statusBadge(t.status)}${t.blockedHours !== null ? html`<div class="small muted" style="margin-top:3px">${t.blockedHours}h</div>` : ''}</td><td class="hide-sm">${prioBadge(t.priority)}</td>
+        <td>${t.assigneeName ? html`<div class="row nowrap" style="gap:8px">${avatar(t.assigneeName, null, 'sm')}<span>${t.assigneeName}</span></div>` : html`<span class="badge warn">Unassigned</span>`}</td>
+        <td class="nowrap">${due(t) || html`<span class="muted">—</span>`}</td><td class="hide-sm" style="width:120px">${progressBar(t.progress)}<div class="small muted" style="margin-top:3px">${t.progress}%</div></td></tr>`)}
+    </tbody></table></div>`
+    : groups ? html`${groups.map(([title, ic, tone, list]) => html`<section class="task-group"><h2 class="group-title"><span class="card-icon ${tone}">${icon(ic)}</span>${title}<span class="badge outline">${list.length}</span></h2><div class="task-cards">${list.map(taskCard)}</div></section>`)}`
+    : html`<div class="task-cards">${tasks.map(taskCard)}</div>`}
+    ${tasks.length && !isTeam && !open.length && !hasFilter ? '' : ''}`
   document.getElementById('new-task').addEventListener('click', () => openTaskForm())
   document.getElementById('automate')?.addEventListener('click', () => openContextBuilder(isTeam ? 'task_completed_in_my_team' : 'task_assigned_to_me'))
   document.getElementById('filters').addEventListener('submit', (e) => {
@@ -118,73 +147,81 @@ export async function renderTaskDetail(main, id) {
   const t = d.task
   const a = d.allowed
   const openBlockers = d.blockers.filter((b) => b.status === 'OPEN')
-  const actions = [
-    a.start && html`<button class="btn" data-act="start">Start work</button>`,
-    a.progress && html`<button class="btn ghost" data-act="progress">Update progress</button>`,
-    a.submit && html`<button class="btn" data-act="submit">Submit for review</button>`,
-    a.review && html`<button class="btn" data-act="review">Review submission</button>`,
-    a.block && html`<button class="btn ghost" data-act="block">Report blocker</button>`,
-    a.assign && html`<button class="btn ghost" data-act="assign">${t.assigneeId ? 'Reassign' : 'Assign'}</button>`,
-    a.edit && !['COMPLETED', 'CANCELLED'].includes(t.status) && html`<button class="btn ghost" data-act="edit">Edit</button>`,
-    a.reopen && html`<button class="btn ghost" data-act="reopen">Reopen</button>`,
-    a.restore && html`<button class="btn ghost" data-act="restore">Restore</button>`,
-    a.cancel && html`<button class="btn ghost" data-act="cancel">Cancel task</button>`,
-    a.delete && html`<button class="btn ghost" data-act="delete" style="color:var(--bad)">Delete</button>`
+  const primary = [
+    a.start && html`<button class="btn" data-act="start">${icon('arrowRight')}Start work</button>`,
+    a.submit && html`<button class="btn" data-act="submit">${icon('send')}Submit for review</button>`,
+    a.review && html`<button class="btn" data-act="review">${icon('reviews')}Review submission</button>`,
+    a.progress && html`<button class="btn ghost" data-act="progress">${icon('trending')}Update progress</button>`,
+    a.block && html`<button class="btn ghost" data-act="block">${icon('blocked')}Report blocker</button>`
   ].filter(Boolean)
+  const more = [
+    a.assign && html`<button class="menu-item" data-act="assign">${icon('team', 'sm')}${t.assigneeId ? 'Reassign' : 'Assign'}</button>`,
+    a.edit && !['COMPLETED', 'CANCELLED'].includes(t.status) && html`<button class="menu-item" data-act="edit">${icon('requests', 'sm')}Edit task</button>`,
+    a.reopen && html`<button class="menu-item" data-act="reopen">${icon('refresh', 'sm')}Reopen</button>`,
+    a.restore && html`<button class="menu-item" data-act="restore">${icon('refresh', 'sm')}Restore</button>`,
+    a.cancel && html`<button class="menu-item" data-act="cancel">${icon('x', 'sm')}Cancel task</button>`,
+    a.delete && html`<button class="menu-item danger" data-act="delete">${icon('x', 'sm')}Delete…</button>`
+  ].filter(Boolean)
+  const lastReview = d.submissions.flatMap((x) => x.reviews).at(-1)
+  const changesAsked = lastReview && lastReview.decision !== 'APPROVED' && t.status !== 'COMPLETED'
+  const person = (name, label) => name ? html`<div class="row nowrap" style="gap:8px">${avatar(name, null, 'sm')}<span>${name}</span></div>` : html`<span class="badge warn">${label}</span>`
   main.innerHTML = html`
-    <div class="small muted" style="margin-bottom:6px"><a href="${t.isMine ? '#/my-tasks' : '#/team-tasks'}">← Back to tasks</a></div>
-    <div class="page-head"><div><h1>${t.title}</h1>
-      <div class="row" style="margin-top:8px">${statusBadge(t.status)} ${prioBadge(t.priority)} ${conditionBadges(t)} ${t.teamName ? html`<span class="badge outline">${t.teamName}</span>` : ''}</div></div>
-      <div class="row">${actions}</div></div>
-    ${openBlockers.length ? html`<div class="notice err"><b>Blocked for ${t.blockedHours}h.</b> ${openBlockers.map((b) => b.description).join(' · ')} — a blocked task does not count against the person doing it.</div>` : ''}
-    ${t.status === 'SUBMITTED_FOR_REVIEW' ? html`<div class="notice">Submitted for review ${ago(t.submittedAt)}. It is not complete until a manager approves it.</div>` : ''}
+    <div class="crumbs"><a href="${t.isMine ? '#/my-tasks' : '#/team-tasks'}">${t.isMine ? 'My tasks' : 'Team tasks'}</a>${icon('chevronRight', 'xs')}<span>${t.title.length > 48 ? `${t.title.slice(0, 48)}…` : t.title}</span></div>
+    <header class="task-head"><div class="grow"><h1>${t.title}</h1>
+      <div class="row" style="margin-top:10px">${statusBadge(t.status)} ${prioBadge(t.priority)} ${due(t)} ${conditionBadges(t)} ${t.teamName ? html`<span class="badge outline">${t.teamName}</span>` : ''}</div></div>
+      <div class="task-actions">${primary}${more.length ? html`<details class="more-menu"><summary class="btn ghost" aria-label="More actions">${icon('more')}</summary><div class="menu inline">${more}</div></details>` : ''}</div></header>
+    ${openBlockers.length ? html`<div class="banner bad" role="status"><span class="lead-icon bad">${icon('blocked')}</span><div><b>Blocked for ${t.blockedHours}h</b><div>${openBlockers.map((b) => b.description).join(' · ')}</div><div class="small muted">A blocked task is never counted against the person doing it.</div></div></div>` : ''}
+    ${changesAsked ? html`<div class="banner warn" role="status"><span class="lead-icon warn">${icon('alert')}</span><div><b>${lastReview.reviewer} asked for changes</b><div>${lastReview.comment || 'See the review below.'}</div></div></div>` : ''}
+    ${t.status === 'SUBMITTED_FOR_REVIEW' ? html`<div class="banner brand" role="status"><span class="lead-icon brand">${icon('reviews')}</span><div><b>Waiting for review</b><div>Submitted ${ago(t.submittedAt)}. It is not complete until a manager approves it.</div></div></div>` : ''}
     <div class="grid side">
       <div class="stack">
-        <section class="card"><h2 style="margin-bottom:10px">Details</h2>
-          <dl class="kv">
-            <dt>Owner</dt><dd>${t.assigneeName || html`<span class="badge warn">Unassigned</span>`}</dd>
-            <dt>Created by</dt><dd>${t.createdByName} · ${dt(t.createdAt)}</dd>
-            <dt>Due</dt><dd>${t.dueAt ? html`${dt(t.dueAt)} <span class="muted">(${ago(t.dueAt)})</span>` : '—'}</dd>
-            <dt>Start date</dt><dd>${t.startDate || '—'}</dd>
-            <dt>Progress</dt><dd><div class="row">${html`<div style="width:160px">${progressBar(t.progress)}</div>`}<span>${t.progress}%</span>${t.lastProgressAt ? html`<span class="muted small">updated ${ago(t.lastProgressAt)}</span>` : ''}</div></dd>
-            <dt>Description</dt><dd class="pre">${t.description || '—'}</dd>
-            <dt>Expected outcome</dt><dd class="pre">${t.expectedOutcome || '—'}</dd>
-            ${t.links.length ? html`<dt>Links</dt><dd>${t.links.map((l) => html`<div><a href="${l.url}" target="_blank" rel="noopener noreferrer">${l.label || l.url}</a></div>`)}</dd>` : ''}
-            ${t.sourceRequestId ? html`<dt>From request</dt><dd><a href="#/requests">Approved suggestion</a></dd>` : ''}
+        <section class="card" aria-labelledby="ov-h"><div class="card-head"><h2 id="ov-h"><span class="card-icon">${icon('note')}</span>What this is about</h2></div>
+          ${t.description ? html`<p class="pre" style="margin-bottom:14px">${t.description}</p>` : html`<p class="muted" style="margin-bottom:14px">No description was added.</p>`}
+          <div class="outcome-box"><div class="small muted">Expected outcome</div><div class="pre">${t.expectedOutcome || html`<span class="muted">Not stated — worth agreeing before you start.</span>`}</div></div>
+          ${t.links.length ? html`<div class="chips" style="margin-top:12px">${t.links.map((l) => html`<a class="chip" href="${l.url}" target="_blank" rel="noopener noreferrer">${icon('evidence', 'xs')} ${l.label || l.url}</a>`)}</div>` : ''}
+          ${t.sourceRequestId ? html`<p class="small muted" style="margin:12px 0 0">Created from <a href="#/requests">an approved suggestion</a>.</p>` : ''}
+        </section>
+        <section class="card facts" aria-labelledby="facts-h"><h2 id="facts-h" class="sr">Details</h2>
+          <dl class="fact-grid">
+            <div><dt>Owner</dt><dd>${person(t.assigneeName, 'Unassigned')}</dd></div>
+            <div><dt>Due</dt><dd>${t.dueAt ? html`${dt(t.dueAt)}` : '—'}</dd></div>
+            <div><dt>Progress</dt><dd><div class="row nowrap" style="gap:10px"><div style="flex:1;min-width:70px">${progressBar(t.progress)}</div><b>${t.progress}%</b></div>${t.lastProgressAt ? html`<div class="small muted">updated ${ago(t.lastProgressAt)}</div>` : ''}</dd></div>
+            <div><dt>Created by</dt><dd>${t.createdByName}<div class="small muted">${dt(t.createdAt)}</div></dd></div>
+            ${t.startDate ? html`<div><dt>Start date</dt><dd>${t.startDate}</dd></div>` : ''}
           </dl></section>
-        ${d.submissions.length ? html`<section class="card"><h2 style="margin-bottom:10px">Completion submissions and reviews</h2>
-          ${d.submissions.map((s) => html`<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
+        ${d.submissions.length ? html`<section class="card" aria-labelledby="sub-h"><div class="card-head"><h2 id="sub-h"><span class="card-icon brand">${icon('reviews')}</span>Submission and review</h2>${prov('self', 'The employee’s account')}</div>
+          ${d.submissions.map((s) => html`<div class="submission">
             <div class="row between"><b>${s.submittedBy} · ${dt(s.createdAt)}</b><span class="badge ${s.status === 'APPROVED' ? 'ok' : s.status === 'PENDING' ? 'info' : 'warn'}">${s.status.replace(/_/g, ' ').toLowerCase()}</span></div>
-            <dl class="kv" style="margin-top:6px"><dt>Work summary</dt><dd class="pre">${s.summary}</dd><dt>Outcome achieved</dt><dd class="pre">${s.outcome}</dd>
+            <dl class="kv" style="margin-top:8px"><dt>Work summary</dt><dd class="pre">${s.summary}</dd><dt>Outcome achieved</dt><dd class="pre">${s.outcome}</dd>
             ${s.evidence.length ? html`<dt>Evidence</dt><dd>${s.evidence.map((e) => html`<div><a href="${e.url}" ${e.kind === 'link' ? raw('target="_blank" rel="noopener noreferrer"') : ''}>${e.label || e.fileName || e.url}</a></div>`)}</dd>` : ''}</dl>
-            ${s.reviews.map((r) => html`<div class="notice ${r.decision === 'APPROVED' ? 'ok' : 'warn'}" style="margin:8px 0 0"><b>${r.reviewer}</b> ${r.decision === 'APPROVED' ? 'approved' : 'requested changes'} ${ago(r.createdAt)}${r.comment ? html`: “${r.comment}”` : ''}</div>`)}
+            ${s.reviews.map((r) => html`<div class="notice ${r.decision === 'APPROVED' ? 'ok' : 'warn'}" style="margin:10px 0 0"><b>${r.reviewer}</b> ${r.decision === 'APPROVED' ? 'approved' : 'requested changes'} ${ago(r.createdAt)}${r.comment ? html`: “${r.comment}”` : ''}</div>`)}
           </div>`)}
-          ${t.status === 'COMPLETED' ? html`<p class="small muted" style="margin-top:10px">Completion is not the same as impact. ${t.isMine ? html`<a href="#/impact?new=1&taskId=${t.id}">Record the outcome this delivered</a> so it can be verified.` : ''}</p>` : ''}
+          ${t.status === 'COMPLETED' ? html`<div class="card-foot"><span class="muted">Completion is not the same as impact.</span>${t.isMine ? html`<a class="btn small ghost" href="#/impact?new=1&taskId=${t.id}">${icon('award')}Record the outcome</a>` : ''}</div>` : ''}
         </section>` : ''}
         ${t.assigneeId ? html`<section class="card" id="ai-card" aria-live="polite">${raw('<div class="loading">Loading the contribution analysis…</div>')}</section>` : ''}
-        <section class="card"><div class="card-head"><h2>Activity and comments</h2></div>
-          <ul class="timeline">${d.events.map((e) => html`<li><div><b>${e.actorName || 'System'}</b> ${eventText(e)}</div><div class="when">${dt(e.createdAt)}</div></li>`)}</ul>
-          <form id="comment" class="row" style="margin-top:8px;align-items:flex-start"><div class="grow" style="flex:1"><label for="c-body" class="sr" style="position:absolute;left:-999px">Comment</label><textarea id="c-body" name="body" rows="2" required maxlength="4000" placeholder="Write a comment…" style="min-height:44px"></textarea></div><button class="btn ghost" type="submit">Comment</button></form>
+        <section class="card" aria-labelledby="act-h"><div class="card-head"><h2 id="act-h"><span class="card-icon">${icon('message')}</span>Activity and comments</h2>${prov('fact', 'Recorded history')}</div>
+          <form id="comment" class="comment-form"><label for="c-body" class="sr">Comment</label><textarea id="c-body" name="body" rows="2" required maxlength="4000" placeholder="Write a comment…"></textarea><button class="btn" type="submit">Comment</button></form>
+          <ul class="timeline" style="margin-top:16px">${[...d.events].reverse().map((e) => html`<li><div><b>${e.actorName || 'System'}</b> ${eventText(e)}</div><div class="when">${dt(e.createdAt)}</div></li>`)}</ul>
         </section>
       </div>
       <div class="stack">
-        <section class="card"><div class="card-head"><h2>Blockers</h2>${a.block ? html`<button class="btn small ghost" data-act="block">Report</button>` : ''}</div>
+        <section class="card" aria-labelledby="blk-h"><div class="card-head"><h2 id="blk-h"><span class="card-icon ${openBlockers.length ? 'bad' : ''}">${icon('blocked')}</span>Blockers</h2>${a.block ? html`<button class="btn small ghost" data-act="block">Report</button>` : ''}</div>
           ${d.blockers.length ? html`<ul class="list">${d.blockers.map((b) => html`<li><div class="grow">
-            <div class="row"><span class="badge ${b.status === 'OPEN' ? 'bad' : 'ok'}">${b.status === 'OPEN' ? `Open ${b.hoursOpen}h` : 'Resolved'}</span>${b.escalatedAt ? html`<span class="badge warn">Escalated</span>` : ''}${b.isExternal ? html`<span class="badge outline">External</span>` : ''}</div>
-            <div style="margin-top:4px">${b.description}</div>
+            <div class="row"><span class="badge ${b.status === 'OPEN' ? 'bad' : 'ok'}">${b.status === 'OPEN' ? `Open ${b.hoursOpen}h` : 'Resolved'}</span>${b.escalatedAt ? html`<span class="badge warn">Escalated</span>` : ''}${b.isExternal ? html`<span class="badge info">Outside their control</span>` : ''}</div>
+            <div style="margin-top:6px">${b.description}</div>
             <div class="small muted">${b.reportedBy} · ${ago(b.reportedAt)}${b.dependencyOwnerName ? ` · waiting on ${b.dependencyOwnerName}` : ''}${b.dependencyNote ? ` · ${b.dependencyNote}` : ''}</div>
-            ${b.resolutionNote ? html`<div class="small">Resolved by ${b.resolvedBy}: ${b.resolutionNote}</div>` : ''}
-            ${b.status === 'OPEN' ? html`<div class="row" style="margin-top:6px"><button class="btn small ghost" data-resolve="${b.id}">Resolve</button>${!b.escalatedAt ? html`<button class="btn small ghost" data-escalate="${b.id}">Escalate</button>` : ''}</div>` : ''}
-          </div></li>`)}</ul>` : html`<p class="muted small">No blockers reported.</p>`}
+            ${b.resolutionNote ? html`<div class="small" style="margin-top:4px">Resolved by ${b.resolvedBy}: ${b.resolutionNote}</div>` : ''}
+            ${b.status === 'OPEN' ? html`<div class="row" style="margin-top:8px"><button class="btn small ghost" data-resolve="${b.id}">Resolve</button>${!b.escalatedAt ? html`<button class="btn small ghost" data-escalate="${b.id}">Escalate</button>` : ''}</div>` : ''}
+          </div></li>`)}</ul>` : html`<p class="muted small" style="margin:0">No blockers reported.</p>`}
         </section>
-        <section class="card"><div class="card-head"><h2>Evidence</h2></div>
-          ${d.evidence.length ? html`<ul class="list">${d.evidence.map((e) => html`<li><div class="grow"><a href="${e.url}" ${e.kind === 'link' ? raw('target="_blank" rel="noopener noreferrer"') : ''}>${e.label || e.fileName || e.url}</a><div class="small muted">${e.kind === 'file' ? `${Math.ceil(e.sizeBytes / 1024)} KB · ` : ''}${e.createdBy} · ${ago(e.createdAt)}</div></div>
-            ${e.createdBy === app.me.name ? html`<button class="btn small link" data-del-evidence="${e.id}" aria-label="Remove">Remove</button>` : ''}</li>`)}</ul>` : html`<p class="muted small">No evidence attached.</p>`}
-          ${t.isMine || t.canManage ? html`<div class="row" style="margin-top:8px"><button class="btn small ghost" data-act="add-link">Add link</button><label class="btn small ghost" style="margin:0">Upload file<input type="file" id="ev-file" hidden accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.csv,.zip,.docx,.xlsx,.pptx"></label></div><div class="hint">Files are private to people who can see this task. Max 5 MB.</div>` : ''}
+        <section class="card" aria-labelledby="att-h"><div class="card-head"><h2 id="att-h"><span class="card-icon">${icon('evidence')}</span>Evidence and attachments</h2></div>
+          ${d.evidence.length ? html`<ul class="list">${d.evidence.map((e) => html`<li><span class="lead-icon">${icon(e.kind === 'file' ? 'note' : 'evidence')}</span><div class="grow"><a href="${e.url}" ${e.kind === 'link' ? raw('target="_blank" rel="noopener noreferrer"') : ''}>${e.label || e.fileName || e.url}</a><div class="small muted">${e.kind === 'file' ? `${Math.ceil(e.sizeBytes / 1024)} KB · ` : ''}${e.createdBy} · ${ago(e.createdAt)}</div></div>
+            ${e.createdBy === app.me.name ? html`<button class="btn small link" data-del-evidence="${e.id}" aria-label="Remove ${e.label || e.fileName || 'evidence'}">Remove</button>` : ''}</li>`)}</ul>` : html`<p class="muted small" style="margin:0">Nothing attached yet.</p>`}
+          ${t.isMine || t.canManage ? html`<div class="row" style="margin-top:12px"><button class="btn small ghost" data-act="add-link">${icon('plus')}Add link</button><label class="btn small ghost" style="margin:0">${icon('plus')}Upload file<input type="file" id="ev-file" hidden accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.csv,.zip,.docx,.xlsx,.pptx"></label></div><div class="hint">Files are private to people who can see this task. Max 5 MB.</div>` : ''}
         </section>
         <section class="card" id="ext-evidence"></section>
-        ${d.impact.length ? html`<section class="card"><h2 style="margin-bottom:8px">Recorded impact</h2><ul class="list">${d.impact.map((r) => html`<li><a href="#/impact/${r.id}">${r.title}</a></li>`)}</ul></section>` : ''}
-        <section class="card"><div class="card-head"><h2>Share</h2></div><p class="small muted">Post this task to a Slack channel through your own connected Slack (ViaSocket).</p><button class="btn small ghost" data-act="share">Share to Slack</button></section>
+        ${d.impact.length ? html`<section class="card"><div class="card-head"><h2><span class="card-icon ok">${icon('award')}</span>Recorded impact</h2></div><ul class="list">${d.impact.map((r) => html`<li><a href="#/impact/${r.id}">${r.title}</a></li>`)}</ul></section>` : ''}
+        <section class="card"><div class="card-head"><h2><span class="card-icon">${icon('send')}</span>Share</h2></div><p class="small muted">Post this task to a Slack channel through your own connected Slack (viaSocket).</p><button class="btn small ghost" data-act="share">Share to Slack</button></section>
       </div>
     </div>`
 
@@ -278,7 +315,13 @@ export async function renderTaskDetail(main, id) {
     }),
     share: () => shareToSlack(t)
   }
-  main.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => ACTIONS[b.dataset.act]?.()))
+  main.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => { b.closest('details')?.removeAttribute('open'); ACTIONS[b.dataset.act]?.() }))
+  const moreMenu = main.querySelector('.more-menu')
+  if (moreMenu) {
+    const away = (e) => { if (!moreMenu.isConnected) return document.removeEventListener('click', away); if (!moreMenu.contains(e.target)) moreMenu.removeAttribute('open') }
+    document.addEventListener('click', away)
+    moreMenu.addEventListener('keydown', (e) => { if (e.key === 'Escape') { moreMenu.removeAttribute('open'); moreMenu.querySelector('summary').focus() } })
+  }
 }
 
 async function shareToSlack(t) {

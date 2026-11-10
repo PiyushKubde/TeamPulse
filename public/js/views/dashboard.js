@@ -1,6 +1,6 @@
 import { api, html, raw, avatar, ago, dt, statusBadge, prioBadge, conditionBadges, progressBar, verifyBadge, empty, bindForm, toast, requestBadge, errorText, icon, due, prov } from '../ui.js'
 import { app } from '../app.js'
-import { openTaskForm } from './tasks.js'
+import { openTaskForm, taskCard } from './tasks.js'
 import { renderSignals } from './assistant.js'
 
 const stat = (label, value, { tone = '', href = null } = {}) => href
@@ -79,17 +79,6 @@ const failed = (r) => r.status === 'rejected'
 
 const RANK = (t) => (t.overdue ? 0 : t.status === 'BLOCKED' ? 1 : t.atRisk ? 2 : t.status === 'IN_PROGRESS' ? 3 : t.status === 'SUBMITTED_FOR_REVIEW' ? 5 : 4)
 const byUrgency = (a, b) => RANK(a) - RANK(b) || (Date.parse(a.dueAt || '9999-12-31') - Date.parse(b.dueAt || '9999-12-31'))
-
-function taskCard(t) {
-  const sub = t.expectedOutcome || t.description || ''
-  return html`<a class="task-card" href="#/tasks/${t.id}">
-    <div class="row between nowrap" style="gap:8px">${statusBadge(t.status)}${prioBadge(t.priority)}</div>
-    <div class="t">${t.title}</div>
-    ${sub ? html`<div class="note" title="${sub}">${sub}</div>` : ''}
-    <div class="foot">${progressBar(t.progress)}<span class="pct">${t.progress}%</span></div>
-    <div class="meta">${due(t)}${t.status === 'BLOCKED' && t.blockedHours !== null ? html`<span class="due late">${icon('blocked', 'xs')}Blocked ${t.blockedHours}h</span>` : ''}${!t.dueAt && t.status !== 'BLOCKED' ? html`<span>No deadline</span>` : ''}</div>
-  </a>`
-}
 
 function hero(p, tasks, attention) {
   const inProgress = tasks.filter((t) => t.status === 'IN_PROGRESS').length
