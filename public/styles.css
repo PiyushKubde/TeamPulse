@@ -681,3 +681,33 @@ a.chip.ev > svg { color: var(--ok); }
   .assistant-side { position: static; }
 }
 @media (max-width: 640px) { .day-form { align-items: stretch; } .day-form > * { flex: 1 1 100%; } .day-form input[type=date] { width: 100%; } }
+
+/* ---------------------------------------------------------------- manager overview */
+.decisions { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-4); }
+a.decision { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); color: inherit; box-shadow: var(--shadow-xs); transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease); }
+a.decision:hover { text-decoration: none; border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
+a.decision.open { border-color: color-mix(in srgb, var(--warn) 35%, var(--border)); }
+.d-body { display: grid; min-width: 0; line-height: 1.3; }
+.d-label { font-size: var(--fs-xs); color: var(--text-3); font-weight: var(--fw-medium); }
+.d-value { font-size: var(--fs-lg); font-weight: var(--fw-semibold); letter-spacing: -.01em; }
+a.decision:not(.open) .d-value { font-size: var(--fs-base); color: var(--ok-ink); }
+
+.decision-box { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; margin-top: var(--sp-4); padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--border); }
+.decision-box.manager { border-color: color-mix(in srgb, var(--ok) 30%, var(--border)); background: color-mix(in srgb, var(--ok-soft) 50%, var(--surface)); }
+.count-pill { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 4px; border-radius: var(--r-full); background: var(--brand-solid); color: var(--on-brand); font-size: 11px; line-height: 18px; text-align: center; font-weight: var(--fw-semibold); }
+.person-head { align-items: center; }
+
+/* ---------------------------------------------------------------- reviews, signals detail, copilot */
+.review-tabs a { display: inline-flex; align-items: center; gap: 8px; }
+.review-queue { display: grid; gap: var(--sp-3); grid-template-columns: minmax(0, 1fr); }
+.review-item .ttl { color: var(--text); }
+.review-item .assessment-slot { margin-top: var(--sp-4); padding-top: var(--sp-4); border-top: 1px solid var(--border-subtle); }
+.sig-detail { display: grid; gap: 6px; margin-top: 8px; padding: 10px 12px; background: var(--surface-2); border-radius: var(--r-sm); font-size: var(--fs-sm); color: var(--text-2); }
+.sig-detail > div { display: grid; grid-template-columns: 130px 1fr; gap: 10px; align-items: start; }
+.sig-label { color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); text-transform: uppercase; letter-spacing: .04em; padding-top: 2px; }
+.signal.state-dismissed, .signal.state-resolved { opacity: .85; }
+.copilot-layout > .card { min-height: 320px; }
+.q-cards { display: grid; gap: 8px; }
+.q-card { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); color: var(--text); font: inherit; font-weight: var(--fw-medium); text-align: left; cursor: pointer; transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease); }
+.q-card:hover { border-color: var(--brand); background: var(--brand-soft); }
+@media (max-width: 640px) { .sig-detail > div { grid-template-columns: 1fr; gap: 2px; } }

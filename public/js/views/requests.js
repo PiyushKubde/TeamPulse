@@ -1,4 +1,4 @@
-import { api, html, raw, modal, bindForm, toast, errorText, ago, dt, prioBadge, requestBadge, empty, toLocalInput, fromLocalInput, confirmDialog } from '../ui.js'
+import { api, html, raw, modal, bindForm, toast, errorText, ago, dt, prioBadge, requestBadge, empty, toLocalInput, fromLocalInput, confirmDialog, icon, avatar } from '../ui.js'
 import { app } from '../app.js'
 import { openTaskForm } from './tasks.js'
 
@@ -8,30 +8,30 @@ export async function renderRequests(main, q) {
   const mine = list.filter((r) => r.requestedBy === app.me.id)
   const toDecide = app.isManager ? list.filter((r) => r.requestedBy !== app.me.id && ['PENDING', 'CLARIFICATION_REQUESTED'].includes(r.status)) : []
   const decided = app.isManager ? list.filter((r) => r.requestedBy !== app.me.id && !['PENDING', 'CLARIFICATION_REQUESTED'].includes(r.status)) : []
-  const card = (r, { decide = false } = {}) => html`<article class="card" style="margin-bottom:12px">
-    <div class="row between"><div><h3>${r.title}</h3><div class="small muted">${r.source === 'external' ? html`<span class="badge brand">External</span> from ${r.externalRequester || 'an automation'}` : `by ${r.requestedByName}`} · ${ago(r.createdAt)}${r.teamName ? ` · ${r.teamName}` : ''}</div></div>
-      <div class="row">${requestBadge(r.status)} ${prioBadge(r.suggestedPriority)}</div></div>
-    <dl class="kv" style="margin-top:10px">
+  const card = (r, { decide = false } = {}) => html`<article class="card request-card ${decide ? 'to-decide' : ''}">
+    <div class="row between" style="align-items:flex-start;gap:12px"><div class="row nowrap" style="gap:12px;min-width:0">${r.source === 'external' ? html`<span class="app-icon tp">${icon('inbox')}</span>` : avatar(r.requestedByName, null)}<div style="min-width:0"><h3>${r.title}</h3><div class="meta" style="margin-top:2px">${r.source === 'external' ? html`<span class="badge brand">External</span><span>from ${r.externalRequester || 'an automation'}</span>` : html`<span>${r.requestedByName}</span>`}<span class="sep"></span><span>${ago(r.createdAt)}</span>${r.teamName ? html`<span class="sep"></span><span>${r.teamName}</span>` : ''}</div></div></div>
+      <div class="row nowrap" style="gap:8px">${requestBadge(r.status)} ${prioBadge(r.suggestedPriority)}</div></div>
+    <dl class="kv" style="margin-top:12px">
       ${r.description ? html`<dt>Description</dt><dd class="pre">${r.description}</dd>` : ''}
-      ${r.reason ? html`<dt>Reason</dt><dd class="pre">${r.reason}</dd>` : ''}
+      ${r.reason ? html`<dt>Why it is needed</dt><dd class="pre">${r.reason}</dd>` : ''}
       ${r.expectedOutcome ? html`<dt>Expected outcome</dt><dd class="pre">${r.expectedOutcome}</dd>` : ''}
       ${r.suggestedDueAt ? html`<dt>Suggested deadline</dt><dd>${dt(r.suggestedDueAt)}</dd>` : ''}
       ${r.suggestedAssigneeName ? html`<dt>Suggested owner</dt><dd>${r.suggestedAssigneeName}</dd>` : ''}
       ${r.decisionNote ? html`<dt>${r.status === 'CLARIFICATION_REQUESTED' ? 'Question' : 'Decision note'}</dt><dd class="pre">${r.decisionNote} <span class="muted small">— ${r.decidedByName}, ${ago(r.decidedAt)}</span></dd>` : ''}
     </dl>
-    <div class="row" style="margin-top:10px">
-      ${decide ? html`<button class="btn small" data-approve="${r.id}">Approve…</button><button class="btn small ghost" data-clarify="${r.id}">Ask a question</button><button class="btn small ghost" data-reject="${r.id}">Reject</button>` : ''}
-      ${r.requestedBy === app.me.id && ['PENDING', 'CLARIFICATION_REQUESTED'].includes(r.status) ? html`<button class="btn small ${r.status === 'CLARIFICATION_REQUESTED' ? '' : 'ghost'}" data-edit="${r.id}">${r.status === 'CLARIFICATION_REQUESTED' ? 'Answer and resubmit' : 'Edit'}</button><button class="btn small ghost" data-withdraw="${r.id}">Withdraw</button>` : ''}
+    <div class="row" style="margin-top:14px">
+      ${decide ? html`<button class="btn small" data-approve="${r.id}">${icon('check')}Approve…</button><button class="btn small ghost" data-clarify="${r.id}">Ask a question</button><button class="btn small subtle" data-reject="${r.id}">Reject</button>` : ''}
+      ${r.requestedBy === app.me.id && ['PENDING', 'CLARIFICATION_REQUESTED'].includes(r.status) ? html`<button class="btn small ${r.status === 'CLARIFICATION_REQUESTED' ? '' : 'ghost'}" data-edit="${r.id}">${r.status === 'CLARIFICATION_REQUESTED' ? 'Answer and resubmit' : 'Edit'}</button><button class="btn small subtle" data-withdraw="${r.id}">Withdraw</button>` : ''}
       ${r.taskId ? html`<a class="btn small ghost" href="#/tasks/${r.taskId}">Open task</a>` : ''}
     </div></article>`
   main.innerHTML = html`
-    <div class="page-head"><div><h1>Task requests</h1><p>Suggestions become official tasks only when a manager approves them. External requests from automations land here too — never assigned automatically.</p></div>
-      <button class="btn" id="suggest">Suggest a task</button></div>
-    <div class="tabs" role="tablist">${[['', 'All'], ['PENDING', 'Pending'], ['CLARIFICATION_REQUESTED', 'Needs clarification'], ['APPROVED', 'Approved'], ['REJECTED', 'Rejected']].map(([k, l]) => html`<a href="#/requests${k ? `?status=${k}` : ''}" ${status === k ? raw('aria-current="page"') : ''}>${l}</a>`)}</div>
-    ${app.isManager ? html`<h2 style="margin-bottom:10px">To decide (${toDecide.length})</h2>${toDecide.length ? toDecide.map((r) => card(r, { decide: true })) : html`<div class="card">${empty('Nothing to decide', 'New suggestions from your team will appear here.')}</div>`}` : ''}
-    <h2 style="margin:20px 0 10px">My requests (${mine.length})</h2>
-    ${mine.length ? mine.map((r) => card(r)) : html`<div class="card">${empty('No requests yet', 'Suggest a task when you see work that should be done.')}</div>`}
-    ${decided.length ? html`<h2 style="margin:20px 0 10px">Decided</h2>${decided.map((r) => card(r))}` : ''}`
+    <div class="page-head"><div><div class="eyebrow">${icon('requests', 'xs')}Requests</div><h1>Task requests</h1><p>Suggestions become official tasks only when a manager approves them. External requests from automations land here too — never assigned automatically.</p></div>
+      <button class="btn" id="suggest">${icon('plus')}Suggest a task</button></div>
+    <nav class="tabs" aria-label="Request status">${[['', 'All'], ['PENDING', 'Pending'], ['CLARIFICATION_REQUESTED', 'Needs clarification'], ['APPROVED', 'Approved'], ['REJECTED', 'Rejected']].map(([k, l]) => html`<a href="#/requests${k ? `?status=${k}` : ''}" ${status === k ? raw('aria-current="page"') : ''}>${l}</a>`)}</nav>
+    ${app.isManager ? html`<h2 class="group-title" style="margin-bottom:12px"><span class="card-icon warn">${icon('alert')}</span>To decide<span class="badge outline">${toDecide.length}</span></h2><div class="stack">${toDecide.length ? toDecide.map((r) => card(r, { decide: true })) : html`<div class="card">${empty('Nothing to decide', 'New suggestions from your team will appear here.', '', 'checkCircle')}</div>`}</div>` : ''}
+    <h2 class="group-title" style="margin:28px 0 12px"><span class="card-icon">${icon('requests')}</span>My requests<span class="badge outline">${mine.length}</span></h2>
+    <div class="stack">${mine.length ? mine.map((r) => card(r)) : html`<div class="card">${empty('No requests yet', 'Suggest a task when you see work that should be done.', '', 'requests')}</div>`}</div>
+    ${decided.length ? html`<h2 class="group-title" style="margin:28px 0 12px"><span class="card-icon ok">${icon('checkCircle')}</span>Decided<span class="badge outline">${decided.length}</span></h2><div class="stack">${decided.map((r) => card(r))}</div>` : ''}`
 
   const reload = () => { app.refreshCounts(); renderRequests(main, q) }
   main.querySelector('#suggest').addEventListener('click', async () => {
