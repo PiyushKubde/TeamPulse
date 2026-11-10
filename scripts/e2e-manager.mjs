@@ -6,7 +6,7 @@
 // then delivered through the real webhook with the real bearer tokens. viaSocket itself is not called, and the AI is
 // the SIMULATED development analyser. Proves the screens and flows; claims nothing about live integrations.
 // Usage: npm run test:e2e:manager   (SCREENSHOTS=<dir> to keep screenshots)
-/* global document */
+/* global document, location */
 import { spawn, execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdtempSync, mkdirSync } from 'node:fs'
@@ -161,7 +161,7 @@ try {
   step = 'employee cannot open manager pages'
   const e = await session('priya@demo.teampulse')
   await e.goto(`${base}/#/copilot`); await e.waitForSelector('h1:has-text("Manager Copilot is for managers")')
-  await e.goto(`${base}/#/reviews`); await e.waitForSelector('h1:has-text("My overview"), h1:has-text("Good")')
+  await e.goto(`${base}/#/reviews`); await e.waitForFunction(() => location.hash === '#/dashboard'); await e.waitForSelector('main h1')
 } catch (err) {
   problems.unshift(`FAILED at "${step}": ${err.message}`)
 } finally {
