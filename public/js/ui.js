@@ -207,10 +207,10 @@ const APP_TILE = { github: ['github', 'GitHub'], slack: ['hash', 'Slack'], gmail
 export const appTile = (slug, size = '') => html`<span class="app-icon ${slug} ${size}" title="${(APP_TILE[slug] || [])[1] || slug}">${icon((APP_TILE[slug] || ['dot'])[0])}</span>`
 
 // ---------- theme (light | dark | system), stored per browser; applied before first paint by index.html ----------
-export function themePref() { return document.documentElement.dataset.themePref || 'system' }
+export function themePref() { return document.documentElement.dataset.themePref || 'light' }
 export function setThemePref(pref) {
-  const p = ['light', 'dark', 'system'].includes(pref) ? pref : 'system'
-  try { if (p === 'system') localStorage.removeItem('tp-theme'); else localStorage.setItem('tp-theme', p) } catch { /* private mode: still applies for this page */ }
+  const p = ['light', 'dark', 'system'].includes(pref) ? pref : 'light'
+  try { localStorage.setItem('tp-theme', p) } catch { /* private mode: still applies for this page */ }
   const root = document.documentElement
   root.dataset.themePref = p
   root.dataset.theme = p === 'dark' || (p === 'system' && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'

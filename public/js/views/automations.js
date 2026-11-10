@@ -290,7 +290,7 @@ export async function openContextBuilder(context, appSlug) {
     try {
       await loadScript(EMBED_SCRIPT)
       el.querySelector('#ctx-box').innerHTML = ''
-      const embed = window.viaSocket.mount({ embedToken: cfg.token, parent: '#ctx-box', config: { pageheading: 'Automation', pagesubheading: cfg.label, filteredServices: cfg.filteredServices, showEnabled: false, hideWebhook: true, hideApi: true, hideFunction: true, themeJson: { '--primary-color': '#4338ca' } }, open: { dummy_payload: cfg.dummyPayload, meta: cfg.meta } })
+      const embed = window.viaSocket.mount({ embedToken: cfg.token, parent: '#ctx-box', config: { pageheading: 'Automation', pagesubheading: cfg.label, filteredServices: cfg.filteredServices, showEnabled: false, hideWebhook: true, hideApi: true, hideFunction: true, themeJson: { '--primary-color': '#111111' } }, open: { dummy_payload: cfg.dummyPayload, meta: cfg.meta } })
       dlg.addEventListener('close', () => { try { embed.destroy?.() } catch { /* gone */ } }, { once: true })
     } catch (e) { el.querySelector('#ctx-box').innerHTML = html`<div class="notice err" style="margin:12px">${errorText(e)}</div>`.toString() }
   })
@@ -327,7 +327,7 @@ async function renderBuilder(body, conns, appSlug) {
     box.innerHTML = ''
     const embed = window.viaSocket.mount({
       embedToken: token, parent: '#embed-box',
-      config: { pageheading: 'Automation', pagesubheading: 'Automate the work around your TeamPulse tasks.', showTemplates: true, themeJson: { '--primary-color': '#4338ca' } },
+      config: { pageheading: 'Automation', pagesubheading: 'Automate the work around your TeamPulse tasks.', showTemplates: true, themeJson: { '--primary-color': '#111111' } },
       ...(focus && serviceIds[focus.slug] ? { open: { serviceId: serviceIds[focus.slug] } } : {})
     })
     embed.on?.('error', (e) => { box.innerHTML = html`<div class="notice err" style="margin:12px">The builder reported an error: ${e?.message || 'unknown'}</div>`.toString() })

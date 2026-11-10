@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>TeamPulse</title>
   <meta name="description" content="TeamPulse — work intelligence that makes contributions visible. Work volume is not work value.">
-  <meta name="theme-color" content="#F5F6FA" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0F172A" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#F7F7F5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101010" media="(prefers-color-scheme: dark)">
   <script>
-    // Theme before first paint, so the page never flashes the wrong theme. 'system' (default) follows the OS live.
+    // Theme before first paint, so the page never flashes the wrong theme. Light is the default; 'system' follows the OS live.
     (function () {
-      var pref = 'system'
-      try { pref = localStorage.getItem('tp-theme') || 'system' } catch (e) {}
+      var pref = 'light'
+      try { pref = localStorage.getItem('tp-theme') || 'light' } catch (e) {}
       var mq = window.matchMedia('(prefers-color-scheme: dark)')
       function apply() {
         var p = document.documentElement.dataset.themePref || pref
@@ -22,10 +22,7 @@
       mq.addEventListener ? mq.addEventListener('change', apply) : mq.addListener(apply)
     })()
   </script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%234F46E5'/%3E%3Cpath d='M6 17h5l3-7 4 13 3-6h5' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111111'/%3E%3Cpath d='M6 17h5l3-7 4 13 3-6h5' fill='none' stroke='%23C6F36A' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>

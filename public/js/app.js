@@ -15,7 +15,7 @@ import { renderAssistant, renderCopilot } from './views/assistant.js'
 import { renderContributions, renderJourney } from './views/journeys.js'
 import { renderReviews } from './views/reviews.js'
 
-const LOGO = raw(`<svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--brand-solid)"/><path d="M6 17h5l3-7 4 13 3-6h5" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`)
+const LOGO = raw(`<svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--logo-bg)"/><path d="M6 17h5l3-7 4 13 3-6h5" fill="none" stroke="var(--logo-fg)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`)
 
 export const app = {
   session: null,
