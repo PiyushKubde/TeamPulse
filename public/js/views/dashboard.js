@@ -40,15 +40,26 @@ export async function renderDashboard(main) {
   if (!data.manager) return renderEmployeeOverview(main, data.personal)
   const m = data.manager
   const p = data.personal
-  main.innerHTML = html`
-    <div class="page-head"><div><h1>Team dashboard</h1><p>Where the team stands, where people need help, and the outcomes they delivered. Task counts are operational only.</p></div>
-      <div class="row"><button class="btn" id="new-task">${icon('plus')}${app.session.membership.creationMode === 'direct' ? 'New task' : 'Suggest a task'}</button></div></div>
-    <section class="card intervene" id="dash-signals" style="margin-bottom:16px"></section>
+  const intel = await api(`/api/contribution/intelligence?from=${encodeURIComponent(new Date(Date.now() - 30 * 86400000).toISOString())}`).catch(() => null)
+  main.innerHTML = html`${managerHero(m, intel)}
+    ${decisionStrip(m, intel)}
+    <div class="overview">
+      <div class="col">
+        <section class="card intervene" id="dash-signals" style="--o:1"></section>
+        ${intel ? contributionsThatMatter(intel) : ''}
+        ${developments(m)}
+      </div>
+      <div class="col">
+        ${intel ? blockedCard(intel) : ''}
+        ${deadlineRisks(m)}
+        ${intel ? sharedCard(intel) : ''}
+      </div>
+    </div>
     ${managerSection(m)}
-    <div class="section-title"><h2>My own work</h2><a class="btn small ghost" href="#/assistant?run=1">${icon('sparkles')}Analyse my day</a></div>
-    ${personalSection(p, false)}
+    <div class="section-title"><div><h2>My own work</h2><p class="small muted" style="margin:2px 0 0">What is assigned to you as a person.</p></div><a class="btn small ghost" href="#/assistant?run=1">${icon('sparkles')}Analyse my day</a></div>
+    ${quietPersonal(p) ? html`<section class="card"><div class="row between"><span class="muted">Nothing is assigned to you personally right now.</span><span class="row"><a class="btn small ghost" href="#/my-tasks">${icon('tasks')}My tasks</a><a class="btn small ghost" href="#/evidence">${icon('evidence')}My Work Evidence</a></span></div></section>` : personalSection(p, false)}
   `
-  renderSignals(document.getElementById('dash-signals'), { scope: 'team', limit: 6, title: 'Where to intervene' })
+  renderSignals(document.getElementById('dash-signals'), { scope: 'team', limit: 5, title: 'Where to intervene', subtitle: 'Recommended next steps, detected from records by fixed rules. Help to act — never a penalty.' })
   document.getElementById('new-task').addEventListener('click', () => openTaskForm())
   const cd = document.getElementById('contrib-dash')
   if (cd) {
@@ -57,12 +68,82 @@ export async function renderDashboard(main) {
       const needs = t.people.filter((p) => p.awaitingYourReview || p.disputes)
       box.outerHTML = (t.people.some((p) => p.analysed)
         ? html`<p class="small muted" style="margin-bottom:8px">Last 30 days: ${t.people.reduce((n, p) => n + p.analysed, 0)} piece(s) of work analysed; ${t.team.verifiedOutcomes} verified team outcome(s) (shared ones counted once).</p>
-          ${needs.length ? html`<ul class="list">${needs.map((p) => html`<li><div class="grow"><a href="#/contribution/${p.userId}"><b>${p.name}</b></a></div>${p.awaitingYourReview ? html`<span class="badge warn">${p.awaitingYourReview} to review</span>` : ''}${p.disputes ? html`<span class="badge warn">${p.disputes} disputed</span>` : ''}</li>`)}</ul>` : html`<p class="small">Nothing waiting for your review.</p>`}`
-        : empty('No analysed work yet', 'Work is analysed when it is submitted for review.')).toString()
+          ${needs.length ? html`<ul class="list">${needs.map((p) => html`<li><div class="grow"><a href="#/contribution/${p.userId}"><b>${p.name}</b></a></div>${p.awaitingYourReview ? html`<span class="badge warn">${p.awaitingYourReview} to review</span>` : ''}${p.disputes ? html`<span class="badge warn">${p.disputes} disputed</span>` : ''}</li>`)}</ul>` : html`<p class="small" style="margin:0">Nothing waiting for your review.</p>`}`
+        : empty('No analysed work yet', 'Work is analysed when it is submitted for review.', '', 'intelligence')).toString()
     }).catch((e) => { cd.querySelector('.loading').outerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString() })
   }
   bindReflection(p)
 }
+
+const greetingM = () => { const h = new Date().getHours(); return h < 5 ? 'Working late' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening' }
+
+function managerHero(m, intel) {
+  const c = m.counts
+  const toReview = c.awaitingReview + (intel ? intel.people.reduce((n, x) => n + x.awaitingYourReview, 0) : 0)
+  const parts = []
+  if (c.blocked) parts.push(html`<b>${plural(c.blocked, 'task')} blocked</b>`)
+  if (c.overdue) parts.push(html`<b>${c.overdue} overdue</b>`)
+  if (toReview) parts.push(html`<b>${toReview} waiting for your review</b>`)
+  if (c.pendingRequests) parts.push(html`<b>${plural(c.pendingRequests, 'request')} to decide</b>`)
+  const lede = parts.length ? html`Today: ${parts.map((x, i) => html`${i ? (i === parts.length - 1 ? ' and ' : ', ') : ''}${x}`)}. Start with where you can help.`
+    : html`Nothing is blocked, overdue or waiting on you. The team is moving — a good moment to look at what mattered.`
+  return html`<header class="hero"><div><div class="eyebrow">${icon('calendar', 'xs')}${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</div><h1>${greetingM()}, ${firstName(app.me.name)}</h1><p class="lede">${lede}</p></div>
+    <div class="row"><a class="btn ghost" href="#/copilot">${icon('copilot')}Ask the Copilot</a><button class="btn" id="new-task">${icon('plus')}${app.session.membership.creationMode === 'direct' ? 'New task' : 'Suggest a task'}</button></div></header>`
+}
+
+/** The decisions only the manager can make. Counts of things waiting on you, never of people's activity. */
+function decisionStrip(m, intel) {
+  const c = m.counts
+  const rv = intel?.evidenceReview
+  const tiles = [
+    ['Submissions to review', c.awaitingReview, '#/team-tasks?status=SUBMITTED_FOR_REVIEW', 'reviews'],
+    ['Analyses to review', intel ? intel.people.reduce((n, x) => n + x.awaitingYourReview, 0) : 0, '#/reviews', 'intelligence'],
+    ['Requests to decide', c.pendingRequests, '#/requests', 'requests'],
+    ['Outcomes to verify', c.pendingImpact, '#/impact?status=PENDING', 'award'],
+    ['Evidence to resolve', rv ? rv.disputed + rv.unknownAuthor + rv.sharedPending : 0, '#/contribution?tab=review', 'evidence']
+  ]
+  return html`<nav class="decisions" aria-label="Decisions waiting for you">${tiles.map(([l, n, href, ic]) => html`<a class="decision ${n ? 'open' : ''}" href="${href}"><span class="lead-icon ${n ? 'warn' : ''}">${icon(ic)}</span><span class="d-body"><span class="d-label">${l}</span><span class="d-value">${n ? n : 'All clear'}</span></span></a>`)}</nav>`
+}
+
+function contributionsThatMatter(t) {
+  return html`<section class="card" aria-labelledby="cm-h"><div class="card-head"><div><h2 id="cm-h"><span class="card-icon brand">${icon('award')}</span>Contributions that matter</h2><p>Complex work or verified outcomes, most recent first — with the reason. Not a ranking.</p></div><a class="btn small subtle" href="#/contribution">Team Intelligence${icon('arrowRight', 'sm')}</a></div>
+    ${t.significant.length ? html`<ul class="mini-list">${t.significant.slice(0, 5).map((x) => html`<li>${avatar(x.name, null, 'sm')}<div class="grow"><a class="ttl" href="#/tasks/${x.taskId}">${x.taskTitle}</a><div class="small muted"><a href="#/contribution/${x.userId}">${x.name}</a>${x.complexityReason ? ` — ${x.complexityReason}` : ''}</div>
+      <div class="row" style="gap:6px;margin-top:6px">${x.complexity ? html`<span class="badge brand">${x.complexity}</span>` : ''}${x.verifiedOutcomes ? prov('verified', 'Verified outcome') : ''}${x.externalEvidence ? prov('fact', 'Evidence from apps') : ''}${x.sharedWithOthers ? html`<span class="badge outline">Shared work</span>` : ''}${x.simulated ? html`<span class="badge warn">simulated</span>` : ''}</div></div></li>`)}</ul>`
+      : empty('Nothing yet', 'Analysed complex work and verified outcomes appear here.', '', 'award')}</section>`
+}
+
+const DEV = new Set(['submitted_for_review', 'review_decision', 'blocker_reported', 'blocker_resolved', 'blocker_escalated', 'reopened'])
+function developments(m) {
+  const list = m.activity.filter((e) => DEV.has(e.type) || (e.type === 'status_changed' && ['COMPLETED', 'BLOCKED'].includes(e.data?.to))).slice(0, 6)
+  return html`<section class="card" aria-labelledby="dev-h"><div class="card-head"><div><h2 id="dev-h"><span class="card-icon">${icon('trending')}</span>Important developments</h2><p>Reviews, completions and blockers — routine progress is left out.</p></div>${prov('fact', 'Recorded history')}</div>
+    ${list.length ? html`<ul class="timeline">${list.map((e) => html`<li><div><b>${e.actorName || 'System'}</b> ${eventText(e)} on <a href="#/tasks/${e.taskId}">${e.taskTitle}</a></div><div class="when">${ago(e.createdAt)}</div></li>`)}</ul>` : empty('No developments yet', 'Submissions, approvals and blockers show up here as they happen.', '', 'trending')}</section>`
+}
+
+function blockedCard(t) {
+  return html`<section class="card" aria-labelledby="bl-h"><div class="card-head"><div><h2 id="bl-h"><span class="card-icon bad">${icon('blocked')}</span>Blocked work</h2><p>Blockers outside a person’s control are context, never a fault.</p></div></div>
+    ${t.blockers.length ? html`<ul class="mini-list">${t.blockers.slice(0, 5).map((b) => html`<li><span class="lead-icon bad">${icon('blocked')}</span><div class="grow"><a class="ttl" href="#/tasks/${b.taskId}">${b.taskTitle}</a><div class="small muted"><a href="#/contribution/${b.userId}">${b.name}</a> · since ${ago(b.since)}</div><div class="small">${b.description}</div>
+      <div class="row" style="gap:6px;margin-top:6px">${b.outsideControl ? html`<span class="badge info">Outside their control</span>` : ''}${b.escalated ? html`<span class="badge warn">Escalated</span>` : ''}</div></div></li>`)}</ul>${t.blockers.length > 5 ? html`<p class="small muted" style="margin:10px 0 0">${t.blockers.length - 5} more in <a href="#/contribution">Team Intelligence</a>.</p>` : ''}`
+      : empty('Nobody is blocked', 'Nothing in your teams is waiting on someone else.', '', 'checkCircle')}</section>`
+}
+
+function deadlineRisks(m) {
+  const list = m.attention.filter((a) => ['overdue', 'at_risk', 'no_progress', 'blocked_long'].includes(a.kind)).slice(0, 5)
+  return html`<section class="card" aria-labelledby="dr-h"><div class="card-head"><div><h2 id="dr-h"><span class="card-icon warn">${icon('clock')}</span>Deadline risks</h2><p>Overdue, at risk or stalled — calculated from deadlines and progress.</p></div></div>
+    ${list.length ? html`<ul class="mini-list">${list.map((a) => html`<li><div class="grow"><a class="ttl" href="#/tasks/${a.task.id}">${a.task.title}</a><div class="small muted">${a.task.assigneeName ? `${a.task.assigneeName} · ` : ''}${a.detail}</div></div><span class="badge ${ATTENTION[a.kind][1]}">${ATTENTION[a.kind][0]}</span></li>`)}</ul>`
+      : empty('No deadline risks', 'Nothing is overdue or at risk right now.', '', 'checkCircle')}</section>`
+}
+
+function sharedCard(t) {
+  const shared = t.significant.filter((x) => x.sharedWithOthers)
+  const pending = t.evidenceReview.sharedPending
+  return html`<section class="card" aria-labelledby="sh-h"><div class="card-head"><div><h2 id="sh-h"><span class="card-icon teal">${icon('team')}</span>Shared contributions</h2><p>Work several people share is counted once; each person’s part stays theirs.</p></div></div>
+    ${shared.length || pending ? html`<ul class="mini-list">${shared.slice(0, 4).map((x) => html`<li><div class="grow"><a class="ttl" href="#/tasks/${x.taskId}">${x.taskTitle}</a><div class="small muted">${x.name} and others</div></div></li>`)}
+      ${pending ? html`<li><span class="lead-icon teal">${icon('evidence')}</span><div class="grow"><a class="ttl" href="#/contribution?tab=review">${plural(pending, 'shared evidence link')} to resolve</a><div class="small muted">Decide whose work it is — nothing is credited until then.</div></div></li>` : ''}</ul>`
+      : empty('No shared work to resolve', 'Shared ownership shows here when several people contribute to one outcome.', '', 'team')}</section>`
+}
+
+/** A manager with nothing of their own gets one line instead of a wall of empty cards. */
+const quietPersonal = (p) => !Object.values(p.counts).some(Boolean) && !p.impact.length && !p.feedback.length && !p.clarifications.length && !p.reflection.savedAt
 
 function bindReflection(p) {
   const f = document.getElementById('reflection')
@@ -215,49 +296,51 @@ async function renderEmployeeOverview(main, p) {
 function managerSection(m) {
   const c = m.counts
   return html`
-    <div class="stats" aria-label="Team summary">
-      ${stat('Team members', c.teamMembers)}
-      ${stat('Active tasks', c.active, { href: '#/team-tasks' })}
-      ${stat('Pending (not started)', c.pending, { href: '#/team-tasks?status=ASSIGNED' })}
-      ${stat('In progress', c.inProgress, { href: '#/team-tasks?status=IN_PROGRESS' })}
-      ${stat('Blocked', c.blocked, { tone: 'bad', href: '#/team-tasks?status=BLOCKED' })}
-      ${stat('Awaiting review', c.awaitingReview, { tone: 'warn', href: '#/team-tasks?status=SUBMITTED_FOR_REVIEW' })}
-      ${stat('Overdue', c.overdue, { tone: 'bad', href: '#/team-tasks?condition=overdue' })}
-      ${stat('Unassigned', c.unassigned, { tone: 'warn', href: '#/team-tasks?condition=unassigned' })}
-      ${stat('Completed', c.completed, { href: '#/team-tasks?status=COMPLETED' })}
-      ${stat('Requests to decide', c.pendingRequests, { tone: 'warn', href: '#/requests' })}
-      ${stat('Impact to verify', c.pendingImpact, { tone: 'warn', href: '#/impact?status=PENDING' })}
-    </div>
+    <div class="section-title"><div><h2>The detail</h2><p class="small muted" style="margin:2px 0 0">Everything behind the summary above — for when you need to dig in.</p></div></div>
     <div class="grid side">
-      <section class="card" aria-labelledby="att-h"><div class="card-head"><div><h2 id="att-h">Attention required</h2><p>Overdue, ownerless, stuck or waiting on you</p></div></div>
-        ${m.attention.length ? html`<ul class="list">${m.attention.slice(0, 12).map((a) => html`<li><span class="badge ${ATTENTION[a.kind][1]}" style="min-width:110px;justify-content:center">${ATTENTION[a.kind][0]}</span>
-          <div class="grow"><a href="#/tasks/${a.task.id}"><b>${a.task.title}</b></a><div class="small muted">${a.detail}${a.task.assigneeName ? ` · ${a.task.assigneeName}` : ''}</div></div></li>`)}</ul>`
-          : empty('All clear', 'Nothing overdue, blocked or waiting on you.')}
+      <section class="card" aria-labelledby="att-h"><div class="card-head"><div><h2 id="att-h"><span class="card-icon warn">${icon('alert')}</span>Attention required</h2><p>Overdue, ownerless, stuck or waiting on you</p></div></div>
+        ${m.attention.length ? html`<ul class="mini-list">${m.attention.slice(0, 12).map((a) => html`<li><span class="badge ${ATTENTION[a.kind][1]}" style="min-width:118px;justify-content:center">${ATTENTION[a.kind][0]}</span>
+          <div class="grow"><a class="ttl" href="#/tasks/${a.task.id}">${a.task.title}</a><div class="small muted">${a.detail}${a.task.assigneeName ? ` · ${a.task.assigneeName}` : ''}</div></div></li>`)}</ul>`
+          : empty('All clear', 'Nothing overdue, blocked or waiting on you.', '', 'checkCircle')}
       </section>
-      <section class="card" aria-labelledby="act-h"><div class="card-head"><h2 id="act-h">Recent activity</h2></div>
+      <section class="card" aria-labelledby="act-h"><div class="card-head"><div><h2 id="act-h"><span class="card-icon">${icon('message')}</span>Recent activity</h2></div></div>
         ${m.activity.length ? html`<ul class="timeline" style="max-height:420px;overflow-y:auto">${m.activity.slice(0, 15).map((e) => html`<li><div><b>${e.actorName || 'System'}</b> ${eventText(e)} on <a href="#/tasks/${e.taskId}">${e.taskTitle}</a></div><div class="when">${ago(e.createdAt)}</div></li>`)}</ul>`
-          : empty('No activity yet', 'Create a task to get started.')}
+          : empty('No activity yet', 'Create a task to get started.', '', 'tasks')}
       </section>
     </div>
-    <section class="card" style="margin-top:16px" aria-labelledby="nh-h"><div class="card-head"><div><h2 id="nh-h">People who may need help</h2><p>Signals per person — overdue, blocked, stalled or overloaded work. Not a performance ranking: blocked and external dependencies are reasons, not faults.</p></div></div>
-      ${m.needsHelp.length ? html`<ul class="list">${m.needsHelp.map((p) => html`<li>${avatar(p.name, p.pictureUrl)}<div class="grow"><a href="#/team-tasks?assigneeId=${p.userId}"><b>${p.name}</b></a> <span class="small muted">${p.teamName || ''} · ${p.active} active</span>
-        <div class="row" style="margin-top:4px">${p.reasons.map((r) => html`<span class="badge ${r.severity >= 3 ? 'bad' : r.severity === 2 ? 'warn' : 'outline'}">${r.text}</span>`)}</div></div></li>`)}</ul>`
-        : empty('Nobody looks stuck', 'No one has overdue, blocked, stalled or unusually heavy work right now.')}
+    <section class="card" style="margin-top:16px" aria-labelledby="nh-h"><div class="card-head"><div><h2 id="nh-h"><span class="card-icon teal">${icon('heart')}</span>People who may need help</h2><p>Signals per person — overdue, blocked, stalled or overloaded work. Not a performance ranking: blocked and external dependencies are reasons, not faults.</p></div></div>
+      ${m.needsHelp.length ? html`<ul class="list">${m.needsHelp.map((p) => html`<li>${avatar(p.name, p.pictureUrl)}<div class="grow"><a href="#/contribution/${p.userId}"><b>${p.name}</b></a> <span class="small muted">${p.teamName || ''}</span>
+        <div class="row" style="margin-top:4px">${p.reasons.map((r) => html`<span class="badge ${r.severity >= 3 ? 'bad' : r.severity === 2 ? 'warn' : 'outline'}">${r.text}</span>`)}</div></div><a class="btn small ghost" href="#/team-tasks?assigneeId=${p.userId}">Their tasks</a></li>`)}</ul>`
+        : empty('Nobody looks stuck', 'No one has overdue, blocked, stalled or unusually heavy work right now.', '', 'checkCircle')}
     </section>
-    <section class="card" style="margin-top:16px" aria-labelledby="ca-h" id="contrib-dash"><div class="card-head"><div><h2 id="ca-h">Contribution analysis</h2><p>What people's work involved — complexity, quality, ownership and verified impact, with reasons. Not a ranking.</p></div><a class="btn small ghost" href="#/contribution">Open</a></div>
+    <section class="card" style="margin-top:16px" aria-labelledby="ca-h" id="contrib-dash"><div class="card-head"><div><h2 id="ca-h"><span class="card-icon brand">${icon('intelligence')}</span>Contribution analysis</h2><p>What people's work involved — complexity, quality, ownership and verified impact, with reasons. Not a ranking.</p></div><a class="btn small ghost" href="#/contribution">Open</a></div>
       <div class="loading">Loading…</div></section>
     <div class="grid two" style="margin-top:16px">
-      <section class="card" aria-labelledby="wl-h"><div class="card-head"><div><h2 id="wl-h">Team workload</h2><p>Open work per person — a planning view, not a performance measure</p></div></div>
+      <section class="card" aria-labelledby="wl-h"><div class="card-head"><div><h2 id="wl-h"><span class="card-icon">${icon('team')}</span>Team workload</h2><p>Open work per person — a planning view, not a performance measure</p></div></div>
         ${m.workload.length ? html`<div class="table-wrap"><table><thead><tr><th>Person</th><th class="num">Active</th><th class="num">Blocked</th><th class="num">Due ≤3d</th><th class="num">Overdue</th><th class="num hide-sm">Review</th></tr></thead><tbody>
-          ${m.workload.map((w) => html`<tr class="clickable" data-href="#/team-tasks?assigneeId=${w.userId}"><td><div class="row">${avatar(w.name, w.pictureUrl)}<span>${w.name}</span></div></td><td class="num">${w.active}</td><td class="num">${w.blocked ? html`<span class="badge bad">${w.blocked}</span>` : 0}</td><td class="num">${w.dueSoon}</td><td class="num">${w.overdue ? html`<span class="badge bad">${w.overdue}</span>` : 0}</td><td class="num hide-sm">${w.inReview}</td></tr>`)}
-          </tbody></table></div>` : empty('No team members yet', 'Invite people from Settings → Members.', html`<a class="btn small" href="#/settings/members">Invite people</a>`)}
+          ${m.workload.map((w) => html`<tr class="clickable" data-href="#/team-tasks?assigneeId=${w.userId}"><td><div class="row nowrap">${avatar(w.name, w.pictureUrl, 'sm')}<span>${w.name}</span></div></td><td class="num">${w.active}</td><td class="num">${w.blocked ? html`<span class="badge bad">${w.blocked}</span>` : 0}</td><td class="num">${w.dueSoon}</td><td class="num">${w.overdue ? html`<span class="badge bad">${w.overdue}</span>` : 0}</td><td class="num hide-sm">${w.inReview}</td></tr>`)}
+          </tbody></table></div>` : empty('No team members yet', 'Invite people from Settings → Members.', html`<a class="btn small" href="#/settings/members">Invite people</a>`, 'team')}
       </section>
-      <section class="card" aria-labelledby="imp-h"><div class="card-head"><div><h2 id="imp-h">Team impact (last ${m.impact.periodDays} days)</h2><p>Verified outcomes — not task counts</p></div><a class="btn small ghost" href="#/impact">All impact</a></div>
+      <section class="card" aria-labelledby="imp-h"><div class="card-head"><div><h2 id="imp-h"><span class="card-icon ok">${icon('award')}</span>Team impact (last ${m.impact.periodDays} days)</h2><p>Verified outcomes — not task counts</p></div><a class="btn small ghost" href="#/impact">All impact</a></div>
         ${m.impact.verifiedTotals.length ? html`<div class="row" style="margin-bottom:10px">${m.impact.verifiedTotals.map((t) => html`<span class="badge ${t.valueType === 'ESTIMATED' ? 'warn' : 'ok'}">${t.categoryLabel}: ${t.valueType === 'ESTIMATED' ? '≈' : ''}${t.total.toLocaleString()} ${t.unit}${t.valueType === 'ESTIMATED' ? ' (est.)' : ''}</span>`)}</div>` : ''}
-        ${m.impact.recent.length ? html`<ul class="list">${m.impact.recent.map((r) => html`<li><div class="grow"><a href="#/impact/${r.id}"><b>${r.title}</b></a><div class="small muted">${r.userName} · ${r.categoryLabel}${r.measurableValue !== null ? ` · ${r.isEstimate ? '≈ ' : ''}${r.measurableValue} ${r.measurementUnit}${r.isEstimate ? ' (estimate)' : ''}` : ''}</div><div class="small">${r.result}</div></div></li>`)}</ul>`
-          : empty('No verified outcomes yet', 'When people record outcomes and you verify them, they appear here.')}
+        ${m.impact.recent.length ? html`<ul class="mini-list">${m.impact.recent.map((r) => html`<li><div class="grow"><a class="ttl" href="#/impact/${r.id}">${r.title}</a><div class="small muted">${r.userName} · ${r.categoryLabel}${r.measurableValue !== null ? ` · ${r.isEstimate ? '≈ ' : ''}${r.measurableValue} ${r.measurementUnit}${r.isEstimate ? ' (estimate)' : ''}` : ''}</div><div class="small">${r.result}</div></div></li>`)}</ul>`
+          : empty('No verified outcomes yet', 'When people record outcomes and you verify them, they appear here.', '', 'award')}
       </section>
-    </div>`
+    </div>
+    <details class="card reflect" style="margin-top:16px"><summary><div><h2>Operational numbers</h2><p class="small muted" style="margin:3px 0 0">Task counts for planning — never a measure of how productive anyone is.</p></div><span class="chev">${icon('chevronDown')}</span></summary>
+      <div class="stats" aria-label="Team summary" style="margin:0">
+        ${stat('Team members', c.teamMembers)}
+        ${stat('Active tasks', c.active, { href: '#/team-tasks' })}
+        ${stat('Pending (not started)', c.pending, { href: '#/team-tasks?status=ASSIGNED' })}
+        ${stat('In progress', c.inProgress, { href: '#/team-tasks?status=IN_PROGRESS' })}
+        ${stat('Blocked', c.blocked, { tone: 'bad', href: '#/team-tasks?status=BLOCKED' })}
+        ${stat('Awaiting review', c.awaitingReview, { tone: 'warn', href: '#/team-tasks?status=SUBMITTED_FOR_REVIEW' })}
+        ${stat('Overdue', c.overdue, { tone: 'bad', href: '#/team-tasks?condition=overdue' })}
+        ${stat('Unassigned', c.unassigned, { tone: 'warn', href: '#/team-tasks?condition=unassigned' })}
+        ${stat('Completed', c.completed, { href: '#/team-tasks?status=COMPLETED' })}
+        ${stat('Requests to decide', c.pendingRequests, { tone: 'warn', href: '#/requests' })}
+        ${stat('Impact to verify', c.pendingImpact, { tone: 'warn', href: '#/impact?status=PENDING' })}
+      </div></details>`
 }
 
 function personalSection(p, solo) {
