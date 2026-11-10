@@ -1,4 +1,4 @@
-import { api, html, raw, modal, bindForm, toast, errorText, ago, dt, verifyBadge, empty, CATEGORIES, OUTCOME_TYPES, confirmDialog } from '../ui.js'
+import { api, html, raw, modal, bindForm, toast, errorText, ago, dt, verifyBadge, empty, CATEGORIES, OUTCOME_TYPES, confirmDialog, icon } from '../ui.js'
 import { app } from '../app.js'
 
 export async function renderImpact(main, q) {
@@ -10,8 +10,8 @@ export async function renderImpact(main, q) {
   if (q.get('category')) params.set('category', q.get('category'))
   const [records, summary] = await Promise.all([api(`/api/impact?${params}`), api(`/api/impact-summary${view === 'mine' ? '?view=mine' : ''}`)])
   main.innerHTML = html`
-    <div class="small muted" style="margin-bottom:6px"><a href="#/contributions">← Contributions</a></div>
-    <div class="page-head"><div><h1>Outcomes &amp; impact</h1><p>Contributions shown by what changed, with evidence and verification — never a single score. Research, prevention and learning count; estimates are labelled.</p></div>
+    <div class="crumbs"><a href="#/contributions">Contributions</a></div>
+    <div class="page-head"><div><div class="eyebrow">${icon('award', 'xs')}Outcomes</div><h1>Outcomes &amp; impact</h1><p>Contributions shown by what changed, with evidence and verification — never a single score. Research, prevention and learning count; estimates are labelled.</p></div>
       <button class="btn" id="new-impact">Record an outcome</button></div>
     <div class="tabs">${(app.isManager ? [['team', 'Team'], ['mine', 'Mine']] : [['mine', 'Mine']]).map(([k, l]) => html`<a href="#/impact?view=${k}" ${view === k ? raw('aria-current="page"') : ''}>${l}</a>`)}
       ${app.isManager ? html`<a href="#/impact?view=team&status=PENDING" ${status === 'PENDING' && view === 'team' ? raw('aria-current="page"') : ''}>To verify</a>` : ''}
@@ -89,7 +89,7 @@ export async function renderImpactDetail(main, id) {
   const mine = r.userId === app.me.id
   const canVerify = app.isManager && !mine
   main.innerHTML = html`
-    <div class="small muted" style="margin-bottom:6px"><a href="#/impact">← Performance &amp; impact</a></div>
+    <div class="crumbs"><a href="#/impact">Outcomes &amp; impact</a></div>
     <div class="page-head"><div><h1>${r.title}</h1><div class="row" style="margin-top:8px">${verifyBadge(r.verificationStatus)} <span class="badge outline">${r.categoryLabel}</span> <span class="badge outline">${OUTCOME_TYPES[r.outcomeType]}</span>${r.isQuality ? html`<span class="badge outline">Quality</span>` : ''}${r.isReusable ? html`<span class="badge outline">Reusable</span>` : ''}</div></div>
       <div class="row">${canVerify && r.verificationStatus !== 'VERIFIED' ? html`<button class="btn" id="verify">Verify</button><button class="btn ghost" id="reject">Reject</button>` : ''}${mine && r.verificationStatus !== 'VERIFIED' ? html`<button class="btn ghost" id="edit">Edit</button>` : ''}</div></div>
     ${r.verificationStatus === 'REJECTED' ? html`<div class="notice err"><b>Not verified:</b> ${r.rejectionReason}${mine ? ' — edit the record to resubmit it.' : ''}</div>` : ''}

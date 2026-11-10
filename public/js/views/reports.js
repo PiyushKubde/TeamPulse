@@ -1,4 +1,4 @@
-import { api, html, raw, empty, d } from '../ui.js'
+import { api, html, raw, empty, d, icon } from '../ui.js'
 import { openContextBuilder } from './automations.js'
 import { app } from '../app.js'
 
@@ -12,9 +12,9 @@ export async function renderReports(main, q) {
   const params = new URLSearchParams()
   for (const k of ['from', 'to', 'userId', 'weekStart']) if (q.get(k)) params.set(k, q.get(k))
   const report = await api(`/api/reports/${type}?${params}`)
-  main.innerHTML = html`<div class="page-head"><div><h1>Reports</h1><p>Operational views and evidence of contribution. No report ranks people by how many tasks they closed.</p></div>
+  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('reports', 'xs')}Reports</div><h1>Reports</h1><p>Operational views and evidence of contribution. No report ranks people by how many tasks they closed.</p></div>
     <div class="row">${type === 'weekly' && app.session.integrations?.viasocket ? html`<button class="btn ghost" id="automate" title="When my weekly report is ready…">Send each report to Google Sheets, Slack or Gmail</button>` : ''}<a class="btn ghost" href="/api/reports/${type}.csv?${params}" download>Export CSV</a></div></div>
-    <form class="filters" id="rf">
+    <form class="filters toolbar" id="rf">
       <select name="type" aria-label="Report">${REPORTS.map(([k, l]) => html`<option value="${k}" ${k === type ? raw('selected') : ''}>${l}</option>`)}</select>
       ${type === 'weekly' ? html`<label class="small" for="ws" style="margin:0">Week of</label><input id="ws" type="date" name="weekStart" value="${report.weekStart}">`
         : html`<label class="small" for="from" style="margin:0">From</label><input id="from" type="date" name="from" value="${(q.get('from') || report.from || '').slice(0, 10)}"><label class="small" for="to" style="margin:0">To</label><input id="to" type="date" name="to" value="${(q.get('to') || '').slice(0, 10)}">`}
@@ -31,7 +31,7 @@ export async function renderReports(main, q) {
   main.querySelector('select[name=type]').addEventListener('change', (e) => { location.hash = `#/reports?type=${e.target.value}` })
   const rb = main.querySelector('#rb')
   if (type === 'weekly') return renderWeekly(rb, report)
-  rb.innerHTML = html`<h2 style="margin-bottom:8px">${report.title}</h2>
+  rb.innerHTML = html`<h2 style="margin-bottom:12px">${report.title}</h2>
     ${report.totals?.length ? html`<div class="row" style="margin-bottom:10px">${report.totals.map((t) => html`<span class="badge ${t.valueType === 'ESTIMATED' ? 'warn' : 'ok'}">${t.categoryLabel}: ${t.valueType === 'ESTIMATED' ? '≈' : ''}${t.total.toLocaleString()} ${t.unit}</span>`)}</div>` : ''}
     ${report.rows.length ? html`<div class="table-wrap"><table><thead><tr>${report.columns.map((c) => html`<th>${LABELS[c] || c}</th>`)}</tr></thead><tbody>${report.rows.map((r) => html`<tr>${report.columns.map((c) => html`<td class="${typeof r[c] === 'number' ? 'num' : ''}">${cell(c, r[c])}</td>`)}</tr>`)}</tbody></table></div>`
       : html`<div class="card">${empty('Nothing in this period', 'Try a wider date range.')}</div>`}`

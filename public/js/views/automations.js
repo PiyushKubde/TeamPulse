@@ -1,6 +1,6 @@
 // Automation Center: (1) Connected Apps — curated ViaSocket apps in context, (2) Ready-made TeamPulse automations,
 // (3) Advanced Builder — the full ViaSocket Embed. The browser only ever holds the per-user embed token.
-import { api, html, raw, esc, modal, bindForm, toast, errorText, ago, empty, confirmDialog, loading } from '../ui.js'
+import { api, html, raw, esc, modal, bindForm, toast, errorText, ago, empty, confirmDialog, loading, icon, appTile } from '../ui.js'
 import { app } from '../app.js'
 
 const EMBED_SCRIPT = 'https://embed.viasocket.com/prod-embedcomponent.js'
@@ -15,7 +15,7 @@ export async function renderAutomations(main, q) {
   const tab = q.get('tab') || 'apps'
   const [conns, autos] = await Promise.all([api('/api/viasocket/connections'), api('/api/automations')])
   main.innerHTML = html`
-    <div class="page-head"><div><h1>${app.isManager ? 'Automation Center' : 'Connected apps'}</h1><p>Connect the apps you already use. TeamPulse can then collect the work evidence you allow, send notifications, and run ready-made automations — the full builder is there when you need more.</p></div></div>
+    <div class="page-head"><div><div class="eyebrow">${icon('apps', 'xs')}Connected apps</div><h1>${app.isManager ? 'Automation Center' : 'Connected apps'}</h1><p>Connect the apps you already use. TeamPulse can then collect the work evidence you allow, send notifications, and run ready-made automations — the full builder is there when you need more.</p></div></div>
     <section class="card steps-card"><ol class="steps"><li class="${(conns.connections || []).length ? 'done' : ''}"><b>Connect</b> an app below</li><li><a href="#/evidence"><b>Choose what to collect</b></a> — repositories, channels, a label, a calendar or a sheet</li><li><a href="#/assistant"><b>Analyse your work</b></a> — the evidence is linked to your tasks for you</li></ol></section>
     ${!conns.configured ? html`<div class="notice warn"><b>ViaSocket is not configured on this server.</b> App connections, the New Task Notification, the Weekly Team Report delivery and the Advanced Builder need an admin to set <span class="mono">VIASOCKET_ORG_ID</span>, <span class="mono">VIASOCKET_PROJECT_ID</span> and <span class="mono">VIASOCKET_EMBED_SECRET</span> (see README → ViaSocket). External requests and in-app notifications work without it.</div>` : ''}
     <div class="tabs" role="tablist">${[['apps', 'Connected apps'], ['ready', 'Ready-made automations'], ['builder', 'Advanced builder']].map(([k, l]) => html`<a href="#/automations?tab=${k}" ${tab === k ? raw('aria-current="page"') : ''}>${l}</a>`)}</div>
@@ -31,7 +31,7 @@ function renderApps(body, conns, reload) {
   const byApp = (slug) => conns.connections.filter((c) => c.app === slug)
   body.innerHTML = html`
     ${conns.error ? html`<div class="notice warn">${conns.error}</div>` : ''}
-    <div class="grid two">${conns.apps.map((a) => html`<article class="card"><div class="app-card"><div class="app-icon" aria-hidden="true">${a.name[0]}</div><div style="flex:1;min-width:0">
+    <div class="grid two">${conns.apps.map((a) => html`<article class="card"><div class="app-card">${a.slug ? appTile(a.slug, 'lg') : html`<div class="app-icon lg" aria-hidden="true">${a.name[0]}</div>`}<div style="flex:1;min-width:0">
       <div class="row between"><h3>${a.name}</h3>${a.runsInTeamPulse ? html`<span class="badge brand">Used by TeamPulse</span>` : html`<span class="badge outline">Builder</span>`}</div>
       <p class="small" style="margin-top:4px">${a.purpose}</p>
       <div class="small muted">Used by: ${a.usedBy.join(' · ')}</div>
