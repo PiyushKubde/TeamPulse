@@ -1,29 +1,31 @@
 // "My work evidence": what TeamPulse collects from the person's own connected apps, how it is linked to their tasks,
 // and the "Analyse my work" action. Plus the managers' evidence review (attribution and shared ownership).
 // Plain language first; the viaSocket details stay behind "Advanced".
-import { api, html, raw, modal, bindForm, toast, errorText, ago, dt, empty, loading, confirmDialog } from '../ui.js'
+import { api, html, raw, modal, bindForm, toast, errorText, ago, dt, empty, loading, confirmDialog, icon, appTile, prov } from '../ui.js'
 import { app } from '../app.js'
 
-const APP_ICON = { github: '⌥', slack: '#', gmail: '✉', 'google-calendar': '◷', 'google-sheets': '▦' }
 const STATUS = { ACTIVE: ['Collecting', 'ok'], PAUSED: ['Paused', 'outline'], NEEDS_RECONNECT: ['Reconnect needed', 'warn'], FAILED: ['Not working', 'bad'] }
 const LINK_STATE = { linked: ['Linked to a task', 'ok'], suggested: ['Suggested link', 'info'], possible: ['Possible match — confirm?', 'warn'], unmatched: ['Not linked', 'outline'] }
 const STATES = [['review', 'Needs your confirmation'], ['linked', 'Linked'], ['unmatched', 'Not linked'], ['all', 'All']]
 
 function evidenceItem(e, { canAct = true } = {}) {
   const [stateText, stateTone] = LINK_STATE[e.linkState]
-  return html`<li class="ev-item" data-id="${e.id}"><div class="grow" style="min-width:0">
-    <div class="row" style="gap:6px"><span class="badge outline" title="${e.appLabel}">${APP_ICON[e.app] || ''} ${e.appLabel}</span><span class="badge ${stateTone}">${stateText}</span>
+  const suggested = e.links.filter((l) => l.status === 'suggested')
+  const confirmed = e.links.filter((l) => l.status === 'confirmed')
+  return html`<li class="ev-item" data-id="${e.id}">${appTile(e.app)}<div class="grow" style="min-width:0">
+    <div class="row" style="gap:6px"><span class="small muted">${e.appLabel}</span><span class="badge ${stateTone}">${stateText}</span>
       ${e.status !== 'active' ? html`<span class="badge warn">${e.status}</span>` : ''}${e.attribution === 'disputed' ? html`<span class="badge warn">Attribution disputed</span>` : ''}</div>
-    <div style="margin-top:4px"><b>${e.title || e.kind}</b></div>
+    <div class="ev-title"><b>${e.title || e.kind}</b></div>
     ${e.content ? html`<div class="small ev-content">${e.content.slice(0, 280)}${e.content.length > 280 ? '…' : ''}</div>` : ''}
-    <div class="small muted">${ago(e.occurredAt)} · ${e.verificationText} · ${e.actorName ? `by ${e.actorName}` : e.attributionText}${e.collectorName && e.collectorName !== e.actorName ? ` · collected by ${e.collectorName}` : ''}${e.sourceUrl ? raw(` · <a href="${encodeURI(e.sourceUrl)}" target="_blank" rel="noopener noreferrer">open</a>`) : ''}</div>
-    ${e.links.length ? html`<ul class="plain small" style="margin-top:6px">${e.links.map((l) => html`<li>→ <a href="#/tasks/${l.taskId}">${l.taskTitle}</a> <span class="muted">(${l.taskRef}) · ${l.status === 'confirmed' ? 'confirmed' : `${l.method.replace('_', ' ')}, ${Math.round(l.confidence * 100)}%`}${l.share === 'shared' ? ` · shared${l.contributorName ? `, ${l.contributorName}'s contribution` : ''}` : ''}</span>
-      <div class="muted">${l.explanation}</div>
-      ${canAct && l.status === 'suggested' ? html`<span class="row" style="gap:6px;margin-top:2px"><button class="btn small" data-link="${l.id}" data-act="CONFIRM">Yes, it belongs here</button><button class="btn small ghost" data-link="${l.id}" data-act="REJECT">No</button></span>` : ''}</li>`)}</ul>` : ''}
-    ${canAct && e.status === 'active' ? html`<div class="row" style="gap:6px;margin-top:6px">
-      <button class="btn small ghost" data-ev-link="${e.id}">Link to a task</button>
-      ${e.actorId === app.me.id || (e.collectorId === app.me.id && e.attribution === 'self') ? html`<button class="btn small ghost" data-ev-dispute="${e.id}">Not mine</button>` : ''}
-      ${e.collectorId === app.me.id ? html`<button class="btn small link" data-ev-remove="${e.id}">Remove</button>` : ''}</div>` : ''}
+    <div class="meta" style="margin-top:4px"><span>${ago(e.occurredAt)}</span><span class="sep"></span><span>${e.verificationText}</span><span class="sep"></span><span>${e.actorName ? `by ${e.actorName}` : e.attributionText}</span>${e.collectorName && e.collectorName !== e.actorName ? html`<span class="sep"></span><span>collected by ${e.collectorName}</span>` : ''}${e.sourceUrl ? raw(`<span class="sep"></span><a href="${encodeURI(e.sourceUrl)}" target="_blank" rel="noopener noreferrer">Open in ${e.appLabel}</a>`) : ''}</div>
+    ${confirmed.map((l) => html`<div class="link-row"><span>${prov('self', 'Confirmed')}</span><span class="small">Part of <a href="#/tasks/${l.taskId}">${l.taskTitle}</a> <span class="muted">(${l.taskRef})${l.share === 'shared' ? ` · shared${l.contributorName ? `, ${l.contributorName}'s contribution` : ''}` : ''}</span></span></div>`)}
+    ${suggested.map((l) => html`<div class="suggest-block link-row"><div><span>${prov('suggested', 'Suggested match')}</span> <span class="small">for <a href="#/tasks/${l.taskId}">${l.taskTitle}</a> <span class="muted">(${l.taskRef}) · ${l.method.replace('_', ' ')}, ${Math.round(l.confidence * 100)}%</span></span>
+      <div class="small muted" style="margin-top:2px">${l.explanation}</div></div>
+      ${canAct ? html`<span class="row" style="gap:6px"><button class="btn small" data-link="${l.id}" data-act="CONFIRM">${icon('check')}Yes, it belongs here</button><button class="btn small ghost" data-link="${l.id}" data-act="REJECT">No</button></span>` : ''}</div>`)}
+    ${canAct && e.status === 'active' ? html`<div class="row" style="gap:6px;margin-top:8px">
+      <button class="btn small ghost" data-ev-link="${e.id}">${icon('evidence')}Link to a task</button>
+      ${e.actorId === app.me.id || (e.collectorId === app.me.id && e.attribution === 'self') ? html`<button class="btn small subtle" data-ev-dispute="${e.id}">Not mine</button>` : ''}
+      ${e.collectorId === app.me.id ? html`<button class="btn small subtle" data-ev-remove="${e.id}">Remove</button>` : ''}</div>` : ''}
   </div></li>`
 }
 
@@ -60,26 +62,32 @@ export async function renderEvidence(main, q) {
   const filtered = items.filter((e) => state === 'all' || (state === 'review' ? ['suggested', 'possible'].includes(e.linkState) && e.links.some((l) => l.status === 'suggested') : e.linkState === state))
   const pending = items.filter((e) => e.links.some((l) => l.status === 'suggested')).length
   const errors = sources.reduce((n, s) => n + s.collectionErrors, 0)
-  main.innerHTML = html`<div class="page-head"><div><h1>My work evidence</h1><p>What TeamPulse collects from apps you connected — only the repositories, channels, label, calendar or sheet you chose — and which of your tasks it belongs to. Activity is never counted; it only explains your work.</p></div>
-      <button class="btn" id="analyse-mine">Analyse my work</button></div>
+  const active = sources.filter((s) => s.status === 'ACTIVE').length
+  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('evidence', 'xs')}Evidence</div><h1>My work evidence</h1><p>What TeamPulse notices in the apps you connected — only the repositories, channels, labels, calendars or sheets you chose — and which of your tasks it belongs to. Activity is never counted; it only explains your work.</p></div>
+      <button class="btn" id="analyse-mine">${icon('sparkles')}Analyse my work</button></div>
     <div id="analyse-out"></div>
-    <section class="card"><div class="card-head"><div><h2>Connected sources</h2><p>${sources.length ? `${sources.filter((s) => s.status === 'ACTIVE').length} collecting${errors ? ` · ${errors} event(s) could not be read` : ''}` : 'Nothing is collected yet.'}</p></div>
-      ${catalog.configured ? html`<button class="btn small" id="add-source">Add a source</button>` : ''}</div>
-      ${!catalog.configured ? html`<div class="notice">New sources cannot be added: app connections are not set up on this server (ViaSocket keys missing).</div>` : ''}
-      ${sources.length ? html`<ul class="list">${sources.map((s) => html`<li><div class="grow" style="min-width:0"><div class="row" style="gap:6px"><b>${APP_ICON[s.app] || ''} ${s.appLabel}</b> <span>${s.scope}</span><span class="badge ${STATUS[s.status]?.[1] || 'outline'}">${STATUS[s.status]?.[0] || s.status}</span></div>
-          <div class="small muted">${s.kinds.map((k) => k.label).join(' · ')}</div>
-          <div class="small">${s.lastSuccessAt ? `Last event ${ago(s.lastEventAt)}` : 'No events yet'}${s.lastHealthAt ? ` · checked ${ago(s.lastHealthAt)}` : ''}${Object.entries(s.linkState).length ? ` · ${Object.entries(s.linkState).map(([k, n]) => `${n} ${k === 'unmatched' ? 'not linked' : k}`).join(', ')}` : ''}</div>
-          ${s.lastError ? html`<div class="small" style="color:var(--bad)">${s.lastError}</div>` : ''}
-          <details class="small"><summary>Advanced</summary><ul class="plain">${s.history.map((h) => html`<li>${dt(h.at)} · ${h.kind} · ${h.status}${h.items ? ` · ${h.items} item(s)` : ''}${h.error ? ` · ${h.error}` : ''}</li>`)}</ul></details></div>
-          <div class="row" style="gap:6px">${s.status === 'ACTIVE' ? html`<button class="btn small ghost" data-src="${s.id}" data-to="PAUSED">Pause</button>` : s.status === 'PAUSED' ? html`<button class="btn small ghost" data-src="${s.id}" data-to="ACTIVE">Resume</button>` : ''}<button class="btn small link" data-src="${s.id}" data-to="DELETED">Stop</button></div></li>`)}</ul>`
-        : catalog.configured ? empty('No sources yet', 'Add GitHub, Slack, Gmail, Google Calendar or Google Sheets. First connect the account in the Automation Center.', html`<a class="btn small ghost" href="#/automations">Connect an app</a>`) : ''}
+    <ol class="trust-steps" aria-label="How evidence becomes part of your work">
+      <li>${prov('fact', 'Observed')}<span>TeamPulse notices activity in the sources you chose.</span></li>
+      <li>${prov('suggested', 'Suggested')}<span>It proposes which of your tasks it belongs to. Nothing counts yet.</span></li>
+      <li>${prov('self', 'Confirmed by you')}<span>You decide. Only then is it used when your work is analysed.</span></li></ol>
+    <section aria-labelledby="src-h" style="margin-top:20px"><div class="section-title" style="margin-top:0"><div><h2 id="src-h">Connected sources</h2><p class="small muted" style="margin:2px 0 0">${sources.length ? `${active} collecting${errors ? ` · ${errors} event(s) could not be read` : ''}` : 'Nothing is collected yet.'}</p></div>
+      ${catalog.configured ? html`<button class="btn small" id="add-source">${icon('plus')}Add a source</button>` : ''}</div>
+      ${!catalog.configured ? html`<div class="notice">New sources cannot be added: app connections are not set up on this server (viaSocket keys missing).</div>` : ''}
+      ${sources.length ? html`<div class="source-grid">${sources.map((s) => html`<article class="card source ${s.status === 'ACTIVE' ? '' : 'off'}">
+          <div class="row nowrap" style="gap:12px;align-items:flex-start">${appTile(s.app, 'lg')}<div class="grow" style="min-width:0"><div class="row" style="gap:6px"><b>${s.appLabel}</b><span class="badge ${STATUS[s.status]?.[1] || 'outline'}">${STATUS[s.status]?.[0] || s.status}</span></div>
+            <div class="clip" title="${s.scope}">${s.scope}</div><div class="small muted">${s.kinds.map((k) => k.label).join(' · ')}</div></div></div>
+          <div class="small muted health">${s.lastSuccessAt ? `Last event ${ago(s.lastEventAt)}` : 'No events yet'}${s.lastHealthAt ? ` · checked ${ago(s.lastHealthAt)}` : ''}${Object.entries(s.linkState).length ? ` · ${Object.entries(s.linkState).map(([k, n]) => `${n} ${k === 'unmatched' ? 'not linked' : k}`).join(', ')}` : ''}</div>
+          ${s.lastError ? html`<div class="notice err small" style="margin:8px 0 0">${s.lastError}</div>` : ''}
+          <details class="small"><summary>Advanced</summary><ul class="plain">${s.history.map((h) => html`<li>${dt(h.at)} · ${h.kind} · ${h.status}${h.items ? ` · ${h.items} item(s)` : ''}${h.error ? ` · ${h.error}` : ''}</li>`)}</ul></details>
+          <div class="row" style="gap:6px;margin-top:10px">${s.status === 'ACTIVE' ? html`<button class="btn small ghost" data-src="${s.id}" data-to="PAUSED">Pause</button>` : s.status === 'PAUSED' ? html`<button class="btn small ghost" data-src="${s.id}" data-to="ACTIVE">Resume</button>` : ''}<button class="btn small subtle" data-src="${s.id}" data-to="DELETED">Stop</button></div></article>`)}</div>`
+        : catalog.configured ? html`<div class="card">${empty('No sources yet', 'Add GitHub, Slack, Gmail, Google Calendar or Google Sheets. First connect the account in Connected Apps.', html`<a class="btn small ghost" href="#/automations">${icon('apps')}Connect an app</a>`, 'apps')}</div>` : ''}
     </section>
-    <section class="card" style="margin-top:16px"><div class="card-head"><div><h2>Evidence</h2><p>${pending ? `${pending} item(s) wait for your confirmation.` : 'Nothing waits for you.'} Only confirmed links and high-confidence suggestions are used when your work is analysed.</p></div></div>
-      <div class="tabs">${STATES.map(([k, l]) => html`<a href="#/evidence?state=${k}" ${k === state ? raw('aria-current="page"') : ''}>${l}</a>`)}</div>
-      ${filtered.length ? html`<ul class="list">${filtered.slice(0, 100).map((e) => evidenceItem(e))}</ul>` : empty(state === 'review' ? 'Nothing to confirm' : 'No evidence here', state === 'review' ? 'Suggested links appear here for you to confirm or reject.' : 'Collected evidence appears here.')}
+    <section class="card" style="margin-top:20px" aria-labelledby="ev-h"><div class="card-head"><div><h2 id="ev-h">Evidence</h2><p>${pending ? `${pending} item(s) wait for your confirmation.` : 'Nothing waits for you.'} Only confirmed links and high-confidence suggestions are used when your work is analysed.</p></div></div>
+      <div class="tabs">${STATES.map(([k, l]) => html`<a href="#/evidence?state=${k}" ${k === state ? raw('aria-current="page"') : ''}>${l}${k === 'review' && pending ? html` <span class="badge brand">${pending}</span>` : ''}</a>`)}</div>
+      ${filtered.length ? html`<ul class="list ev-list">${filtered.slice(0, 100).map((e) => evidenceItem(e))}</ul>` : empty(state === 'review' ? 'Nothing to confirm' : 'No evidence here', state === 'review' ? 'Suggested matches appear here for you to confirm or reject.' : 'Collected evidence appears here.', '', state === 'review' ? 'checkCircle' : 'inbox')}
     </section>
-    <section class="card" style="margin-top:16px"><div class="card-head"><div><h2>Who you are in each app</h2><p>So your commits and messages are recognised as yours — and nobody else's are. Each identity can belong to one person only.</p></div><button class="btn small ghost" id="add-identity">Add</button></div>
-      ${identities.length ? html`<ul class="list">${identities.map((i) => html`<li><div class="grow"><b>${i.app}</b> ${i.identity} <span class="small muted">${i.source === 'connection' ? 'from your connected account' : 'added by you'}</span></div><button class="btn small link" data-identity="${i.id}">Remove</button></li>`)}</ul>` : html`<p class="small muted">None yet. Without it, your GitHub and Slack activity shows as “author not known”.</p>`}
+    <section class="card" style="margin-top:20px" aria-labelledby="id-h"><div class="card-head"><div><h2 id="id-h">Who you are in each app</h2><p>So your commits and messages are recognised as yours — and nobody else’s are. Each identity can belong to one person only.</p></div><button class="btn small ghost" id="add-identity">${icon('plus')}Add</button></div>
+      ${identities.length ? html`<ul class="list">${identities.map((i) => html`<li>${appTile(i.app)}<div class="grow"><b>${i.identity}</b> <span class="small muted">${i.app} · ${i.source === 'connection' ? 'from your connected account' : 'added by you'}</span></div><button class="btn small subtle" data-identity="${i.id}">Remove</button></li>`)}</ul>` : html`<p class="small muted" style="margin:0">None yet. Without it, your GitHub and Slack activity shows as “author not known”.</p>`}
     </section>`.toString()
   const reload = () => renderEvidence(main, q).catch((e) => toast(errorText(e), { error: true }))
   let tasksCache = null
@@ -88,11 +96,11 @@ export async function renderEvidence(main, q) {
   main.querySelector('#analyse-mine').addEventListener('click', async (ev) => {
     ev.currentTarget.disabled = true
     const box = main.querySelector('#analyse-out')
-    box.innerHTML = html`<div class="notice" role="status"><span class="spinner" aria-hidden="true"></span> Matching your evidence and analysing your recent tasks…</div>`.toString()
+    box.innerHTML = html`<div class="ai-block" role="status" style="margin-bottom:16px"><span class="spinner" aria-hidden="true"></span> Matching your evidence and analysing your recent tasks…</div>`.toString()
     try {
       const r = await api('/api/contribution/analyse', { method: 'POST', body: {} })
       const T = { queued: 'Analysing…', in_progress: 'Already being analysed', unchanged: 'Nothing new since the last analysis', done: 'Done (too little evidence for AI)', not_analysed: 'Not analysed' }
-      box.innerHTML = html`<section class="card" style="margin-bottom:16px"><h2 style="margin-bottom:6px">Analysis started</h2>
+      box.innerHTML = html`<section class="card" style="margin-bottom:16px"><div class="card-head"><h2><span class="card-icon brand">${icon('sparkles')}</span>Analysis started</h2>${prov('ai', 'AI-assisted')}</div>
         <p class="small muted">${r.tasks} recent task(s)${r.pendingConfirmations ? ` · ${r.pendingConfirmations} evidence link(s) wait for your confirmation` : ''}. Results appear on each task’s page.</p>
         <ul class="list">${r.results.map((x) => html`<li><div class="grow"><a href="#/tasks/${x.taskId}">${x.title}</a><div class="small ${x.status === 'not_analysed' ? '' : 'muted'}">${T[x.status] || x.status}${x.reason ? ` — ${x.reason}` : ''}</div></div></li>`)}</ul>
         ${!r.results.length ? html`<p class="small">No recent tasks to analyse.</p>` : ''}</section>`.toString()
@@ -192,7 +200,7 @@ export async function renderTaskExternalEvidence(box, taskId) {
   try {
     const items = await api(`/api/tasks/${taskId}/external-evidence`)
     if (!items.length) { box.remove(); return }
-    box.innerHTML = html`<div class="card-head"><h2>From connected apps</h2></div><ul class="list">${items.map((e) => html`<li><div class="grow" style="min-width:0"><div class="small"><span class="badge outline">${e.appLabel}</span> ${e.links.find((l) => l.taskId === taskId)?.status === 'confirmed' ? 'confirmed' : 'suggested'}</div>
+    box.innerHTML = html`<div class="card-head"><h2><span class="card-icon teal">${icon('evidence')}</span>From connected apps</h2></div><ul class="list">${items.map((e) => html`<li>${appTile(e.app, 'sm')}<div class="grow" style="min-width:0"><div class="small">${e.links.find((l) => l.taskId === taskId)?.status === 'confirmed' ? prov('self', 'Confirmed') : prov('suggested', 'Suggested')}</div>
       <div>${e.sourceUrl ? html`<a href="${e.sourceUrl}" target="_blank" rel="noopener noreferrer">${e.title || e.kind}</a>` : e.title || e.kind}</div>
       <div class="small muted">${ago(e.occurredAt)} · ${e.actorName ? `by ${e.actorName}` : e.attributionText}</div></div></li>`)}</ul>`.toString()
   } catch { box.remove() }
