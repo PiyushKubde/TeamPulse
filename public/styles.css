@@ -425,6 +425,10 @@ dialog .row.end { margin-top: var(--sp-5); }
 .auth .panel > p { color: var(--text-3); font-size: var(--fs-md); }
 .pillars { display: grid; gap: 10px; margin: 20px 0 24px; }
 .pillars div { display: flex; gap: 10px; color: var(--text-2); align-items: flex-start; }
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 42px; width: 100%; }
+.pw-toggle { position: absolute; right: 0; top: 0; bottom: 0; width: 40px; display: grid; place-items: center; background: none; border: none; cursor: pointer; color: var(--text-3); padding: 0; }
+.pw-toggle:hover { color: var(--text); }
 
 /* ---------------------------------------------------------------- apps, embed */
 .app-card { display: flex; gap: var(--sp-3); align-items: flex-start; }

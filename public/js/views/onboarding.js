@@ -12,10 +12,34 @@ function authCard(inner) {
 }
 const googleHref = () => { const invite = sessionStorage.getItem('tp_invite'); return `/auth/google${invite ? `?returnTo=${encodeURIComponent(`#/invite/${invite}`)}` : ''}` }
 const googleButton = (sess) => sess.googleConfigured ? html`<a class="btn google" style="width:100%" href="${googleHref()}">${GOOGLE} Continue with Google</a>`
-  : html`<div class="notice warn"><b>Google sign-in is not set up yet.</b> An administrator must add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to this app’s settings${sess.googleCallbackUrl ? html`, and register this redirect URI in the Google OAuth client: <span class="mono" style="word-break:break-all">${sess.googleCallbackUrl}</span>` : ''}.</div>`
+  : html`<div class="notice warn"><b>Google sign-in is not set up yet.</b> An administrator must add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to this app's settings${sess.googleCallbackUrl ? html`, and register this redirect URI in the Google OAuth client: <span class="mono" style="word-break:break-all">${sess.googleCallbackUrl}</span>` : ''}.</div>`
 const divider = html`<div class="divider" role="separator"><span>or</span></div>`
-const emailOff = html`<div class="notice">Email and password sign-in is not available on this server yet (no email provider is configured). Use Continue with Google.</div>`
 const sentNotice = (msg) => html`<div class="notice ok" role="status">${msg}</div>`
+
+/** Wires show/hide toggle for every <input type="password"> inside the given form element. */
+function wirePasswordToggles(form) {
+  form.querySelectorAll('.pw-toggle').forEach((btn) => {
+    const input = form.querySelector(`#${btn.dataset.for}`)
+    if (!input) return
+    btn.addEventListener('click', () => {
+      const show = input.type === 'password'
+      input.type = show ? 'text' : 'password'
+      btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password')
+      btn.setAttribute('aria-pressed', String(show))
+    })
+  })
+}
+
+function pwField(id, name, label, autocomplete, hint) {
+  return html`<div>
+    <label for="${id}">${label}</label>
+    <div class="pw-wrap">
+      <input id="${id}" name="${name}" type="password" required maxlength="128" autocomplete="${autocomplete}"${hint ? raw(` aria-describedby="${id}-hint"`) : ''}>
+      <button type="button" class="pw-toggle" data-for="${id}" aria-label="Show password" aria-pressed="false">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+    </div>${hint ? html`<div class="hint" id="${id}-hint">${hint}</div>` : ''}</div>`
+}
 
 export function renderLogin(root, q) {
   root.innerHTML = authCard(html`
@@ -27,16 +51,17 @@ export function renderLogin(root, q) {
     <div id="login-actions"><div class="loading">Checking sign-in options…</div></div>`)
   api('/api/session').then((sess) => {
     const box = document.getElementById('login-actions')
-    const email = sess.emailAuth?.available
     box.innerHTML = html`
       ${googleButton(sess)}
       ${divider}
-      ${email ? html`<form id="pw-login" class="stack" novalidate><div class="form-error"></div>
-          <div><label for="li-email">Email</label><input id="li-email" name="email" type="email" required autocomplete="username" maxlength="254"></div>
-          <div><label for="li-pw">Password</label><input id="li-pw" name="password" type="password" required autocomplete="current-password" maxlength="128"></div>
-          <button class="btn" type="submit">Sign in</button>
-        </form>
-        <div class="row" style="justify-content:space-between;margin-top:10px"><a href="#/forgot">Forgot password?</a><a href="#/signup">Create account</a></div>` : emailOff}
+      <form id="pw-login" class="stack" novalidate><div class="form-error"></div>
+        <div><label for="li-email">Email</label><input id="li-email" name="email" type="email" required autocomplete="username" maxlength="254"></div>
+        ${pwField('li-pw', 'password', 'Password', 'current-password')}
+        <button class="btn" type="submit">Sign in</button>
+      </form>
+      <div class="row" style="justify-content:space-between;margin-top:10px">
+        <a href="#/forgot">Forgot password?</a><a href="#/signup">Create account</a>
+      </div>
       ${sess.devLogin ? html`<details style="margin-top:16px"><summary class="small muted">Local development sign-in</summary>
         <form id="dev-login" class="stack" style="margin-top:10px"><div class="form-error"></div>
           <div><label for="dev-email">Email</label><input id="dev-email" name="email" type="email" required placeholder="you@example.com"></div>
@@ -44,7 +69,10 @@ export function renderLogin(root, q) {
           <button class="btn ghost" type="submit">Sign in (development only)</button></form></details>` : ''}
       <p class="small muted" style="margin-top:16px">After signing in, create your organization, accept an invitation, or ask to join with a code.</p>`.toString()
     const pl = document.getElementById('pw-login')
-    if (pl) bindForm(pl, (d) => api('/auth/login', { method: 'POST', body: d }), { onSuccess: () => { navigate(sessionStorage.getItem('tp_invite') ? `#/invite/${sessionStorage.getItem('tp_invite')}` : '#/dashboard') } })
+    if (pl) {
+      wirePasswordToggles(pl)
+      bindForm(pl, (d) => api('/auth/login', { method: 'POST', body: d }), { onSuccess: () => { navigate(sessionStorage.getItem('tp_invite') ? `#/invite/${sessionStorage.getItem('tp_invite')}` : '#/dashboard') } })
+    }
     const f = document.getElementById('dev-login')
     if (f) bindForm(f, (d) => api('/auth/dev-login', { method: 'POST', body: d }), { onSuccess: () => reloadSession() })
   }).catch((e) => { document.getElementById('login-actions').innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString() })
@@ -54,34 +82,32 @@ export async function renderSignup(root) {
   const sess = await api('/api/session')
   root.innerHTML = authCard(html`
     <h1>Create your account</h1>
-    <p class="muted">You’ll confirm your email before you can sign in. Then create your organization, accept an invitation, or ask to join one.</p>
+    <p class="muted">Sign up with your email, or use Google. Then create your organization, accept an invitation, or ask to join one.</p>
     ${googleButton(sess)}
     ${divider}
-    <div id="su-box">${sess.emailAuth?.available ? html`<form id="su" class="stack" novalidate><div class="form-error"></div>
-        <div><label for="su-name">Full name</label><input id="su-name" name="name" type="text" required maxlength="120" autocomplete="name"></div>
-        <div><label for="su-email">Email</label><input id="su-email" name="email" type="email" required maxlength="254" autocomplete="email"></div>
-        <div><label for="su-pw">Password</label><input id="su-pw" name="password" type="password" required minlength="12" maxlength="128" autocomplete="new-password" aria-describedby="su-pw-hint"><div class="hint" id="su-pw-hint">${POLICY_HINT}</div></div>
-        <div><label for="su-pw2">Confirm password</label><input id="su-pw2" name="confirmPassword" type="password" required maxlength="128" autocomplete="new-password"></div>
-        <label class="check"><input type="checkbox" name="acceptTerms" value="true" required> <span>I agree to the ${sess.legal?.termsUrl ? html`<a href="${sess.legal.termsUrl}" target="_blank" rel="noopener">terms of use</a>` : 'terms of use'} and ${sess.legal?.privacyUrl ? html`<a href="${sess.legal.privacyUrl}" target="_blank" rel="noopener">privacy policy</a>` : 'privacy policy'}</span></label>
-        <button class="btn" type="submit">Create account</button>
-      </form>` : emailOff}</div>
+    <form id="su" class="stack" novalidate><div class="form-error"></div>
+      <div><label for="su-name">Full name</label><input id="su-name" name="name" type="text" required maxlength="120" autocomplete="name"></div>
+      <div><label for="su-email">Email</label><input id="su-email" name="email" type="email" required maxlength="254" autocomplete="email"></div>
+      ${pwField('su-pw', 'password', 'Password', 'new-password', POLICY_HINT)}
+      ${pwField('su-pw2', 'confirmPassword', 'Confirm password', 'new-password')}
+      <button class="btn" type="submit">Create account</button>
+    </form>
     <p style="margin-top:14px">Already have an account? <a href="#/login">Sign in</a></p>`)
   const f = document.getElementById('su')
-  if (f) bindForm(f, (d) => api('/auth/register', { method: 'POST', body: { ...d, acceptTerms: f.acceptTerms.checked } }), { onSuccess: (out) => {
-    const email = f.email.value
-    document.getElementById('su-box').innerHTML = html`${sentNotice(out.message)}<p class="small muted">The link is valid for 24 hours. Didn’t get it? <button class="btn link" id="resend">Send it again</button></p>`.toString()
-    document.getElementById('resend').onclick = async (e) => { e.target.disabled = true; try { const r = await api('/auth/email/resend', { method: 'POST', body: { email } }); toast(r.message) } catch (err) { toast(errorText(err), { error: true }) } }
-  } })
+  if (f) {
+    wirePasswordToggles(f)
+    bindForm(f, (d) => api('/auth/register-direct', { method: 'POST', body: d }), { onSuccess: () => { toast('Account created. Welcome!'); navigate('#/dashboard', { replace: true }) } })
+  }
 }
 
 export async function renderForgot(root) {
   const sess = await api('/api/session')
   root.innerHTML = authCard(html`
     <h1>Reset your password</h1>
-    <div id="fg-box">${sess.emailAuth?.available ? html`<p class="muted">Enter your account email. If it can be used, we’ll send a link to choose a new password (valid for 30 minutes).</p>
+    <div id="fg-box"><p class="muted">Enter your account email. If it can be used, we'll send a link to choose a new password (valid for 30 minutes).</p>
       <form id="fg" class="stack" novalidate><div class="form-error"></div>
         <div><label for="fg-email">Email</label><input id="fg-email" name="email" type="email" required maxlength="254" autocomplete="email"></div>
-        <button class="btn" type="submit">Send reset link</button></form>` : emailOff}</div>
+        <button class="btn" type="submit">Send reset link</button></form></div>
     <p style="margin-top:14px"><a href="#/login">Back to sign in</a></p>`)
   const f = document.getElementById('fg')
   if (f) bindForm(f, (d) => api('/auth/password/forgot', { method: 'POST', body: d }), { onSuccess: (out) => { document.getElementById('fg-box').innerHTML = sentNotice(out.message).toString() } })
@@ -98,7 +124,7 @@ export async function renderReset(root, token) {
     return
   }
   const adding = info.purpose === 'link_password'
-  box.innerHTML = html`<p class="muted">${adding ? 'Set a password so you can also sign in with your email. Google sign-in keeps working.' : 'Choose a new password. You’ll be signed out everywhere else.'}</p>
+  box.innerHTML = html`<p class="muted">${adding ? 'Set a password so you can also sign in with your email. Google sign-in keeps working.' : "Choose a new password. You'll be signed out everywhere else."}</p>
     <form id="rs" class="stack" novalidate><div class="form-error"></div>
       <div><label for="rs-pw">New password</label><input id="rs-pw" name="password" type="password" required minlength="12" maxlength="128" autocomplete="new-password" aria-describedby="rs-hint"><div class="hint" id="rs-hint">${POLICY_HINT}</div></div>
       <div><label for="rs-pw2">Confirm password</label><input id="rs-pw2" name="confirmPassword" type="password" required maxlength="128" autocomplete="new-password"></div>
@@ -114,7 +140,7 @@ export async function renderVerify(root, token) {
     <form id="vf" class="stack" novalidate><div class="form-error"></div>
       <div><label for="vf-pw">Password</label><input id="vf-pw" name="password" type="password" required maxlength="128" autocomplete="current-password"></div>
       <button class="btn" type="submit">Confirm email and sign in</button></form>
-    <p class="small muted" style="margin-top:12px">Didn’t create a TeamPulse account? Ignore this, or <a href="#/signup">create one with your own password</a>.</p></div>`)
+    <p class="small muted" style="margin-top:12px">Didn't create a TeamPulse account? Ignore this, or <a href="#/signup">create one with your own password</a>.</p></div>`)
   bindForm(document.getElementById('vf'), (d) => api('/auth/email/verify', { method: 'POST', body: { token, password: d.password } }), {
     onSuccess: () => { toast('Email confirmed. Welcome!'); navigate('#/dashboard', { replace: true }) }
   })
@@ -132,7 +158,7 @@ export async function renderWelcome(root) {
   root.innerHTML = html`<div class="auth"><div class="panel" style="width:min(560px,100%)"><div class="card" style="padding:28px">
     <div class="logo">${LOGO}<span>TeamPulse</span></div>
     <h1>Welcome, ${sess.user.name}</h1>
-    <p class="muted">Signed in as ${sess.user.email}${sess.user.emailVerified ? '' : ' (email not verified)'}. Join your team’s organization to continue.</p>
+    <p class="muted">Signed in as ${sess.user.email}${sess.user.emailVerified ? '' : ' (email not verified)'}. Join your team's organization to continue.</p>
     ${ob.invitations.length ? html`<h2 style="margin:18px 0 8px">Invitations</h2><ul class="list">${ob.invitations.map((i) => html`<li><div class="grow"><b>${i.orgName}</b><div class="small muted">as ${i.role} · sent to ${i.email}</div>
         ${i.emailMatches ? '' : html`<div class="small" style="color:var(--bad)">This invitation is for ${i.email}. Sign in with that email (or its Google account) to accept it.</div>`}</div>
         ${i.emailMatches ? html`<button class="btn small" data-accept="${i.id}">Accept</button>` : ''}</li>`)}</ul>` : ''}

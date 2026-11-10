@@ -78,30 +78,22 @@ try {
   step = 'register (validation)'
   await page.click('text=Create account')
   await page.waitForSelector('#su')
-  ok(await page.isVisible('#su >> text=I agree to the terms'), 'terms checkbox'); ok(await page.isVisible('text=Continue with Google'), 'Google on sign-up')
+  ok(await page.isVisible('text=Continue with Google'), 'Google button on sign-up page')
+  ok(await page.isVisible('#su-name') && await page.isVisible('#su-email') && await page.isVisible('#su-pw') && await page.isVisible('#su-pw2'), 'all fields present')
+  // Password show/hide toggle exists
+  ok(await page.isVisible('.pw-toggle'), 'show/hide toggle present')
+  // Validation: short password
   await page.fill('#su-name', 'Ada Lovelace'); await page.fill('#su-email', EMAIL); await page.fill('#su-pw', 'short'); await page.fill('#su-pw2', 'short')
-  await page.check('input[name=acceptTerms]')
   await page.click('#su button[type=submit]')
   await page.waitForSelector('#su .notice.err')
   step = 'register'
   await page.fill('#su-pw', PW); await page.fill('#su-pw2', PW)
   await shot(page, 'a2-signup')
   await page.click('#su button[type=submit]')
-  await page.waitForSelector('text=If this email can be used')
-  await shot(page, 'a3-signup-sent')
-
-  step = 'login before verifying'
-  await page.goto(`${base}/#/login`); await page.waitForSelector('#pw-login')
-  await page.fill('#li-email', EMAIL); await page.fill('#li-pw', PW); await page.click('#pw-login button[type=submit]')
-  await page.waitForSelector('text=Confirm your email first')
-
-  step = 'verify'
-  await page.goto(await waitMail(EMAIL, 'verify'))
-  await page.fill('#vf-pw', 'Wrong-Kettle-0000!'); await page.click('#vf button[type=submit]')
-  await page.waitForSelector('text=not the password chosen')
-  await page.fill('#vf-pw', PW); await page.click('#vf button[type=submit]')
-  await page.waitForSelector('text=Welcome, Ada Lovelace')
+  // Direct registration: signed in immediately, navigate to onboarding (no org yet)
+  await page.waitForSelector('text=Welcome, Ada Lovelace', { timeout: 8000 })
   ok(await page.isVisible('text=create a new organization'), 'no automatic role; normal onboarding')
+  await shot(page, 'a3-onboarding')
   await page.fill('#org', 'Engine Works'); await page.click('#create button[type=submit]')
   await page.waitForSelector('#nav')
 

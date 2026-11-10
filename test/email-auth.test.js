@@ -298,14 +298,151 @@ test('invitations: a verified password account accepts with exactly the invited 
   } finally { await t.close() }
 })
 
-test('without an email provider: sign-up and reset say so; nothing pretends to send', async () => {
+test('without an email provider: email-verification sign-up and reset say so; direct registration always works', async () => {
   const t = await startApp()
   try {
+    // Email-verification flow still requires a mailer.
     const r = await reg(t, 'np@example.com')
     assert.equal(r.status, 503); assert.equal(r.body.error.code, 'email_not_configured')
     assert.equal((await t.call('/auth/password/forgot', { method: 'POST', body: { email: 'np@example.com' } })).status, 503)
-    assert.equal((await t.call('/api/session')).body.emailAuth.available, false)
+    // emailAuth.available is always true: direct registration is always offered.
+    assert.equal((await t.call('/api/session')).body.emailAuth.available, true)
     assert.equal(t.db.prepare(`SELECT COUNT(*) AS n FROM users WHERE email = 'np@example.com'`).get().n, 0)
+    // Direct registration works without a mailer.
+    const PW2 = 'Direct-Lantern-42'
+    const dr = await t.call('/auth/register-direct', { method: 'POST', body: { name: 'Nova Direct', email: 'np-direct@example.com', password: PW2, confirmPassword: PW2 } })
+    assert.equal(dr.status, 200); assert.ok(dr.cookie, 'signed in immediately')
+    const sess = await t.call('/api/session', { headers: { cookie: dr.cookie } })
+    assert.equal(sess.body.user.email, 'np-direct@example.com')
+    assert.equal(sess.body.user.emailVerified, true)
     void makeUser
+  } finally { await t.close() }
+})
+
+// ---- Direct registration (no email verification) ----
+const DR = 'Direct-Lantern-99'
+const regDirect = (t, email, extra = {}) =>
+  t.call('/auth/register-direct', { method: 'POST', body: { name: 'Dana Direct', email, password: DR, confirmPassword: DR, ...extra } })
+const loginDirect = (t, email, password = DR) => t.call('/auth/login', { method: 'POST', body: { email, password } })
+
+test('register-direct: creates verified account, signs in immediately, argon2id hash stored', async () => {
+  const t = await startApp()
+  try {
+    const r = await regDirect(t, 'dana@example.com')
+    assert.equal(r.status, 200, 'created')
+    assert.ok(r.cookie, 'session cookie set')
+    const sess = await t.call('/api/session', { headers: { cookie: r.cookie } })
+    assert.equal(sess.body.user.email, 'dana@example.com')
+    assert.equal(sess.body.user.emailVerified, true, 'immediately verified')
+    assert.deepEqual(sess.body.user.signIn, { google: false, password: true })
+    assert.equal(sess.body.membership, null, 'no org yet — onboarding required')
+    assert.equal(JSON.stringify(sess.body).includes('argon2'), false, 'hash not in response')
+    const u = t.db.prepare(`SELECT * FROM users WHERE email = 'dana@example.com'`).get()
+    assert.match(u.password_hash, /^\$argon2id\$/)
+    assert.equal(u.email_verified, 1)
+    assert.ok(t.db.prepare(`SELECT 1 FROM audit_log WHERE action = 'auth.registered_direct'`).get())
+  } finally { await t.close() }
+})
+
+test('register-direct: validation — missing name, bad email, password mismatch, weak password', async () => {
+  const t = await startApp()
+  try {
+    assert.equal((await regDirect(t, 'v@example.com', { name: '' })).status, 400)
+    assert.equal((await regDirect(t, 'not-an-email')).status, 400)
+    assert.equal((await regDirect(t, 'v@example.com', { confirmPassword: 'Different-33' })).status, 400)
+    const mismatch = await regDirect(t, 'v@example.com', { confirmPassword: 'Other-Lantern-99' })
+    assert.equal(mismatch.body.error.details?.field, 'confirmPassword')
+    assert.equal((await regDirect(t, 'v@example.com', { password: 'short', confirmPassword: 'short' })).status, 400)
+    assert.equal((await regDirect(t, 'v@example.com', { password: 'alllowercase20charss', confirmPassword: 'alllowercase20charss' })).status, 200, '20+ char passphrase allowed')
+  } finally { await t.close() }
+})
+
+test('register-direct: duplicate email is rejected', async () => {
+  const t = await startApp()
+  try {
+    const first = await regDirect(t, 'dup@example.com')
+    assert.equal(first.status, 200)
+    const again = await regDirect(t, 'dup@example.com')
+    assert.equal(again.status, 400)
+    assert.match(again.body.error.message, /already exists/i)
+    assert.equal(t.db.prepare(`SELECT COUNT(*) AS n FROM users WHERE email = 'dup@example.com'`).get().n, 1)
+  } finally { await t.close() }
+})
+
+test('register-direct: login works immediately after registration, wrong password refused', async () => {
+  const t = await startApp()
+  try {
+    await regDirect(t, 'li@example.com')
+    const ok = await loginDirect(t, 'LI@example.com')
+    assert.equal(ok.status, 200, 'case-insensitive login')
+    assert.ok(ok.cookie)
+    const bad = await loginDirect(t, 'li@example.com', 'Wrong-Lantern-99')
+    assert.equal(bad.status, 401); assert.equal(bad.cookie, null)
+    assert.equal(bad.body.error.code, 'invalid_login')
+  } finally { await t.close() }
+})
+
+test('register-direct: session persists across requests, logout ends it', async () => {
+  const t = await startApp()
+  try {
+    const r = await regDirect(t, 'sp@example.com')
+    const cookie = r.cookie
+    const s1 = await t.call('/api/session', { headers: { cookie } })
+    assert.equal(s1.body.user.email, 'sp@example.com', 'session persists')
+    await t.call('/api/session/logout', { method: 'POST', headers: { cookie } })
+    const s2 = await t.call('/api/session', { headers: { cookie } })
+    assert.equal(s2.body.user, null, 'logged out')
+  } finally { await t.close() }
+})
+
+test('register-direct: org onboarding flow works after registration', async () => {
+  const t = await startApp()
+  try {
+    const r = await regDirect(t, 'org@example.com')
+    const cookie = r.cookie
+    // No org yet.
+    assert.equal((await t.call('/api/session', { headers: { cookie } })).body.membership, null)
+    // Create org → becomes admin.
+    const org = await t.call('/api/organizations', { method: 'POST', headers: { cookie }, body: { name: 'Dana Co' } })
+    assert.equal(org.status, 200)
+    const sess = await t.call('/api/session', { headers: { cookie } })
+    assert.equal(sess.body.membership.role, 'admin')
+    assert.equal(sess.body.membership.orgId, org.body.id)
+  } finally { await t.close() }
+})
+
+test('register-direct: Google accounts still work after the change', async () => {
+  const { generateKeyPairSync, createSign } = await import('node:crypto')
+  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'k2', alg: 'RS256', use: 'sig' }
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  const idToken = (claims) => { const h = b64({ alg: 'RS256', kid: 'k2' }); const p = b64(claims); return `${h}.${p}.${createSign('RSA-SHA256').update(`${h}.${p}`).sign(privateKey).toString('base64url')}` }
+  const CLIENT = 'test-client2.apps.googleusercontent.com'
+  const g = { next: null }
+  g.transport = { exchangeCode: async () => ({ id_token: idToken(g.next) }), jwks: async () => [jwk] }
+  const gcfg = { clientId: CLIENT, clientSecret: 's2', redirectUri: 'https://teampulse.test/auth/google/callback', configured: true }
+  const t = await startApp({ google: g.transport, cfgOverrides: { google: gcfg } })
+  try {
+    const start = await t.call('/auth/google')
+    const url = new URL(start.headers.get('location'))
+    g.next = { iss: 'https://accounts.google.com', aud: CLIENT, sub: 'g-dr-1', email: 'gdr@example.com', email_verified: true, name: 'G Direct', nonce: url.searchParams.get('nonce'), exp: Math.floor(Date.now() / 1000) + 600 }
+    const cb = await t.call(`/auth/google/callback?code=c&state=${url.searchParams.get('state')}`)
+    assert.equal(cb.headers.get('location'), '/#/dashboard', 'Google login still works')
+  } finally { await t.close() }
+})
+
+test('register-direct: tenant isolation — cannot access another org\'s data', async () => {
+  const t = await startApp()
+  try {
+    const { seedOrg } = await import('./helpers.js')
+    const s = seedOrg(t.db)
+    const r = await regDirect(t, 'isolated@example.com')
+    const cookie = r.cookie
+    // Create own org.
+    await t.call('/api/organizations', { method: 'POST', headers: { cookie }, body: { name: 'Isolated Co' } })
+    // Cannot see tasks from the other org.
+    const task = await t.call('/api/tasks', { method: 'POST', as: s.manager, body: { title: 'Secret', assigneeId: s.employee.id } })
+    const cross = await t.call(`/api/tasks/${task.body.task.id}`, { headers: { cookie } })
+    assert.equal(cross.status, 404, 'cross-tenant access blocked')
   } finally { await t.close() }
 })

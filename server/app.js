@@ -183,6 +183,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     return fn(req, res)
   }))
   authPost('/auth/register', (req) => accounts.register(db, mailer, cfg, req.body))
+  authPost('/auth/register-direct', async (req, res) => { const user = await accounts.registerDirect(db, req.body); setSession(res, user.id, req); return { ok: true } })
   authPost('/auth/email/resend', (req) => accounts.resendVerification(db, mailer, cfg, req.body))
   authPost('/auth/email/verify', async (req, res) => { const user = await accounts.verifyEmail(db, req.body); setSession(res, user.id, req); return { ok: true } })
   authPost('/auth/login', async (req, res) => {
@@ -203,7 +204,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     return { ok: true }
   }))
   app.get('/api/session', h((req) => {
-    const base = { googleConfigured: cfg.google.configured, devLogin: cfg.devLogin, emailAuth: { available: mailer.configured }, legal: cfg.legal || {}, integrations: { viasocket: vs.configured, ai: ai.configured ? (ai.simulated ? 'simulated' : 'configured') : 'not_configured' }, ...(cfg.google.configured ? {} : { googleCallbackUrl: cfg.google.redirectUri || null }) }
+    const base = { googleConfigured: cfg.google.configured, devLogin: cfg.devLogin, emailAuth: { available: true }, legal: cfg.legal || {}, integrations: { viasocket: vs.configured, ai: ai.configured ? (ai.simulated ? 'simulated' : 'configured') : 'not_configured' }, ...(cfg.google.configured ? {} : { googleCallbackUrl: cfg.google.redirectUri || null }) }
     if (!req.user) return { ...base, user: null }
     const c = req.ctx
     return {
