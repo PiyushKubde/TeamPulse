@@ -86,35 +86,55 @@ export async function renderTaskList(main, { view, q }) {
 }
 
 // ---------- create / edit ----------
-export async function openTaskForm(existing = null) {
+export async function openTaskForm(existing = null, { defaultTeamId = null, defaultAssigneeId = null } = {}) {
   const mode = existing ? 'edit' : app.session.membership.creationMode
   const [people, teamList] = await Promise.all([assignable().catch(() => []), teams().catch(() => [])])
   const myTeams = app.isAdmin ? teamList : app.role === 'manager' ? teamList.filter((t) => t.managedByMe) : teamList.filter((t) => t.id === app.session.membership.teamId)
   const isRequest = mode === 'request'
   const t = existing || {}
+  // Pre-fill from context (e.g. opened from a team view).
+  const preTeam = t.teamId || defaultTeamId || (myTeams.length === 1 ? myTeams[0].id : null)
+  const preAssignee = t.assigneeId || defaultAssigneeId
+
+  // When editing, show all fields; when creating, use progressive disclosure.
+  const moreOpen = existing || Boolean(t.expectedOutcome || t.priority || t.dueAt || preTeam || preAssignee)
+
+  const detailFields = html`
+    <div class="field"><label for="t-out">${isRequest ? 'What outcome do you expect?' : 'Expected outcome'} <span class="field-hint">optional</span></label><textarea id="t-out" name="expectedOutcome" maxlength="2000" rows="2" placeholder="What will be different when this is done? This helps the team assess impact later.">${t.expectedOutcome || ''}</textarea></div>
+    <div class="fields">
+      <div class="field"><label for="t-prio">${isRequest ? 'Suggested priority' : 'Priority'}</label><select id="t-prio" name="priority">${['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((p) => html`<option value="${p}" ${(t.priority || 'MEDIUM') === p ? raw('selected') : ''}>${p[0] + p.slice(1).toLowerCase()}</option>`)}</select></div>
+      <div class="field"><label for="t-due">${isRequest ? 'Suggested deadline' : 'Due date'} <span class="field-hint">optional</span></label><input id="t-due" name="dueAt" type="datetime-local" value="${toLocalInput(t.dueAt)}"></div>
+      ${isRequest ? '' : html`<div class="field"><label for="t-start">Start date <span class="field-hint">optional</span></label><input id="t-start" name="startDate" type="date" value="${t.startDate || ''}"></div>`}
+      ${myTeams.length > 1 ? html`<div class="field"><label for="t-team">Team</label><select id="t-team" name="teamId"><option value="">(default)</option>${myTeams.map((x) => html`<option value="${x.id}" ${preTeam === x.id ? raw('selected') : ''}>${x.name}</option>`)}</select></div>` : (myTeams.length === 1 ? html`<input type="hidden" name="teamId" value="${myTeams[0].id}">` : '')}
+      ${!existing ? html`<div class="field"><label for="t-assignee">${isRequest ? 'Suggested owner' : 'Assign to'} <span class="field-hint">optional</span></label><select id="t-assignee" name="assigneeId"><option value="">${isRequest ? '(let the manager decide)' : '(unassigned)'}</option>
+        ${(isRequest ? [] : people).map((p) => html`<option value="${p.userId}" ${preAssignee === p.userId ? raw('selected') : ''}>${p.name}${p.userId === app.me.id ? ' (me)' : ''}</option>`)}</select>
+        ${!isRequest && !people.length ? html`<div class="hint">You do not have permission to assign tasks.</div>` : ''}</div>` : ''}
+    </div>
+    ${isRequest ? '' : html`<div class="field"><label for="t-links">Supporting links <span class="field-hint">optional</span></label><textarea id="t-links" name="links" rows="2" placeholder="One link per line (https://…)">${(t.links || []).map((l) => l.url).join('\n')}</textarea></div>`}
+    ${existing ? html`<div class="field"><label for="t-reason2">Reason for this change <span class="field-hint">kept in history</span></label><input id="t-reason2" name="reason" type="text" maxlength="500" placeholder="e.g. scope clarified, deadline moved"></div>` : ''}`
+
   const content = html`<h2 id="modal-title">${existing ? 'Edit task' : isRequest ? 'Suggest a task' : 'New task'}</h2>
     ${isRequest ? html`<div class="notice">Your manager approves suggestions before they become official tasks.</div>` : ''}
     <form id="task-form"><div class="form-error"></div>
-      <div class="field"><label for="t-title">Title</label><input id="t-title" name="title" type="text" required maxlength="200" value="${t.title || ''}"></div>
-      <div class="field"><label for="t-desc">Description</label><textarea id="t-desc" name="description" maxlength="5000">${t.description || ''}</textarea></div>
-      ${isRequest ? html`<div class="field"><label for="t-reason">Why is this needed?</label><textarea id="t-reason" name="reason" required maxlength="2000"></textarea></div>` : ''}
-      <div class="field"><label for="t-out">Expected outcome</label><textarea id="t-out" name="expectedOutcome" maxlength="2000" placeholder="What will be different when this is done?">${t.expectedOutcome || ''}</textarea></div>
-      <div class="fields">
-        <div class="field"><label for="t-prio">${isRequest ? 'Suggested priority' : 'Priority'}</label><select id="t-prio" name="priority">${['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((p) => html`<option value="${p}" ${(t.priority || 'MEDIUM') === p ? raw('selected') : ''}>${p[0] + p.slice(1).toLowerCase()}</option>`)}</select></div>
-        <div class="field"><label for="t-due">${isRequest ? 'Suggested deadline' : 'Due'}</label><input id="t-due" name="dueAt" type="datetime-local" value="${toLocalInput(t.dueAt)}"></div>
-        ${isRequest ? '' : html`<div class="field"><label for="t-start">Start date</label><input id="t-start" name="startDate" type="date" value="${t.startDate || ''}"></div>`}
-        ${myTeams.length ? html`<div class="field"><label for="t-team">Team</label><select id="t-team" name="teamId"><option value="">(default)</option>${myTeams.map((x) => html`<option value="${x.id}" ${t.teamId === x.id ? raw('selected') : ''}>${x.name}</option>`)}</select></div>` : ''}
-        ${!existing ? html`<div class="field"><label for="t-assignee">${isRequest ? 'Suggested owner' : 'Assign to'}</label><select id="t-assignee" name="assigneeId"><option value="">${isRequest ? '(let the manager decide)' : '(unassigned)'}</option>
-          ${(isRequest ? [] : people).map((p) => html`<option value="${p.userId}">${p.name}${p.userId === app.me.id ? ' (me)' : ''}</option>`)}</select>
-          ${!isRequest && !people.length ? html`<div class="hint">You do not have permission to assign tasks.</div>` : ''}</div>` : ''}
-      </div>
-      ${isRequest ? '' : html`<div class="field"><label for="t-links">Supporting links</label><textarea id="t-links" name="links" rows="2" placeholder="One link per line (https://…)">${(t.links || []).map((l) => l.url).join('\n')}</textarea></div>`}
-      ${existing ? html`<div class="field"><label for="t-reason2">Reason for change (kept in history)</label><input id="t-reason2" name="reason" type="text" maxlength="500"></div>` : ''}
-      <div class="row end"><button class="btn ghost" data-close>Cancel</button><button class="btn" type="submit">${existing ? 'Save' : isRequest ? 'Send suggestion' : 'Create task'}</button></div>
+      <div class="field"><label for="t-title">Title</label><input id="t-title" name="title" type="text" required maxlength="200" value="${t.title || ''}" placeholder="What needs to get done?" autocomplete="off"></div>
+      <div class="field"><label for="t-desc">Description <span class="field-hint">optional</span></label><textarea id="t-desc" name="description" maxlength="5000" rows="3" placeholder="More context — the problem, background, or approach.">${t.description || ''}</textarea></div>
+      ${isRequest ? html`<div class="field"><label for="t-reason">Why is this needed?</label><textarea id="t-reason" name="reason" required maxlength="2000" rows="2" placeholder="What problem does this solve? Why now?"></textarea></div>` : ''}
+      ${existing
+        ? detailFields
+        : html`<details class="task-more" id="task-more" ${moreOpen ? raw('open') : ''}><summary>${icon('chevronDown', 'xs')}<span>More options</span></summary><div class="task-more-body">${raw(detailFields)}</div></details>`}
+      <div class="row end" style="margin-top:4px"><button class="btn ghost" data-close>Cancel</button><button class="btn" type="submit">${existing ? 'Save changes' : isRequest ? 'Send suggestion' : 'Create task'}</button></div>
     </form>`
   return modal(content.toString(), (el, close) => {
     // The suggested-owner list for requests comes from all members (a suggestion grants nothing).
-    if (isRequest) api('/api/members').then((ms) => { const s = el.querySelector('#t-assignee'); ms.forEach((m) => s.insertAdjacentHTML('beforeend', `<option value="${esc(m.userId)}">${esc(m.name)}</option>`)) }).catch(() => {})
+    if (isRequest) api('/api/members').then((ms) => { const s = el.querySelector('#t-assignee'); if (s) ms.forEach((m) => s.insertAdjacentHTML('beforeend', `<option value="${esc(m.userId)}">${esc(m.name)}</option>`)) }).catch(() => {})
+    // Enter on title opens More options and focuses description instead of submitting (unless description filled).
+    const titleEl = el.querySelector('#t-title')
+    titleEl?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        const details = el.querySelector('#task-more')
+        if (details && !details.open) { e.preventDefault(); details.open = true; el.querySelector('#t-desc')?.focus() }
+      }
+    })
     bindForm(el.querySelector('#task-form'), async (d) => {
       const body = { ...d, dueAt: d.dueAt ? fromLocalInput(d.dueAt) : (existing ? null : undefined) }
       if ('links' in d || existing) body.links = (d.links || '').split('\n').map((s) => s.trim()).filter(Boolean).map((url) => ({ url }))
@@ -253,7 +273,7 @@ export async function renderTaskDetail(main, id) {
     edit: async () => { await openTaskForm(t); reload() },
     progress: () => modal(html`<h2 id="modal-title">Update progress</h2><form id="f"><div class="form-error"></div>
         <div class="field"><label for="p-val">Progress: <output id="p-out">${t.progress}</output>%</label><input id="p-val" name="progress" type="range" min="0" max="100" step="5" value="${t.progress}" style="width:100%"></div>
-        <div class="field"><label for="p-note">What moved forward?</label><textarea id="p-note" name="note" maxlength="2000"></textarea></div>
+        <div class="field"><label for="p-note">What moved forward?</label><textarea id="p-note" name="note" maxlength="2000" placeholder="Describe what changed — specific actions taken, files touched, decisions made, blockers resolved."></textarea></div>
         <div class="row end"><button class="btn ghost" data-close>Cancel</button><button class="btn" type="submit">Save</button></div></form>`.toString(), (el, close) => {
       el.querySelector('#p-val').addEventListener('input', (e) => { el.querySelector('#p-out').textContent = e.target.value })
       bindForm(el.querySelector('#f'), (b) => api(`/api/tasks/${id}/progress`, { method: 'POST', body: { ...b, progress: Number(b.progress) } }), { onSuccess: () => { close(); toast('Progress updated.'); reload() } })
@@ -271,8 +291,8 @@ export async function renderTaskDetail(main, id) {
       })
     },
     submit: () => modal(html`<h2 id="modal-title">Submit for review</h2><form id="f"><div class="form-error"></div>
-        <div class="field"><label for="s-s">Work summary</label><textarea id="s-s" name="summary" required maxlength="4000" placeholder="What did you do?"></textarea></div>
-        <div class="field"><label for="s-o">Outcome achieved</label><textarea id="s-o" name="outcome" required maxlength="4000" placeholder="What is different now? Compare with the expected outcome: ${t.expectedOutcome || '—'}"></textarea></div>
+        <div class="field"><label for="s-s">What did you accomplish?</label><textarea id="s-s" name="summary" required maxlength="4000" placeholder="Describe the work: what you built, changed, fixed, or delivered. Link evidence (PRs, docs, demos) below."></textarea></div>
+        <div class="field"><label for="s-o">What changed because of this work?</label><textarea id="s-o" name="outcome" required maxlength="4000" placeholder="What is different now? Compare with the expected outcome: ${t.expectedOutcome || '—'}"></textarea></div>
         <div class="field"><label for="s-l">Evidence links</label><textarea id="s-l" name="links" rows="2" placeholder="One link per line (PR, doc, dashboard…)"></textarea><div class="hint">You can also upload files on the task page.</div></div>
         <div class="row end"><button class="btn ghost" data-close>Cancel</button><button class="btn" type="submit">Submit</button></div></form>`.toString(), (el, close) => {
       bindForm(el.querySelector('#f'), (b) => api(`/api/tasks/${id}/submit`, { method: 'POST', body: { summary: b.summary, outcome: b.outcome, evidenceLinks: (b.links || '').split('\n').map((s) => s.trim()).filter(Boolean).map((url) => ({ url })) } }),

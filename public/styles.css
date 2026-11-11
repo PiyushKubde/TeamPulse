@@ -546,6 +546,16 @@ a.task-card:hover { text-decoration: none; border-color: var(--border-strong); b
 .lead-icon.ok { background: var(--ok-soft); color: var(--ok-ink); }
 .lead-icon.brand { background: var(--brand-soft); color: var(--brand-ink); }
 .lead-icon.teal { background: var(--teal-soft); color: var(--teal-ink); }
+/* Task form progressive disclosure */
+.task-more { border-top: 1px solid var(--border-subtle); margin-top: var(--sp-3); padding-top: var(--sp-2); }
+.task-more > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; padding: var(--sp-2) 0; color: var(--text-3); font-size: var(--fs-sm); font-weight: 500; user-select: none; }
+.task-more > summary::-webkit-details-marker { display: none; }
+.task-more > summary svg { width: 14px; height: 14px; transition: transform var(--dur) var(--ease); flex: none; }
+.task-more[open] > summary svg { transform: rotate(180deg); }
+.task-more > summary:hover { color: var(--text-1); }
+.task-more-body { padding-top: var(--sp-3); }
+.field-hint { font-size: var(--fs-xs); color: var(--text-3); font-weight: 400; margin-left: 4px; }
+
 .reflect summary { cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .reflect summary::-webkit-details-marker { display: none; }
 .reflect summary .chev { transition: transform var(--dur) var(--ease); color: var(--text-3); }
