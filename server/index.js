@@ -6,6 +6,7 @@ import { createApp, runAlertJob } from './app.js'
 import { createViasocketGateway } from './integrations/viasocket.js'
 import { createM91Transport } from './integrations/m91.js'
 import { createMailer } from './auth/mailer.js'
+import { ALERT_RULES, DEFAULT_ALERT_SETTINGS } from './services/alert-rules.js'
 
 const cfg = loadConfig()
 const db = openDatabase(join(cfg.dataDir, 'teampulse.db'))
@@ -24,6 +25,24 @@ console.log(`[config] Scheduled jobs: ${cfg.cronSecret ? 'CRON_SECRET set' : 'no
 console.log(`[config] Email (verification, password reset): ${mailer.configured ? `configured via ${mailer.provider}` : 'NOT configured — email sign-up and password reset are unavailable (set MAIL_PROVIDER, see .env.example)'}`)
 console.log(`[config] AI work analysis: ${ai.configured ? `${ai.simulated ? 'SIMULATED (development only, not AI)' : `${ai.name}, model ${ai.model}${ai.backup ? `; backup ${ai.backup.name} ${ai.backup.model}` : ''}${ai.note ? ` (${ai.note})` : ''}`}; mode ${app.locals.aiMode.mode}${app.locals.aiMode.mode === 'supervised' ? ` (${app.locals.aiMode.tasks.size} selected task(s))` : ''}` : `not configured — ${ai.reason}`}`)
 if (cfg.devLogin) console.log('[config] DEV_LOGIN is on: anyone can sign in by email. Local development only.')
+
+// When M91 is configured, ensure every org has m91Enabled and the m91Default rules switched on (one-time, idempotent).
+if (m91.status().state === 'ready') {
+  try {
+    const orgs = db.prepare('SELECT id, settings FROM organizations').all()
+    const defaultRules = Object.fromEntries(Object.entries(ALERT_RULES).map(([k, r]) => [k, { m91: r.m91Default }]))
+    for (const org of orgs) {
+      const s = JSON.parse(org.settings || '{}')
+      const alerts = { ...DEFAULT_ALERT_SETTINGS, ...(s.alerts || {}), rules: { ...defaultRules, ...(s.alerts?.rules || {}) } }
+      if (!alerts.m91Enabled) {
+        alerts.m91Enabled = true
+        s.alerts = alerts
+        db.prepare('UPDATE organizations SET settings = ? WHERE id = ?').run(JSON.stringify(s), org.id)
+        console.log(`[m91] Enabled M91 alerts for org ${org.id}`)
+      }
+    }
+  } catch (e) { console.error('[m91] Failed to enable org M91 settings:', e.message) }
+}
 
 // Events left PENDING by a previous process (crash, restart, redeploy) are replayed now; their handlers are idempotent.
 setTimeout(() => { try { const { recoverOutbox } = app.locals.events; recoverOutbox({ olderThanMs: 0 }) } catch (e) { console.error('[events] recovery failed:', e.message) } }, 2000).unref()
