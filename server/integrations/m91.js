@@ -98,7 +98,7 @@ export function createM91Transport({ apiKey = '', callbackUrl = '', sendLink = '
         if (t.length < 5) t = `TeamPulse: ${t}`
         const description = [body, link].filter(Boolean).join('\n').slice(0, 2000) || undefined
         try {
-          const out = await call('POST', '', { title: t, ...(description ? { description } : {}), severity, responseOptions: [{ label: 'I’m on it', effect: 'SHARED' }, { label: 'Seen', effect: 'PERSONAL' }], other: true, isAutoClose: true, customId: idempotencyKey, ...(callbackUrl ? { callbackUrl } : {}) })
+          const out = await call('POST', '', { title: t, ...(description ? { description } : {}), severity, responseOptions: [{ label: "I'm on it", effect: 'SHARED' }, { label: 'Seen', effect: 'PERSONAL' }], other: true, isAutoClose: true, customId: idempotencyKey, ...(callbackUrl ? { callbackUrl } : {}) })
           return { providerMessageId: out.data?._id ?? null, delivered: out.data?.delivered ?? null, deduplicated: Boolean(out.data?.deduplicated) }
         } catch (error) {
           if (error.code === 'CHANNEL_EMPTY') throw new M91Error('Nobody in the M91 channel can receive alerts yet (members must install M91 and accept).', { status: 409, code: 'CHANNEL_EMPTY' })
@@ -113,7 +113,7 @@ export function createM91Transport({ apiKey = '', callbackUrl = '', sendLink = '
       const payload = {
         phone, title: t, ...(description ? { description } : {}), severity,
         // One person takes it on (closes it), or just acknowledges it; free-text replies stay on.
-        responseOptions: [{ label: 'I’m on it', effect: 'SHARED' }, { label: 'Seen', effect: 'PERSONAL' }],
+        responseOptions: [{ label: "I'm on it", effect: 'SHARED' }, { label: 'Seen', effect: 'PERSONAL' }],
         other: true, isAutoClose: true, customId: idempotencyKey,
         ...(callbackUrl ? { callbackUrl } : {})
       }

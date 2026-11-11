@@ -44,7 +44,7 @@ test('Analyse my day: completed, delivered, progressed and blocked work, highlig
     assert.deepEqual(dg.delivered.map((x) => x.title), ['Update the status page copy'])
     assert.deepEqual(dg.progressed.map((x) => x.title), ['Write partner API guide'])
     assert.deepEqual(dg.blocked.map((x) => x.title), ['Integrate bank payouts'])
-    assert.match(dg.summary, /^You completed “Fix checkout double booking”/)
+    assert.match(dg.summary, /^You completed "Fix checkout double booking"/)
     assert.ok(dg.highlights.some((h) => h.text === 'Fix checkout double booking' && /merged|completed/.test(h.why)))
     assert.ok(dg.missing.some((m) => /Update the status page copy/.test(m.text)), 'delivered without evidence is flagged')
     assert.equal(dg.basis, 'records')
@@ -59,7 +59,7 @@ test('Analyse my day: completed, delivered, progressed and blocked work, highlig
     // Priorities: requested changes first.
     const e = await task(t, s, 'Tune cache TTL'); await start(t, s, e); await submit(t, s, e); await review(t, s, e, 'CHANGES_REQUESTED', 'TTL too long')
     const p = (await t.call('/api/assistant/day', { as: s.employee })).body.priorities
-    assert.match(p[0].text, /requested changes on “Tune cache TTL”/)
+    assert.match(p[0].text, /requested changes on "Tune cache TTL"/)
   } finally { await t.close() }
 })
 
@@ -132,7 +132,7 @@ test('contribution journey: one piece of work across sources, facts vs stage rea
   } finally { await t.close() }
 })
 
-test('Manager Copilot: grounded, scoped to the manager’s people, no rankings', async () => {
+test("Manager Copilot: grounded, scoped to the manager's people, no rankings", async () => {
   const t = await startApp()
   try {
     const s = seedOrg(t.db)

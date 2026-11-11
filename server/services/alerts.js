@@ -246,9 +246,12 @@ export async function handleCallback(db, transport, { token, expectedToken, rawB
   const responses = Array.isArray(alert?.responses) ? alert.responses : []
   const answer = alert?.decision || responses.at(-1) || null
   const ts = now()
+  // Normalize labels for comparison: NFC, trim, lowercase. This handles straight vs. curly apostrophes,
+  // capitalization differences, and leading/trailing whitespace from different M91 encoding paths.
+  const normalizeLabel = (s) => String(s || '').normalize('NFC').trim().toLowerCase()
   transaction(db, () => {
     if (answer && !d.responded_at) {
-      const note = responses.find((r) => r.label === answer.label)?.note ?? null
+      const note = responses.find((r) => normalizeLabel(r.label) === normalizeLabel(answer.label))?.note ?? null
       db.prepare(`UPDATE alert_deliveries SET status = 'DELIVERED', response_label = ?, response_effect = ?, response_note = ?, responded_by = ?, responded_at = ?, updated_at = ? WHERE id = ?`)
         .run(String(answer.label || '').slice(0, 100), answer.effect || null, note ? String(note).slice(0, 1000) : null, typeof answer.by === 'string' ? answer.by.slice(0, 100) : null, answer.at || ts, ts, d.id)
       const task = d.task_id ? db.prepare('SELECT * FROM tasks WHERE id = ?').get(d.task_id) : null

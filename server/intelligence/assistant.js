@@ -3,6 +3,7 @@
 // routes to the underlying record. Questions are understood by a small, explicit intent table; nothing is invented.
 // The AI is used only for an optional write-up of a digest (never for the facts), and only through the existing
 // provider, data-policy and supervised gates. Nothing here counts activity or ranks people.
+import { randomBytes } from 'node:crypto'
 import { json, now } from '../db.js'
 import { AppError, invalid } from '../errors.js'
 import { isAdmin, isManager, requireManager, scopeUserIds, taskScopeSql } from '../access.js'
@@ -16,6 +17,27 @@ import * as v from '../validate.js'
 
 const DAY = 86400000
 const clip = (s, n) => (s == null ? null : String(s).length > n ? `${String(s).slice(0, n)}…` : String(s))
+
+// Server-side confirmation tokens for team membership mutations.
+// Tokens are short-lived (5 min), single-use, and bound to the requesting user and org.
+// Never trust userId/teamId supplied by the client at execution time.
+const CONFIRM_TTL = 5 * 60 * 1000
+const pendingOps = new Map()
+function issueConfirmToken(userId, orgId, action, targetUserId, teamId) {
+  const now2 = Date.now()
+  for (const [k, v] of pendingOps) if (v.expiresAt <= now2) pendingOps.delete(k)
+  const token = randomBytes(32).toString('hex')
+  pendingOps.set(token, { userId, orgId, action, targetUserId, teamId: teamId || null, expiresAt: now2 + CONFIRM_TTL })
+  return token
+}
+function claimConfirmToken(token, userId, orgId) {
+  const op = typeof token === 'string' ? pendingOps.get(token) : null
+  if (!op) return null
+  if (op.expiresAt <= Date.now()) { pendingOps.delete(token); return null }
+  if (op.userId !== userId || op.orgId !== orgId) return null
+  pendingOps.delete(token)
+  return op
+}
 const userName = (db, id) => (id ? db.prepare('SELECT name FROM users WHERE id = ?').get(id)?.name ?? null : null)
 const effective = (db, assessmentId, k) => db.prepare('SELECT * FROM assessment_dimensions WHERE assessment_id = ? AND dimension = ? AND is_effective = 1').get(assessmentId, k)
 
@@ -71,12 +93,12 @@ function priorities(db, ctx, userId) {
   for (const t of open) {
     const d = deriveConditions(t)
     const changes = db.prepare(`SELECT 1 FROM completion_submissions s WHERE s.task_id = ? AND s.status = 'CHANGES_REQUESTED' AND NOT EXISTS (SELECT 1 FROM completion_submissions s2 WHERE s2.task_id = s.task_id AND s2.created_at > s.created_at)`).get(t.id)
-    if (changes) out.push({ rank: 0, text: `Address the requested changes on “${t.title}”`, href: `#/tasks/${t.id}`, why: 'Your manager asked for changes.' })
-    else if (d.overdue) out.push({ rank: 1, text: `Finish or re-plan “${t.title}”`, href: `#/tasks/${t.id}`, why: `${d.hoursOverdue}h past the deadline.` })
-    else if (t.status === 'BLOCKED') out.push({ rank: 3, text: `Follow up on the blocker of “${t.title}”`, href: `#/tasks/${t.id}`, why: 'Blocked work waits on someone; escalate if it is outside your control.' })
-    else if (d.hoursUntilDue !== null && d.hoursUntilDue <= 48) out.push({ rank: 2, text: `Move “${t.title}” forward`, href: `#/tasks/${t.id}`, why: `Due in ${d.hoursUntilDue}h at ${t.progress}%.` })
-    else if (t.status === 'ASSIGNED') out.push({ rank: 5, text: `Start “${t.title}”`, href: `#/tasks/${t.id}`, why: `${t.priority.toLowerCase()} priority, not started.` })
-    else out.push({ rank: 4 + ({ CRITICAL: 0, HIGH: 0.2, MEDIUM: 0.4, LOW: 0.6 })[t.priority], text: `Continue “${t.title}”`, href: `#/tasks/${t.id}`, why: `${t.priority.toLowerCase()} priority, ${t.progress}% done.` })
+    if (changes) out.push({ rank: 0, text: `Address the requested changes on "${t.title}"`, href: `#/tasks/${t.id}`, why: 'Your manager asked for changes.' })
+    else if (d.overdue) out.push({ rank: 1, text: `Finish or re-plan "${t.title}"`, href: `#/tasks/${t.id}`, why: `${d.hoursOverdue}h past the deadline.` })
+    else if (t.status === 'BLOCKED') out.push({ rank: 3, text: `Follow up on the blocker of "${t.title}"`, href: `#/tasks/${t.id}`, why: 'Blocked work waits on someone; escalate if it is outside your control.' })
+    else if (d.hoursUntilDue !== null && d.hoursUntilDue <= 48) out.push({ rank: 2, text: `Move "${t.title}" forward`, href: `#/tasks/${t.id}`, why: `Due in ${d.hoursUntilDue}h at ${t.progress}%.` })
+    else if (t.status === 'ASSIGNED') out.push({ rank: 5, text: `Start "${t.title}"`, href: `#/tasks/${t.id}`, why: `${t.priority.toLowerCase()} priority, not started.` })
+    else out.push({ rank: 4 + ({ CRITICAL: 0, HIGH: 0.2, MEDIUM: 0.4, LOW: 0.6 })[t.priority], text: `Continue "${t.title}"`, href: `#/tasks/${t.id}`, why: `${t.priority.toLowerCase()} priority, ${t.progress}% done.` })
   }
   const pending = db.prepare(`SELECT COUNT(*) AS n FROM evidence_task_links l JOIN external_evidence x ON x.id = l.evidence_id WHERE x.org_id = ? AND (l.contributor_id = ? OR x.actor_user_id = ?) AND l.status = 'suggested'`).get(ctx.orgId, userId, userId).n
   if (pending && userId === ctx.user.id) out.push({ rank: 6, text: `Confirm ${pending} suggested evidence link(s)`, href: '#/evidence', why: 'Confirmed evidence makes your work visible in analyses.' })
@@ -92,16 +114,16 @@ export function dayDigest(db, ctx, { day, tz, userId } = {}) {
   const unlinked = db.prepare(`SELECT * FROM external_evidence x WHERE x.org_id = ? AND x.actor_user_id = ? AND x.status = 'active' AND x.occurred_at >= ? AND x.occurred_at < ?
                                AND NOT EXISTS (SELECT 1 FROM evidence_task_links l WHERE l.evidence_id = x.id AND l.status != 'rejected')`).all(ctx.orgId, uid, w.from, w.to).filter((x) => canSeeEvidence(db, ctx, x))
   const missing = [
-    ...items.filter((i) => i.evidenceMissing).map((i) => ({ text: `“${i.title}” was delivered without evidence or an outcome.`, href: i.href, action: 'Add a link or record the outcome.' })),
+    ...items.filter((i) => i.evidenceMissing).map((i) => ({ text: `"${i.title}" was delivered without evidence or an outcome.`, href: i.href, action: 'Add a link or record the outcome.' })),
     ...(unlinked.length ? [{ text: `${unlinked.length} piece(s) of your app evidence from this day are not linked to a task.`, href: '#/evidence?state=unmatched', action: 'Link them, or leave them if they were not task work.' }] : []),
-    ...items.filter((i) => i.state === 'progressed' && !i.notes.length && !i.evidence.length).map((i) => ({ text: `“${i.title}” moved, but there is no note on what changed.`, href: i.href, action: 'A one-line progress note is enough.' }))
+    ...items.filter((i) => i.state === 'progressed' && !i.notes.length && !i.evidence.length).map((i) => ({ text: `"${i.title}" moved, but there is no note on what changed.`, href: i.href, action: 'A one-line progress note is enough.' }))
   ]
   const highlights = items.filter((i) => i.meaningful.length).map((i) => ({ text: i.title, href: i.href, why: i.meaningful.join('; '), complexity: i.complexity }))
   const parts = []
-  if (by('completed').length) parts.push(`completed ${by('completed').map((i) => `“${i.title}”`).join(', ')}`)
-  if (by('delivered').length) parts.push(`delivered ${by('delivered').map((i) => `“${i.title}”`).join(', ')} for review`)
-  if (by('progressed').length) parts.push(`moved ${by('progressed').map((i) => `“${i.title}”`).join(', ')} forward`)
-  if (by('blocked').length) parts.push(`are blocked on ${by('blocked').map((i) => `“${i.title}”`).join(', ')}`)
+  if (by('completed').length) parts.push(`completed ${by('completed').map((i) => `"${i.title}"`).join(', ')}`)
+  if (by('delivered').length) parts.push(`delivered ${by('delivered').map((i) => `"${i.title}"`).join(', ')} for review`)
+  if (by('progressed').length) parts.push(`moved ${by('progressed').map((i) => `"${i.title}"`).join(', ')} forward`)
+  if (by('blocked').length) parts.push(`are blocked on ${by('blocked').map((i) => `"${i.title}"`).join(', ')}`)
   const you = uid === ctx.user.id ? 'You' : userName(db, uid)
   return {
     day: w.day, from: w.from, to: w.to, person: { id: uid, name: userName(db, uid) },
@@ -162,7 +184,7 @@ export function ask(db, ctx, body = {}) {
   const intent = body.intent ? String(body.intent) : classify(question, team)
   const valid = suggestions(team).map((s) => s.intent)
   if (!intent || !valid.includes(intent)) {
-    return { intent: null, title: 'I can answer these', answer: `I answer from your TeamPulse records, so I understand a fixed set of questions${question ? ` — “${clip(question, 80)}” is not one of them yet` : ''}. Try one of these:`, items: [], suggestions: suggestions(team), basis: 'records' }
+    return { intent: null, title: 'I can answer these', answer: `I answer from your TeamPulse records, so I understand a fixed set of questions${question ? ` — "${clip(question, 80)}" is not one of them yet` : ''}. Try one of these:`, items: [], suggestions: suggestions(team), basis: 'records' }
   }
   return team ? teamAnswer(db, ctx, intent, body) : employeeAnswer(db, ctx, intent, body)
 }
@@ -180,16 +202,16 @@ function employeeAnswer(db, ctx, intent, body) {
     const items = workBetween(db, ctx, me, from, new Date(Date.now() + 60000).toISOString())
     if (intent === 'week') {
       const done = items.filter((i) => ['completed', 'delivered'].includes(i.state))
-      return ans(intent, 'This week', items.length ? `${done.length ? `Delivered: ${done.map((i) => `“${i.title}”`).join(', ')}. ` : ''}${items.filter((i) => i.state === 'progressed').length ? `In progress: ${items.filter((i) => i.state === 'progressed').map((i) => `“${i.title}”`).join(', ')}. ` : ''}${items.filter((i) => i.state === 'blocked').length ? `Blocked: ${items.filter((i) => i.state === 'blocked').map((i) => `“${i.title}”`).join(', ')}.` : ''}`.trim() : 'No recorded work in the last 7 days.',
+      return ans(intent, 'This week', items.length ? `${done.length ? `Delivered: ${done.map((i) => `"${i.title}"`).join(', ')}. ` : ''}${items.filter((i) => i.state === 'progressed').length ? `In progress: ${items.filter((i) => i.state === 'progressed').map((i) => `"${i.title}"`).join(', ')}. ` : ''}${items.filter((i) => i.state === 'blocked').length ? `Blocked: ${items.filter((i) => i.state === 'blocked').map((i) => `"${i.title}"`).join(', ')}.` : ''}`.trim() : 'No recorded work in the last 7 days.',
         items.map((i) => ({ text: i.title, detail: `${i.state}${i.complexity ? ` · ${i.complexity}` : ''}${i.outcome !== 'none' ? ` · outcome ${i.outcome}` : ''}`, href: i.href })))
     }
     if (intent === 'difficult') {
       const hard = items.filter((i) => i.complexity && ['L3', 'L4'].includes(i.complexity) || i.meaningful.some((m) => m.startsWith('problem-solving')))
-      return ans(intent, 'Difficult problems', hard.length ? 'From the analyses of your recent work:' : 'None of your recent work has been analysed as complex yet. Analyse a task (or “Analyse my day”) to find out — complexity is judged from evidence, not labels.',
+      return ans(intent, 'Difficult problems', hard.length ? 'From the analyses of your recent work:' : 'None of your recent work has been analysed as complex yet. Analyse a task (or "Analyse my day") to find out — complexity is judged from evidence, not labels.',
         hard.map((i) => ({ text: i.title, detail: i.meaningful.join('; ') || i.complexity, href: i.href })))
     }
     const ranked = items.filter((i) => i.meaningful.length).sort((a, b) => (b.outcome === 'verified') - (a.outcome === 'verified') || (b.complexity || '').localeCompare(a.complexity || ''))
-    return ans(intent, 'Most meaningful contribution', ranked.length ? `“${ranked[0].title}” — ${ranked[0].meaningful.join('; ')}.` : 'Nothing in the last 7 days is backed by a verified outcome, a complexity analysis or a merged change yet.',
+    return ans(intent, 'Most meaningful contribution', ranked.length ? `"${ranked[0].title}" — ${ranked[0].meaningful.join('; ')}.` : 'Nothing in the last 7 days is backed by a verified outcome, a complexity analysis or a merged change yet.',
       ranked.slice(0, 3).map((i) => ({ text: i.title, detail: i.meaningful.join('; '), href: i.href })), { note: 'Chosen by verified outcomes first, then analysed complexity — never by how many tasks or events.' })
   }
   if (intent === 'pending') {
@@ -210,14 +232,14 @@ function employeeAnswer(db, ctx, intent, body) {
       const q = String(body.question || '').toLowerCase().replace(/\b(find|evidence|proof|for|the|task|this|my)\b/g, ' ').split(/\W+/).filter((w) => w.length > 2)
       const mine = db.prepare(`SELECT t.* FROM tasks t WHERE ${scope.sql} AND t.assignee_id = ? AND t.status != 'CANCELLED' ORDER BY t.updated_at DESC LIMIT 100`).all(...scope.params, me)
       task = q.length ? mine.map((t) => ({ t, n: q.filter((w) => t.title.toLowerCase().includes(w)).length })).filter((x) => x.n).sort((a, b) => b.n - a.n)[0]?.t : null
-      if (!task) return ans(intent, 'Find evidence', 'Which task? Name it in the question (e.g. “Find evidence for checkout latency”) or ask from the task page.', mine.slice(0, 5).map((t) => ({ text: t.title, href: `#/tasks/${t.id}`, detail: 'ask about this task', intent: 'find_evidence', taskId: t.id })))
+      if (!task) return ans(intent, 'Find evidence', 'Which task? Name it in the question (e.g. "Find evidence for checkout latency") or ask from the task page.', mine.slice(0, 5).map((t) => ({ text: t.title, href: `#/tasks/${t.id}`, detail: 'ask about this task', intent: 'find_evidence', taskId: t.id })))
     }
     const j = taskJourney(db, ctx, task.id)
     const steps = j.steps.filter((s) => s.source !== 'teampulse' || s.id.startsWith('impact:') || s.id.startsWith('submission:'))
     const attachments = db.prepare(`SELECT * FROM evidence WHERE task_id = ? ORDER BY created_at`).all(task.id)
     const cands = db.prepare(`SELECT * FROM external_evidence x WHERE x.org_id = ? AND x.actor_user_id = ? AND x.status = 'active' AND x.occurred_at >= ? AND NOT EXISTS (SELECT 1 FROM evidence_task_links l WHERE l.evidence_id = x.id AND l.status != 'rejected') ORDER BY x.occurred_at DESC LIMIT 5`)
       .all(ctx.orgId, task.assignee_id || me, new Date(Date.parse(task.created_at) - 3 * DAY).toISOString()).filter((x) => canSeeEvidence(db, ctx, x))
-    return ans(intent, `Evidence for “${task.title}”`, `${steps.length + attachments.length ? `${steps.length + attachments.length} piece(s) of evidence are attached or linked.` : 'Nothing is attached or linked yet.'}${j.missing.length ? ` Missing: ${j.missing[0]}` : ''}`,
+    return ans(intent, `Evidence for "${task.title}"`, `${steps.length + attachments.length ? `${steps.length + attachments.length} piece(s) of evidence are attached or linked.` : 'Nothing is attached or linked yet.'}${j.missing.length ? ` Missing: ${j.missing[0]}` : ''}`,
       [...attachments.map((a) => ({ text: a.label || a.file_name || a.url, detail: 'attached to the task', href: a.kind === 'link' ? a.url : `/api/evidence/${a.id}/download` })),
         ...steps.map((s) => ({ text: s.title, detail: `${s.stage}${s.linkedBy ? ` · ${s.linkedBy}` : ''}`, href: s.href })),
         ...cands.map((x) => ({ text: x.title, detail: `possibly related, not linked (${x.app}) — link it on My work evidence`, href: '#/evidence?state=unmatched' }))],
@@ -343,32 +365,38 @@ function teamAnswer(db, ctx, intent, body) {
   if (intent === 'add_to_team' || intent === 'remove_from_team') {
     const q = String(body.question || '').toLowerCase()
     const emailMatch = q.match(/([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/)
-    // If a confirmed action is passed (after user confirmed), execute it
-    if (body.confirmed && body.action === 'add_to_team' && body.userId && body.teamId) {
-      if (!isAdmin(ctx) && !ctx.managedTeamIds.includes(body.teamId)) return ans(intent, 'Not authorized', 'You can only add employees to teams you manage.', [], { error: true })
-      const target = db.prepare(`SELECT u.id, u.name, m.role, m.team_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.org_id = ? AND m.user_id = ? AND m.status = 'active'`).get(ctx.orgId, body.userId)
-      if (!target) return ans(intent, 'Not found', 'That employee is not in this organization.', [], { error: true })
-      if (target.role !== 'employee') return ans(intent, 'Cannot add', 'Only employees can be moved between teams. Managers and admins manage their own team assignment.', [], { error: true })
-      const team = db.prepare('SELECT * FROM teams WHERE id = ? AND org_id = ?').get(body.teamId, ctx.orgId)
-      if (!team) return ans(intent, 'Not found', 'That team was not found.', [], { error: true })
-      db.prepare('UPDATE memberships SET team_id = ?, updated_at = ? WHERE org_id = ? AND user_id = ? AND status = ?').run(body.teamId, now(), ctx.orgId, body.userId, 'active')
-      return ans('add_to_team', 'Done', `${target.name} has been added to ${team.name}.`, [], { executed: true, userId: body.userId, teamId: body.teamId })
+    // Execute a confirmed action using a server-issued confirmation token (never trust client-supplied userId/teamId).
+    if (body.confirmToken) {
+      const op = claimConfirmToken(String(body.confirmToken), ctx.user.id, ctx.orgId)
+      if (!op) return ans(intent, 'Confirmation expired', 'This confirmation has expired or was already used. Please start over.', [], { error: true })
+      if (op.action === 'add_to_team') {
+        if (!isAdmin(ctx) && !ctx.managedTeamIds.includes(op.teamId)) return ans(intent, 'Not authorized', 'You can only add employees to teams you manage.', [], { error: true })
+        const target = db.prepare(`SELECT u.id, u.name, m.role, m.team_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.org_id = ? AND m.user_id = ? AND m.status = 'active'`).get(ctx.orgId, op.targetUserId)
+        if (!target) return ans(intent, 'Not found', 'That employee is no longer in this organization.', [], { error: true })
+        if (target.role !== 'employee') return ans(intent, 'Cannot add', 'Only employees can be moved between teams.', [], { error: true })
+        const team = db.prepare('SELECT * FROM teams WHERE id = ? AND org_id = ?').get(op.teamId, ctx.orgId)
+        if (!team) return ans(intent, 'Not found', 'That team was not found.', [], { error: true })
+        db.prepare('UPDATE memberships SET team_id = ?, updated_at = ? WHERE org_id = ? AND user_id = ? AND status = ?').run(op.teamId, now(), ctx.orgId, op.targetUserId, 'active')
+        return ans('add_to_team', 'Done', `${target.name} has been added to ${team.name}.`, [], { executed: true })
+      }
+      if (op.action === 'remove_from_team') {
+        const target = db.prepare(`SELECT u.id, u.name, m.role, m.team_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.org_id = ? AND m.user_id = ? AND m.status = 'active'`).get(ctx.orgId, op.targetUserId)
+        if (!target) return ans(intent, 'Not found', 'That employee is no longer in this organization.', [], { error: true })
+        if (!isAdmin(ctx) && !ctx.managedTeamIds.includes(target.team_id)) return ans(intent, 'Not authorized', 'You can only remove employees from teams you manage.', [], { error: true })
+        db.prepare('UPDATE memberships SET team_id = NULL, updated_at = ? WHERE org_id = ? AND user_id = ? AND status = ?').run(now(), ctx.orgId, op.targetUserId, 'active')
+        return ans('remove_from_team', 'Done', `${target.name} has been removed from their team.`, [], { executed: true })
+      }
+      return ans(intent, 'Unknown action', 'This confirmation is not valid.', [], { error: true })
     }
-    if (body.confirmed && body.action === 'remove_from_team' && body.userId) {
-      const target = db.prepare(`SELECT u.id, u.name, m.role, m.team_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.org_id = ? AND m.user_id = ? AND m.status = 'active'`).get(ctx.orgId, body.userId)
-      if (!target) return ans(intent, 'Not found', 'That employee is not in this organization.', [], { error: true })
-      if (!isAdmin(ctx) && !ctx.managedTeamIds.includes(target.team_id)) return ans(intent, 'Not authorized', 'You can only remove employees from teams you manage.', [], { error: true })
-      db.prepare('UPDATE memberships SET team_id = NULL, updated_at = ? WHERE org_id = ? AND user_id = ? AND status = ?').run(now(), ctx.orgId, body.userId, 'active')
-      return ans('remove_from_team', 'Done', `${target.name} has been removed from their team.`, [], { executed: true, userId: body.userId })
-    }
-    // Otherwise, look up the employee and return a pending confirmation
+    // Otherwise, look up the employee and return a pending confirmation with a server-issued token.
     if (!emailMatch) return ans(intent, 'Employee not specified', 'Please include the employee\'s email address in your message, e.g. "Add alice@company.com to my team".', [])
     const target = db.prepare(`SELECT u.id, u.name, u.email, m.role, m.team_id, t.name AS team_name FROM memberships m JOIN users u ON u.id = m.user_id LEFT JOIN teams t ON t.id = m.team_id WHERE m.org_id = ? AND lower(u.email) = ? AND m.status = 'active'`).get(ctx.orgId, emailMatch[1])
     if (!target) return ans(intent, 'Employee not found', `No employee with email ${emailMatch[1]} is registered in this organization. They may need to be invited first.`, [], { notFound: true, email: emailMatch[1] })
     if (intent === 'remove_from_team') {
       if (!target.team_id) return ans(intent, 'Not in a team', `${target.name} is not currently in any team.`, [])
       if (!isAdmin(ctx) && !ctx.managedTeamIds.includes(target.team_id)) return ans(intent, 'Not authorized', `${target.name} is in ${target.team_name}, which you do not manage.`, [], { error: true })
-      return ans(intent, 'Confirm removal', `Remove ${target.name} (${target.email}) from ${target.team_name}?`, [], { pendingConfirmation: true, action: 'remove_from_team', userId: target.id, teamId: target.team_id, teamName: target.team_name, personName: target.name })
+      const confirmToken = issueConfirmToken(ctx.user.id, ctx.orgId, 'remove_from_team', target.id, target.team_id)
+      return ans(intent, 'Confirm removal', `Remove ${target.name} (${target.email}) from ${target.team_name}?`, [], { pendingConfirmation: true, confirmToken, action: 'remove_from_team', teamName: target.team_name, personName: target.name })
     }
     // add_to_team
     const myTeams = isAdmin(ctx) ? db.prepare('SELECT * FROM teams WHERE org_id = ? ORDER BY name').all(ctx.orgId) : db.prepare(`SELECT * FROM teams WHERE org_id = ? AND id IN (${ctx.managedTeamIds.map(() => '?').join(',') || "''"}) ORDER BY name`).all(ctx.orgId, ...ctx.managedTeamIds)
@@ -380,7 +408,8 @@ function teamAnswer(db, ctx, intent, body) {
       return ans(intent, 'Which team?', `${target.name} (${target.email}) found. Which team should they join?${target.team_name ? ` They are currently in ${target.team_name}.` : ''}`, myTeams.map((t) => ({ text: t.name, detail: 'click to select this team', teamId: t.id, intent: 'add_to_team', userId: target.id, email: target.email })), { pendingTeamSelection: true })
     }
     if (!isAdmin(ctx) && !ctx.managedTeamIds.includes(targetTeam.id)) return ans(intent, 'Not authorized', `You do not manage ${targetTeam.name}.`, [], { error: true })
-    return ans('add_to_team', 'Confirm addition', `Add ${target.name} (${target.email}) to ${targetTeam.name}?${target.team_name ? ` They are currently in ${target.team_name}.` : ''}`, [], { pendingConfirmation: true, action: 'add_to_team', userId: target.id, teamId: targetTeam.id, teamName: targetTeam.name, personName: target.name })
+    const confirmToken = issueConfirmToken(ctx.user.id, ctx.orgId, 'add_to_team', target.id, targetTeam.id)
+    return ans('add_to_team', 'Confirm addition', `Add ${target.name} (${target.email}) to ${targetTeam.name}?${target.team_name ? ` They are currently in ${target.team_name}.` : ''}`, [], { pendingConfirmation: true, confirmToken, action: 'add_to_team', teamName: targetTeam.name, personName: target.name })
   }
 
   throw invalid('Unknown question.')

@@ -222,7 +222,7 @@ export async function resetPassword(db, body) {
 /** Signed in: change the password (current one required); other sessions end. */
 export async function changePassword(db, user, body, currentSessionToken) {
   const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id)
-  if (!fresh.password_hash) throw new AppError(409, 'no_password', 'Your account has no password yet. Use “Add password sign-in”.')
+  if (!fresh.password_hash) throw new AppError(409, 'no_password', 'Your account has no password yet. Use "Add password sign-in".')
   if (!(await verifyPassword(String(body?.currentPassword || ''), fresh.password_hash))) throw new AppError(401, 'invalid_login', 'Your current password is incorrect.')
   checkPasswordPolicy(body?.password, { email: fresh.email, name: fresh.name })
   if (body?.password !== body?.confirmPassword) throw invalid('The two passwords do not match.', { field: 'confirmPassword' })
@@ -284,7 +284,7 @@ export async function registerForInvitation(db, body, invitedEmail) {
   checkPasswordPolicy(body?.password, { email, name })
   const hash = await hashPassword(body.password)
   const existing = usersByEmail(db, email)
-  if (existing.some((u) => u.email_verified)) throw invalid('An account with this email already exists. Sign in to accept the invitation.', { field: 'email' })
+  if (existing.some((u) => u.email_verified)) throw new AppError(409, 'email_exists_sign_in', 'An account with this email already exists. Sign in to accept the invitation.')
   const ts = now()
   let user = existing[0]
   if (user) {

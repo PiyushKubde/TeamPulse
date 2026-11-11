@@ -19,20 +19,33 @@ test('GET /api/invite/:token returns valid info for a pending invitation', async
     assert.equal(info.body.email, 'jane@example.com')
     assert.equal(info.body.role, 'employee')
     assert.equal(info.body.orgName, 'Acme')
-    assert.equal(info.body.hasAccount, false, 'new invitee has no account')
+    // hasAccount is not returned to unauthenticated callers (privacy fix)
+    assert.equal(info.body.hasAccount, undefined, 'unauthenticated callers must not learn account existence')
   } finally { await t.close() }
 })
 
-test('GET /api/invite/:token reports hasAccount=true for existing verified users', async () => {
+test('GET /api/invite/:token does not reveal hasAccount to unauthenticated callers even when account exists', async () => {
   const t = await startApp()
   try {
     const s = seedOrg(t.db)
-    // Create an account for the invitee first
     makeUser(t.db, { name: 'Existing Jane', email: 'jane@example.com' })
     const inv = await t.call('/api/invitations', { method: 'POST', as: s.manager, body: { email: 'jane@example.com', role: 'employee' } })
     const info = await t.call(`/api/invite/${inv.body.token}`)
     assert.equal(info.body.valid, true)
-    assert.equal(info.body.hasAccount, true)
+    assert.equal(info.body.hasAccount, undefined, 'account existence must not be revealed to unauthenticated callers')
+  } finally { await t.close() }
+})
+
+test('GET /api/invite/:token returns hasAccount=true when authenticated with matching email', async () => {
+  const t = await startApp()
+  try {
+    const s = seedOrg(t.db)
+    const existingUser = makeUser(t.db, { name: 'Existing Jane', email: 'jane@example.com' })
+    const inv = await t.call('/api/invitations', { method: 'POST', as: s.manager, body: { email: 'jane@example.com', role: 'employee' } })
+    // Authenticated as the invited user — their own hasAccount is revealed
+    const info = await t.call(`/api/invite/${inv.body.token}`, { as: existingUser })
+    assert.equal(info.body.valid, true)
+    assert.equal(info.body.hasAccount, true, 'authenticated matching-email caller sees hasAccount')
   } finally { await t.close() }
 })
 
@@ -238,14 +251,19 @@ test('manager copilot: add_to_team returns pending confirmation before executing
   } finally { await t.close() }
 })
 
-test('manager copilot: add_to_team executes when confirmed', async () => {
+test('manager copilot: add_to_team executes when confirmed with server token', async () => {
   const t = await startApp()
   try {
     const s = seedOrg(t.db)
-    // Admin confirms adding outsider to teamA
-    const r = await t.call('/api/assistant/ask', { method: 'POST', as: s.admin, body: { team: true, question: `add ${s.outsider.email} to team`, confirmed: true, action: 'add_to_team', userId: s.outsider.id, teamId: s.teamA } })
-    assert.equal(r.status, 200, r.text)
-    assert.equal(r.body.executed, true, 'executed flag should be in the response')
+    // Step 1: get pendingConfirmation with a server-issued confirmToken (teamId required when multiple teams exist)
+    const r1 = await t.call('/api/assistant/ask', { method: 'POST', as: s.admin, body: { team: true, question: `add ${s.outsider.email} to team`, teamId: s.teamA } })
+    assert.equal(r1.status, 200, r1.text)
+    assert.equal(r1.body.pendingConfirmation, true)
+    assert.ok(r1.body.confirmToken, 'confirmToken must be returned')
+    // Step 2: execute with the token (no userId/teamId in the body — server resolves from token)
+    const r2 = await t.call('/api/assistant/ask', { method: 'POST', as: s.admin, body: { team: true, intent: 'add_to_team', confirmToken: r1.body.confirmToken } })
+    assert.equal(r2.status, 200, r2.text)
+    assert.equal(r2.body.executed, true, 'executed flag should be in the response')
     const m = t.db.prepare(`SELECT team_id FROM memberships WHERE user_id = ? AND org_id = ?`).get(s.outsider.id, s.org.id)
     assert.equal(m.team_id, s.teamA, 'outsider moved to teamA after confirmed add')
   } finally { await t.close() }
@@ -265,13 +283,19 @@ test('manager copilot: remove_from_team returns pending confirmation before exec
   } finally { await t.close() }
 })
 
-test('manager copilot: remove_from_team executes when confirmed', async () => {
+test('manager copilot: remove_from_team executes when confirmed with server token', async () => {
   const t = await startApp()
   try {
     const s = seedOrg(t.db)
-    const r = await t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, question: 'remove from team', confirmed: true, action: 'remove_from_team', userId: s.employee.id } })
-    assert.equal(r.status, 200, r.text)
-    assert.equal(r.body.executed, true, 'executed flag should be in the response')
+    // Step 1: get pendingConfirmation with a server-issued confirmToken
+    const r1 = await t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, question: `remove employee ${s.employee.email} from team` } })
+    assert.equal(r1.status, 200, r1.text)
+    assert.equal(r1.body.pendingConfirmation, true)
+    assert.ok(r1.body.confirmToken, 'confirmToken must be returned')
+    // Step 2: execute with the token
+    const r2 = await t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, intent: 'remove_from_team', confirmToken: r1.body.confirmToken } })
+    assert.equal(r2.status, 200, r2.text)
+    assert.equal(r2.body.executed, true, 'executed flag should be in the response')
     const m = t.db.prepare(`SELECT team_id FROM memberships WHERE user_id = ? AND org_id = ?`).get(s.employee.id, s.org.id)
     assert.equal(m.team_id, null, 'employee removed from team after confirmation')
   } finally { await t.close() }
@@ -283,5 +307,85 @@ test('employee cannot use team copilot', async () => {
     const s = seedOrg(t.db)
     const r = await t.call('/api/assistant/ask', { method: 'POST', as: s.employee, body: { team: true, question: 'who is on my team?' } })
     assert.equal(r.status, 403)
+  } finally { await t.close() }
+})
+
+// ───────────────────── Confirmation token security ─────────────────────
+
+test('confirmToken: expired token is rejected', async () => {
+  const t = await startApp()
+  try {
+    const s = seedOrg(t.db)
+    const r1 = await t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, question: `remove employee ${s.employee.email} from team` } })
+    assert.ok(r1.body.confirmToken)
+    // Tamper: use a fake token
+    const r2 = await t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, intent: 'remove_from_team', confirmToken: 'not-a-real-token-at-all' } })
+    assert.equal(r2.status, 200)
+    assert.equal(r2.body.error, true, 'fake token must be rejected')
+    // Real token still works (not consumed by fake attempt)
+    const r3 = await t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, intent: 'remove_from_team', confirmToken: r1.body.confirmToken } })
+    assert.equal(r3.body.executed, true, 'real token still valid')
+  } finally { await t.close() }
+})
+
+test('confirmToken: token is single-use (cannot be reused)', async () => {
+  const t = await startApp()
+  try {
+    const s = seedOrg(t.db)
+    const r1 = await t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, question: `remove employee ${s.employee.email} from team` } })
+    const token = r1.body.confirmToken
+    assert.ok(token)
+    // First use — succeeds
+    const r2 = await t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, intent: 'remove_from_team', confirmToken: token } })
+    assert.equal(r2.body.executed, true)
+    // Second use with same token — rejected
+    const r3 = await t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, intent: 'remove_from_team', confirmToken: token } })
+    assert.equal(r3.body.error, true, 'reused token must be rejected')
+  } finally { await t.close() }
+})
+
+test('confirmToken: cross-user token theft is rejected', async () => {
+  const t = await startApp()
+  try {
+    const s = seedOrg(t.db)
+    // Manager gets a token for their operation
+    const r1 = await t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, question: `remove employee ${s.employee.email} from team` } })
+    const token = r1.body.confirmToken
+    assert.ok(token)
+    // Admin tries to use the manager's token — different userId, must be rejected
+    const r2 = await t.call('/api/assistant/ask', { method: 'POST', as: s.admin, body: { team: true, intent: 'remove_from_team', confirmToken: token } })
+    assert.equal(r2.body.error, true, 'cross-user token theft must be rejected')
+    // Manager can still use their own token
+    const r3 = await t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, intent: 'remove_from_team', confirmToken: token } })
+    assert.equal(r3.body.executed, true)
+  } finally { await t.close() }
+})
+
+test('confirmToken: confirmed: true alone is no longer accepted', async () => {
+  const t = await startApp()
+  try {
+    const s = seedOrg(t.db)
+    // Old insecure pattern: confirmed: true with client-supplied userId/teamId
+    const r = await t.call('/api/assistant/ask', { method: 'POST', as: s.admin, body: { team: true, intent: 'add_to_team', confirmed: true, action: 'add_to_team', userId: s.outsider.id, teamId: s.teamA } })
+    assert.equal(r.status, 200)
+    // Should NOT execute (no confirmToken supplied)
+    assert.ok(!r.body.executed, 'confirmed: true alone must not execute the action')
+    const m = t.db.prepare(`SELECT team_id FROM memberships WHERE user_id = ? AND org_id = ?`).get(s.outsider.id, s.org.id)
+    assert.notEqual(m.team_id, s.teamA, 'membership must not change without a valid confirmToken')
+  } finally { await t.close() }
+})
+
+test('POST /auth/register-and-accept: returns email_exists_sign_in when account exists', async () => {
+  const t = await startApp()
+  try {
+    const s = seedOrg(t.db)
+    makeUser(t.db, { name: 'Existing Bob', email: 'bob@example.com' })
+    const inv = await t.call('/api/invitations', { method: 'POST', as: s.manager, body: { email: 'bob@example.com', role: 'employee' } })
+    const r = await t.call('/auth/register-and-accept', {
+      method: 'POST',
+      body: { name: 'Bob Dup', password: 'CorrectHorseBatteryStaple!1', confirmPassword: 'CorrectHorseBatteryStaple!1', inviteToken: inv.body.token }
+    })
+    assert.equal(r.status, 409)
+    assert.equal(r.body.error.code, 'email_exists_sign_in')
   } finally { await t.close() }
 })

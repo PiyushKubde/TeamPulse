@@ -205,8 +205,16 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     if (!inv) return { valid: false, reason: 'invalid' }
     if (inv.expires_at < now()) return { valid: false, reason: 'expired' }
     // Check if an account with this email already exists
-    const hasAccount = Boolean(db.prepare('SELECT 1 FROM users WHERE lower(email) = ? AND email_verified = 1').get(inv.email.toLowerCase()))
-    return { valid: true, id: inv.id, email: inv.email, role: inv.role, orgName: inv.org_name, invitedBy: inv.invited_by_name, hasAccount, expiresAt: inv.expires_at }
+    // Only reveal hasAccount to an already-authenticated caller whose session email matches the invitation email.
+    // Unauthenticated callers must not learn whether an email address is registered.
+    const callerEmail = req.user?.email?.toLowerCase()
+    const invEmail = inv.email.toLowerCase()
+    const hasAccount = (callerEmail && callerEmail === invEmail)
+      ? Boolean(db.prepare('SELECT 1 FROM users WHERE lower(email) = ? AND email_verified = 1').get(invEmail))
+      : undefined
+    const resp = { valid: true, id: inv.id, email: inv.email, role: inv.role, orgName: inv.org_name, invitedBy: inv.invited_by_name, expiresAt: inv.expires_at }
+    if (hasAccount !== undefined) resp.hasAccount = hasAccount
+    return resp
   }))
   // Register a new account using an invitation token (no email verification step needed)
   authPost('/auth/register-and-accept', async (req, res) => {
