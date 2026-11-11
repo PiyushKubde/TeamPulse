@@ -97,7 +97,7 @@ export async function openTaskForm(existing = null, { defaultTeamId = null, defa
   const preAssignee = t.assigneeId || defaultAssigneeId
 
   // When editing, show all fields; when creating, use progressive disclosure.
-  const moreOpen = existing || Boolean(t.expectedOutcome || t.priority || t.dueAt || preTeam || preAssignee)
+  const moreOpen = existing || Boolean(t.expectedOutcome || t.priority || t.dueAt || (myTeams.length > 1 && preTeam) || preAssignee)
 
   const detailFields = html`
     <div class="field"><label for="t-out">${isRequest ? 'What outcome do you expect?' : 'Expected outcome'} <span class="field-hint">optional</span></label><textarea id="t-out" name="expectedOutcome" maxlength="2000" rows="2" placeholder="What will be different when this is done? This helps the team assess impact later.">${t.expectedOutcome || ''}</textarea></div>
