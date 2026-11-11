@@ -393,3 +393,210 @@ environment keys; value never read).
 **Verified locally only [LOCAL]/[SIMULATED]:** all signed-in product logic (roles, isolation, tasks, permissions, requests, blockers, reviews, impact, reports, dashboards) — 53/53 tests, browser e2e, 162-screen crawl; alert de-duplication; outbox replay after a crash; automation and intake rules with stand-ins.
 
 **Awaiting real accounts:** signed-in admin/manager/employee journeys and session persistence in production (owner's Google accounts); Slack/Gmail notifications (A), weekly report delivery (B), Gmail/Slack intake (C), events reaching user-built flows (D) — owner's connected test accounts and approval per send; M91 — an API key.
+
+
+# Phase 1 — AI Work Measurement Engine (2026-11-09, feature branch, not deployed)
+
+Design and configuration: [docs/ai-work-measurement.md](ai-work-measurement.md).
+
+## Already present before this phase (reused, not duplicated)
+
+Impact records with measured / estimated / no value, manager verification, shared outcome keys and contributors (team totals count a shared outcome once); completion review separate from impact; blockers with external flag and "not counted against the person"; append-only task events; audit log; event outbox; dashboards deliberately without scores. **Missing:** any AI layer, complexity, quality/ownership/problem-solving/collaboration assessment, employee confirmation, disputes, assessment history.
+
+## Added
+
+| Area | Result |
+| --- | --- |
+| Provider abstraction | `server/ai/provider.js`: Anthropic (official SDK 1.3.0, pinned; structured outputs; timeout; retries; typed error mapping; server-side refusal fallback; explicit base URL) · simulated dev provider (refused in production, labelled everywhere) · not configured (clear 503) |
+| Engine | Deterministic evidence pack, insufficient-evidence gate (no model call), SHA-256 input dedupe, async runs with status, validation + one retry, re-queue up to 3 attempts, recovery from the scheduled job, model/prompt/rubric versions and usage recorded per run |
+| Guardrails | Invented citations removed; no rating without evidence; complexity not raised by labels or self-description alone; quality capped by regressions / failing tests / rework; external blockers → not applicable, never a fault; impact > 3 only with verified outcome; shared outcomes labelled and counted once; invented numbers dropped |
+| Employee UX | Task card: "Analyse my work", what TeamPulse understood, complexity + 5 dimensions with reasons/confidence/evidence links, claimed / estimated / evidence-supported / verified impact, context, missing information, rules applied; confirm, suggest correction, add context (re-analyses), dispute; own profile |
+| Manager UX | Same card with approve / adjust (reason required) / dispute and the employee's proposal side by side; team overview (alphabetical, no ranking) on its page and the dashboard; person profile with narrative, complexity mix, per-dimension highlights with reasons, verified vs estimated outcomes, blocker context |
+| Data | Migration 007 — five new tables, nothing altered; verified on a copy of a seeded 006 database: existing schema and rows unchanged, integrity ok, 0 FK violations, previous build runs on the migrated database |
+
+## Tests executed (actual)
+
+| Suite | Result |
+| --- | --- |
+| `npm test` (all existing + 12 new measurement tests: scenarios 1–10, dedupe, failures, not configured, schema, migration additivity, production refusal of the simulator) | **78/78 pass** (66 existing + 12 new) |
+| `npm run test:e2e` (existing journeys) | pass |
+| `npm run test:e2e:auth` | pass |
+| `npm run test:e2e:measurement` (employee + manager, phone width) — **simulated analyser** | pass |
+| Live AI provider smoke test | **Not run: no AI credentials are configured for this app.** All AI behaviour is proven with deterministic scripted providers only |
+
+A bug found by the browser run and fixed: "added a regression test" was read as a regression and capped quality; the rule now treats regression tests as validation (test added).
+
+## Remaining before production
+
+1. An `ANTHROPIC_API_KEY` (with `AI_PROVIDER=anthropic`) and one supervised live smoke test on a real task.
+2. Owner approval to deploy (backup is taken by the scheduled job; migration 007 is additive).
+3. Phase 2 candidates: role-specific rubrics, reading evidence contents, normalized GitHub/Slack/Gmail/Calendar/Sheets evidence through ViaSocket, period-level summaries, evaluation set for prompt changes.
+
+
+# Phase 1.1 — Live-AI readiness and evaluation (2026-11-09, feature branch, not deployed, no live API call)
+
+## Audit findings (and what was done)
+
+| # | Finding | Severity | Action |
+|---|---|---|---|
+| 1 | The SDK client inherited environment behaviour: `ANTHROPIC_LOG=debug` could log requests; `ANTHROPIC_OPEN_TELEMETRY_*` could switch on trace content capture | Medium (data leakage) | Client now pinned: explicit key + base URL, `logLevel: 'warn'`, `openTelemetry: false` (tested) |
+| 2 | Fallback answers were recorded only as `model`; no requested model or hops | Medium (transparency) | Served model, requested model and hops are stored on the run and assessment and shown as a badge |
+| 3 | Error messages for 401/403/404/400 were generic | Low | Specific, actionable messages (key / workspace / AI_MODEL / API reason); never include the key (tested) |
+| 4 | Automatic analysis on submit/approve would start sending every task to the provider the moment a key is set | High (consent / supervision) | `AI_MODE` with **supervised** as the default for a real provider: selected tasks only, owner check, admins only, no automatic runs, no events/notifications |
+| 5 | Re-analysis could hide a manager's adjustment (it lives on the superseded assessment) | Medium (audit visibility) | Earlier analyses now carry their human responses on the card |
+| 6 | Complexity corroboration was judged by item kind, so the employee's own comment, or a bare "approved" review, counted as corroboration; L3 needed none at all | High (fairness) | Corroboration is judged by author and content; L3+ needs it (else L2). Found by the evaluation dataset's "inflated self-description" case |
+| 7 | Ratings could cite only the task description | Medium | Treated as no evidence |
+| 8 | Problem-solving / collaboration 4–5 could rest on self-description only | Medium | Capped at 3 without corroboration (ownership exempt) |
+| 9 | The number check used `includes` on the whole JSON pack: ids and timestamps could "contain" an invented number | Medium (unsupported claims) | Checked against human-written text with number boundaries (tested with a timestamp-only number) |
+| 10 | Keyword quality detection flagged "no regressions", "fixed the failing tests"; missed "test failures", "CI is red" | Medium | Narrow detector with negation/fix handling and a phrase table test; structured signals (reopen, changes requested) remain primary. No structured test results exist yet — not invented |
+| 11 | Confidence is model-reported and uncalibrated, but was shown as plain "confidence" | Low | Labelled "model-reported"; capped at 0.6 when only self-reported evidence supports it |
+| 12 | Guardrail changes were not versioned or part of the dedupe hash | Medium (reproducibility) | `GUARDRAIL_VERSION` (now v4) and prompt `v2` in the hash and stored per run/assessment |
+| 13 | Audit rows for assessments had no actor | Low | The requester is recorded |
+| — | Verified correct, unchanged: schema (structured-output compatible: no numeric/length constraints, `additionalProperties:false` everywhere), validator, insufficient-evidence gate, dedupe, async runs, retries/recovery, persistence and history, employee/manager flows, rate limit (30 analyses/hour/user) | — | — |
+
+## Provider readiness (no live call)
+
+- **Model:** `claude-opus-5-5` is a current model in the Claude API reference and in the installed SDK's `Model` type (SDK 1.3.0).
+- **Request shape:** the real provider was run against a local fake Messages API. It sends `model`, `max_tokens` 16000, `output_config: {effort: 'medium', format: {type: 'json_schema', schema}}` and `fallbacks: 'default'` with the `server-side-fallback-2026-07-01` beta header. It sends no thinking or sampling parameters. The SDK sends the key as a bearer credential with API version `2026-10-21`.
+- **Behaviour checked:**
+  - Thinking blocks are ignored and the text is parsed.
+  - Usage is recorded, including cache fields.
+  - A 401 is not retried and gives a clear error.
+  - 500, 529 and 429 are retried by the SDK.
+  - Timeouts surface as retryable.
+  - Refusals, truncation and non-JSON answers are rejected.
+- **Through the app:** a rejected key fails the run with a clear message and creates no assessment or notification. A fallback answer is shown with the model that actually answered.
+
+## Evaluation
+
+- **Dataset:** `eval/dataset.json` has 14 fictional cases: the 12 required work types plus inflated self-description and prompt injection. Reference answers are **draft, not human-reviewed**.
+- **Runner:** `scripts/eval-measurement.mjs` replays the cases into an in-memory TeamPulse with the production code. It scores schema, citations, complexity, dimensions, unsupported claims, missing information, impact attribution and basis, guardrail fixed/broke counts, and consistency.
+- **Simulated run (harness check only, says nothing about a real model):**
+  - Schema validity 1.0 and citation validity 1.0.
+  - Guardrails fixed 8 checks and broke 0.
+  - Agreement with draft expectations: 52/76 raw, 72/88 after guardrails.
+
+## Tests
+
+| Suite | Result |
+|---|---|
+| `npm test` | **94/94** (78 earlier + 6 provider-readiness + 6 guardrail/supervised + 4 eval-runner) |
+| `npm run test:e2e`, `test:e2e:auth`, `test:e2e:measurement` | pass |
+| `npm run eval:measurement -- --dry-run` | 14/14 cases replay; insufficient-evidence routing as expected |
+| Live AI | **not run** — needs the owner's key and approval (docs/supervised-ai-validation.md) |
+
+
+# Pre-deployment checks — viaSocket AI primary, Anthropic backup (2026-11-09, not deployed, no live AI call)
+
+| # | Check | Result | Evidence (`test/final-checks.test.js` unless noted) |
+|---|---|---|---|
+| 1 | Backup only for provider failures, timeouts, malformed answers, validation failures | **PASS after fixes.** Allowlist: timeout, network, 5xx, 429, viaSocket credentials rejected, prose/truncated/tool-call, schema validation. No backup for 400/422 refusals or rejected requests, TeamPulse's own malformed request, or unexpected exceptions. Authorization, permission, supervised-selection, owner-mismatch, cross-org, reviewed-analysis and data-policy refusals call **no** provider | 1a, 1b. Fixed: an unexpected exception and the SDK's own input errors were mapped to "network" and sent to the backup |
+| 2 | No duplicate or overwritten assessments | **PASS after fixes.** One assessment per run (atomic claim). A late viaSocket answer after a timeout is discarded. A run cannot replace a newer assessment, or one a manager reviewed while it ran. After a manager review only a manager or admin can re-run | 2a, 2b, guardrails-supervised. Added: stale-run guard, manager-review protection |
+| 3 | Credentials never in logs, responses, AI conversation, database, Git | **PASS.** Redaction of known key values and key/bearer/JWT shapes on every stored or logged error, tested with errors that echo both keys. Working tree and full Git history checked against the real `.env` secret: 0 hits. `.env` is ignored and was never committed | 3; credential scan |
+| 4 | Provider and fallback metadata on every assessment | **PASS.** `aiMeta` on every assessment (rules, simulated, viaSocket, backup): primary provider, requested model, answered by, answered model, model confirmed, fallback used, kind, reason, request id. Also on the run and in the audit log | 4 |
+| 5 | Guardrails regardless of provider | **PASS.** The same rule-breaking answer gives identical results via viaSocket or the backup | 5 |
+| 6 | Supervised mode, no automatic analysis | **PASS.** Default `supervised` for any real provider. Submit and approve trigger no call | 6, guardrails-supervised |
+| 7 | No deploy, no live AI call | **PASS** | — |
+| — | viaSocket data policy | **UNRESOLVED and enforced:** nothing goes to viaSocket AI until `AI_VIASOCKET_POLICY_CONFIRMED=true`, and Anthropic is not substituted | docs/viasocket-ai-data-policy.md, 1b |
+
+Tests: `npm test` 106/106; `test:e2e`, `test:e2e:auth`, `test:e2e:measurement` pass; eval dry run 14/14; `npm audit` 0.
+
+
+# Sprint 2 — AI work intelligence and viaSocket evidence (2026-11-09, feature branch, not deployed)
+
+Design: [docs/work-evidence.md](work-evidence.md). M91 channel mode: [docs/integrations.md](integrations.md#channel-mode-send-link--configured-for-new-test).
+
+## Found before building
+
+- **Already reusable:**
+  - per-user viaSocket connections (`app_connections`, ownership checked against `listConnections`);
+  - a proven event pipeline, the Gmail/Slack intake: `user.subscribe` with a handler that posts to TeamPulse with a per-subscription bearer token;
+  - the live-options scope picker (`listOptions`);
+  - Phase 1/1.1 measurement (evidence pack, guardrails, gates, history);
+  - M91 alert rules and queue.
+- **Missing:** any external evidence model, identities, evidence-to-task matching, and an evidence UI.
+- **Triggers:** read live from the catalog (`user.listActions`, `catalog.versions`) for all five apps; nothing was invented. Missing triggers are listed in work-evidence.md.
+
+## Built
+
+| Area | Result |
+| --- | --- |
+| Schema | Migration 008 (additive): identities, sources, subscriptions, inbox, evidence, task links, sync runs; all org-scoped |
+| Collectors | GitHub (6 event kinds), Slack (2), Gmail (2, label-scoped), Calendar (1), Sheets (1). Real keys and versions; real-sample check before switch-on |
+| Collection | Webhook with per-subscription token; inbox with dedupe and retry; checkpoints; rate limit; health checks; disconnect stops collection; no external writes |
+| Privacy | Chosen scopes only; no DMs; Gmail label only, quoted text stripped, attachment metadata only; private, declined and out-of-office calendar entries ignored; the collector can remove evidence |
+| Attribution | Identities (one owner per org); self / member / external / unknown, never guessed; "not mine" disputes; manager resolution; shared links |
+| Matching | Explicit reference, resource, text-and-time; AI only proposes; nothing auto-confirmed; decisions never overwritten; no tasks created from messages |
+| Measurement | Linked evidence grouped into the existing pack; candidates never citable; observed facts separate from interpretation; new guardrails (v5); prompt v3; rubric v2; provider gates unchanged |
+| Employee UX | "My work evidence": sources and status, evidence to confirm / linked / not linked, identities, **Analyse my work**; "From connected apps" on task pages |
+| Manager UX | **Team intelligence**: significant contributions with reasons, open blockers (outside-control marked), evidence review (resolve attribution / shared ownership), people in alphabetical order, "analyse this person" |
+| M91 | New intervention rules (attribution review, assessment dispute); channel mode via send link for "New test" (owner-confirmed; no alert sent) |
+
+## Bugs found by the tests
+
+1. Slack identities never matched: stored upper-case, compared lower-case.
+2. `DELETE /api/evidence/:id` collided with the existing task-attachment route, so the new API moved to `/api/work-evidence`.
+3. The rate-limit test exhausted a subscription that later checks still needed.
+
+## Tests (actual)
+
+| Suite | Result |
+| --- | --- |
+| `npm test` | **119/119**: 11 evidence tests across all five integrations and the required scenarios, 2 M91 channel tests, and all earlier tests |
+| `test:e2e`, `test:e2e:auth`, `test:e2e:measurement`, `test:e2e:evidence` (incl. phone width) | pass |
+| `eval:measurement --dry-run` | 14/14 |
+| Live viaSocket triggers, live AI, live M91 | **not run**: stand-ins and real webhook deliveries only |
+
+
+# Final sprint — AI Work Operating System (2026-11-09, feature branch, not deployed)
+
+Design: [docs/work-intelligence.md](work-intelligence.md). This sprint adds no new data collection, provider or credential.
+
+## Built
+
+| Scope item | Result |
+| --- | --- |
+| Employee AI Work Assistant | "Analyse my day": done, delivered, moved forward, blocked, meaningful contributions with reasons, missing context and next priorities. Fixed-intent questions with linked answers. Optional AI write-up only with `AI_MODE=on`. |
+| AI Contribution Graph | One journey per task across 10 stages, from source request to evidence to verified outcome. Shows contributors, what is missing, possible links (confirm or reject), "not part of this work" and related work. |
+| Manager AI Copilot | Team questions in Team Intelligence: today and this week, complex work solved, blocked and why, verified outcomes, reviews, delays, who needs help, attention. Contribution Reviews page. |
+| Proactive signals | 9 rule-based kinds stored in `work_signals` (migration 009): deduplicated, resolve themselves, reopen when the condition returns, dismissal needs a reason, history and audit kept. Shown on dashboards ("Where to intervene", "Today"), in the Assistant and in Reviews. |
+| viaSocket feels native | "Connected apps" as three steps: connect, choose what to collect, analyse. Evidence appears in journeys, the day digest and answers. |
+| M91 for interventions | Existing rules unchanged. New `impact_verification_needed` for significant unverified outcomes (in-app by default). Signals never page directly. |
+| Navigation by role | Manager: team-first, then a "My work" section. Employee: work, evidence, assistant, contributions. |
+| Fairness and privacy | No counts, ranks or scores. External blockers are marked and not penalised. Shared work is counted once. Weak matches need a person's confirmation. Team data needs manager scope; other orgs return 404. |
+
+## Bugs found by the tests and fixed
+
+1. The question box id rendered as `q-` because the template helper renders `false` as empty. The form is now keyed `mine`/`team`.
+2. Evidence chips overflowed a phone screen by about 520px. Inline chips ignore `max-width`, so they are now inline-block in a wrapping row.
+3. Journey contributors were filtered by visibility, which hid co-contributors on work the viewer could see.
+4. e2e selectors still used the old nav labels (Team Tasks, Performance) and an ambiguous "Ready-made automations" text.
+
+## Validation (actual)
+
+| Check | Result |
+| --- | --- |
+| `npm test` | **125/125**, including 6 new intelligence tests: day digest, questions, journey, copilot scoping, signals lifecycle, AI write-up gates |
+| `test:e2e` | pass (new navigation) |
+| `test:e2e:auth` | pass |
+| `test:e2e:measurement` | pass |
+| `test:e2e:evidence` | pass. Extended with: Analyse my day, questions (focus, find evidence, unknown question), journey timeline, Copilot "who is blocked", Reviews with signal dismissal plus a reason, "Where to intervene", and phone-width checks for the assistant, journey, contributions, reviews and dashboard |
+| `eval:measurement --dry-run` | 14 cases, all as expected (draft expectations, not an accuracy measure) |
+| `npm audit` | 0 vulnerabilities |
+| Credential scan of changed files | clean. The M91 send link is not in the repo |
+| Live AI write-up, live viaSocket triggers, live M91 | **not run**. Stand-ins only; the policy gate and supervised mode are unchanged |
+
+
+# Production deployment of the final sprint (2026-11-09, 12:06 UTC)
+
+| Check | Result |
+| --- | --- |
+| Deployed | `e991fc7` (`claude/teampulse-mvp`, clean tree) → Embarko v12. `currentDeployment.appVersion = e991fc7`, status success. Before: v11 = `538b4b6` |
+| Tests on `e991fc7` before deploying | `npm test` 125/125, all four e2e suites pass, lint clean |
+| Backup before deploying | Owner accepted the newest verified backup: 09:11:47 UTC, encrypted off-host copy `teampulse-backup-2026-11-09T09-11-44-867Z.gz` (23 030 bytes), restore check passed in production. Embarko has no data-export API and the app backs up daily, so no newer backup could be made without a code change. Row counts were identical at deploy time |
+| Migrations | 006 (rebuilds `users`, keeping every column and row), 007, 008, 009: each in its own transaction. Rehearsed on a database built by `538b4b6`: users, Google subjects, sessions and memberships kept; `integrity_check` ok; `foreign_key_check` empty; not re-run on a restart |
+| Start-up | Clean log, no errors; storage at `DATA_DIR`; `/api/health` ok, database ok |
+| Data after deploying | Automatic alert run at 12:15:41 UTC on v12 finished `ok`: 1 org, 2 users, 0 tasks (unchanged); backup record readable; signals ran (0 opened) |
+| Unauthenticated production checks | Page and new view scripts 200; new APIs 401; cron 401; evidence webhook without a token 401; dev login off; Google sign-in redirects to Google; sign-in page fits desktop and phone, no console errors |
+| AI and M91 | AI provider not configured, so `aiMode` is off (no AI calls possible); viaSocket policy gate closed; M91 not configured; no env vars or alert rules changed; no alert sent |
+| **Not verified in production** | Every signed-in journey (needs the owner's Google accounts); live GitHub, Slack, Gmail, Calendar and Sheets events; live AI; live M91 |

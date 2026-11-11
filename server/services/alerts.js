@@ -135,7 +135,7 @@ export function scanAlerts(db, at = Date.now()) {
 }
 
 /** How hard M91 chases each alert (it decides re-rings and phone calls, so CRITICAL is never used automatically). */
-export const RULE_SEVERITY = { deadline_missed: 'HIGH', critical_blocked: 'HIGH', blocker_unresolved: 'MEDIUM', deadline_approaching: 'MEDIUM', no_progress: 'MEDIUM', unassigned: 'MEDIUM', not_started: 'LOW', task_assigned: 'LOW', submitted_for_review: 'LOW' }
+export const RULE_SEVERITY = { deadline_missed: 'HIGH', critical_blocked: 'HIGH', blocker_unresolved: 'MEDIUM', deadline_approaching: 'MEDIUM', no_progress: 'MEDIUM', unassigned: 'MEDIUM', not_started: 'LOW', task_assigned: 'LOW', submitted_for_review: 'LOW', evidence_attribution_review: 'MEDIUM', assessment_disputed: 'MEDIUM', evidence_attribution_note: 'LOW', impact_verification_needed: 'LOW' }
 
 /** The M91 customId for a delivery: stable per condition and person, at most 200 characters. */
 export const m91CustomId = (dedupeKey) => `tp-${createHash('sha256').update(String(dedupeKey)).digest('hex').slice(0, 40)}`
@@ -151,7 +151,10 @@ export async function processDeliveries(db, transport, { limit = 50 } = {}) {
     const n = d.notification_id ? db.prepare('SELECT * FROM notifications WHERE id = ?').get(d.notification_id) : null
     const user = d.user_id ? db.prepare('SELECT name, email, phone FROM users WHERE id = ?').get(d.user_id) : null
     try {
-      const out = await transport.send({ title: n?.title || d.rule, body: n?.body || null, link: null, recipient: user, idempotencyKey: m91CustomId(d.dedupe_key), severity: RULE_SEVERITY[d.rule] || 'MEDIUM' })
+      // Channel mode: one alert per condition for the whole channel (the person is dropped from the key), so a
+      // condition that concerns several people rings the channel once; M91 absorbs the repeats of an open customId.
+      const key = transport.mode === 'channel' ? d.dedupe_key.replace(/:[^:]+$/, '') : d.dedupe_key
+      const out = await transport.send({ title: n?.title || d.rule, body: n?.body || null, link: null, recipient: user, idempotencyKey: m91CustomId(key), severity: RULE_SEVERITY[d.rule] || 'MEDIUM' })
       db.prepare(`UPDATE alert_deliveries SET status = 'SENT', provider_message_id = ?, recipient = ?, last_error = NULL, updated_at = ? WHERE id = ?`)
         .run(out?.providerMessageId ? String(out.providerMessageId).slice(0, 200) : null, user?.phone || null, now(), d.id)
       result.sent++
@@ -243,9 +246,12 @@ export async function handleCallback(db, transport, { token, expectedToken, rawB
   const responses = Array.isArray(alert?.responses) ? alert.responses : []
   const answer = alert?.decision || responses.at(-1) || null
   const ts = now()
+  // Normalize labels for comparison: NFC, trim, lowercase. This handles straight vs. curly apostrophes,
+  // capitalization differences, and leading/trailing whitespace from different M91 encoding paths.
+  const normalizeLabel = (s) => String(s || '').normalize('NFC').trim().toLowerCase()
   transaction(db, () => {
     if (answer && !d.responded_at) {
-      const note = responses.find((r) => r.label === answer.label)?.note ?? null
+      const note = responses.find((r) => normalizeLabel(r.label) === normalizeLabel(answer.label))?.note ?? null
       db.prepare(`UPDATE alert_deliveries SET status = 'DELIVERED', response_label = ?, response_effect = ?, response_note = ?, responded_by = ?, responded_at = ?, updated_at = ? WHERE id = ?`)
         .run(String(answer.label || '').slice(0, 100), answer.effect || null, note ? String(note).slice(0, 1000) : null, typeof answer.by === 'string' ? answer.by.slice(0, 100) : null, answer.at || ts, ts, d.id)
       const task = d.task_id ? db.prepare('SELECT * FROM tasks WHERE id = ?').get(d.task_id) : null

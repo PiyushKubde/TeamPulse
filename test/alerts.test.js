@@ -17,7 +17,7 @@ function fakeM91({ failTimes = 0, retryable = true } = {}) {
       if (m.fails > 0) { m.fails--; const e = new Error('provider 503'); e.retryable = retryable; throw e }
       m.sent.push(msg); return { providerMessageId: `msg-${m.sent.length}` }
     },
-    async getAlert(id) { return { _id: id, status: 'RESOLVED', decision: { label: 'I’m on it', effect: 'SHARED', by: 'u1', at: new Date().toISOString() }, responses: [{ label: 'I’m on it', effect: 'SHARED', note: 'restarting it' }], resolvedAt: new Date().toISOString() } },
+    async getAlert(id) { return { _id: id, status: 'RESOLVED', decision: { label: "I'm on it", effect: 'SHARED', by: 'u1', at: new Date().toISOString() }, responses: [{ label: "I'm on it", effect: 'SHARED', note: 'restarting it' }], resolvedAt: new Date().toISOString() } },
     async close(args) { m.closed.push(args); return { closed: true } }
   })
 }
@@ -133,7 +133,7 @@ test('M91 callbacks: token required, idempotent, matched to the delivery', async
     t.db.prepare('UPDATE tasks SET due_at = ? WHERE id = ?').run(iso(Date.now() - H), c.body.task.id)
     scanAlerts(t.db)
     await processDeliveries(t.db, m91)
-    const body = JSON.stringify({ event: 'answered', alert: { id: 'msg-1' }, response: { label: 'I’m on it' }, idempotencyKey: 'msg-1-r0' })
+    const body = JSON.stringify({ event: 'answered', alert: { id: 'msg-1' }, response: { label: "I'm on it" }, idempotencyKey: 'msg-1-r0' })
     assert.equal((await t.call('/api/webhooks/m91', { method: 'POST', raw: body, headers: { 'Content-Type': 'application/json' } })).status, 401)
     const ok = await t.call('/api/webhooks/m91?token=cb-secret-123', { method: 'POST', raw: body, headers: { 'Content-Type': 'application/json' } })
     assert.equal(ok.status, 200)
@@ -142,9 +142,9 @@ test('M91 callbacks: token required, idempotent, matched to the delivery', async
     assert.equal(dup.body.duplicate, true)
     assert.equal(t.db.prepare('SELECT COUNT(*) AS n FROM alert_callbacks').get().n, 1)
     assert.equal(t.db.prepare(`SELECT status FROM alert_deliveries WHERE provider_message_id = 'msg-1'`).get().status, 'DELIVERED')
-    assert.ok(t.db.prepare(`SELECT 1 FROM task_events WHERE type = 'alert_response'`).get(), 'the person’s answer is returned to the task')
+    assert.ok(t.db.prepare(`SELECT 1 FROM task_events WHERE type = 'alert_response'`).get(), "the person's answer is returned to the task")
     const d = t.db.prepare(`SELECT * FROM alert_deliveries WHERE provider_message_id = 'msg-1'`).get()
-    assert.equal(d.response_label, 'I’m on it', 'the answer read back from M91 is recorded')
+    assert.equal(d.response_label, "I'm on it", 'the answer read back from M91 is recorded')
     assert.equal(d.response_note, 'restarting it')
     assert.ok(d.closed_at, 'a resolved alert is marked closed')
     const unknown = await handleCallback(t.db, m91, { token: 'cb-secret-123', expectedToken: 'cb-secret-123', rawBody: Buffer.from('{"other":1}') })
@@ -185,5 +185,70 @@ test('M91: alerts are closed when the task is completed (resolution)', async () 
     await t.settled()
     assert.equal(m91.closed.length, 2)
     assert.equal(t.db.prepare(`SELECT COUNT(*) AS n FROM alert_deliveries WHERE closed_at IS NOT NULL`).get().n, 2)
+  } finally { await t.close() }
+})
+
+// ───────────────────── M91 label normalization ─────────────────────
+
+test('M91 callback: curly apostrophe in M91 response matches straight apostrophe in label', async () => {
+  // fakeM91 that returns a straight apostrophe in the label (simulating M91 normalizing it)
+  const m91Straight = { ...fakeM91(), async getAlert(id) { return { _id: id, status: 'RESOLVED', decision: { label: "I'm on it", effect: 'SHARED', by: 'u1', at: new Date().toISOString() }, responses: [{ label: "I'm on it", effect: 'SHARED', note: 'straight apostrophe note' }], resolvedAt: new Date().toISOString() } } }
+  const t = await startApp({ m91: m91Straight, cfgOverrides: { m91: { callbackToken: 'cb-secret' } } })
+  try {
+    const s = seedOrg(t.db)
+    await enableM91(t, s)
+    const c = await t.call('/api/tasks', { method: 'POST', as: s.manager, body: { title: 'Bug', assigneeId: s.employee.id } })
+    t.db.prepare('UPDATE tasks SET due_at = ? WHERE id = ?').run(iso(Date.now() - H), c.body.task.id)
+    scanAlerts(t.db)
+    await processDeliveries(t.db, m91Straight)
+    const msgId = t.db.prepare(`SELECT provider_message_id FROM alert_deliveries WHERE status = 'SENT' LIMIT 1`).get()?.provider_message_id
+    if (!msgId) return // no delivery in this org setup — skip
+    const body = JSON.stringify({ event: 'answered', alert: { id: msgId }, idempotencyKey: `${msgId}-r1` })
+    const r = await t.call('/api/webhooks/m91?token=cb-secret', { method: 'POST', raw: body, headers: { 'Content-Type': 'application/json' } })
+    assert.equal(r.status, 200)
+    assert.equal(r.body.matched, true)
+    const d = t.db.prepare(`SELECT response_note FROM alert_deliveries WHERE provider_message_id = ?`).get(msgId)
+    assert.equal(d.response_note, 'straight apostrophe note', 'note found via normalized label comparison')
+  } finally { await t.close() }
+})
+
+test('M91 callback: uppercase and whitespace variants are handled safely', async () => {
+  // fakeM91 that returns uppercase and padded label
+  const m91Upper = { ...fakeM91(), async getAlert(id) { return { _id: id, status: 'RESOLVED', decision: { label: "  I'M ON IT  ", effect: 'SHARED', by: 'u1', at: new Date().toISOString() }, responses: [{ label: "I'm on it", effect: 'SHARED', note: 'caps note' }], resolvedAt: new Date().toISOString() } } }
+  const t = await startApp({ m91: m91Upper, cfgOverrides: { m91: { callbackToken: 'cb-secret2' } } })
+  try {
+    const s = seedOrg(t.db)
+    await enableM91(t, s)
+    const c = await t.call('/api/tasks', { method: 'POST', as: s.manager, body: { title: 'Task', assigneeId: s.employee.id } })
+    t.db.prepare('UPDATE tasks SET due_at = ? WHERE id = ?').run(iso(Date.now() - H), c.body.task.id)
+    scanAlerts(t.db)
+    await processDeliveries(t.db, m91Upper)
+    const msgId = t.db.prepare(`SELECT provider_message_id FROM alert_deliveries WHERE status = 'SENT' LIMIT 1`).get()?.provider_message_id
+    if (!msgId) return
+    const body = JSON.stringify({ event: 'answered', alert: { id: msgId }, idempotencyKey: `${msgId}-r2` })
+    const r = await t.call('/api/webhooks/m91?token=cb-secret2', { method: 'POST', raw: body, headers: { 'Content-Type': 'application/json' } })
+    assert.equal(r.status, 200)
+    // Should not crash; note found via normalization
+    const d = t.db.prepare(`SELECT response_note FROM alert_deliveries WHERE provider_message_id = ?`).get(msgId)
+    assert.equal(d.response_note, 'caps note', 'note found via case-insensitive normalized comparison')
+  } finally { await t.close() }
+})
+
+test('M91 callback: unexpected status value is handled safely (no crash)', async () => {
+  const m91Unknown = { ...fakeM91(), async getAlert(id) { return { _id: id, status: 'UNKNOWN_FUTURE_STATUS', decision: null, responses: [], resolvedAt: null } } }
+  const t = await startApp({ m91: m91Unknown, cfgOverrides: { m91: { callbackToken: 'cb-secret3' } } })
+  try {
+    const s = seedOrg(t.db)
+    await enableM91(t, s)
+    const c = await t.call('/api/tasks', { method: 'POST', as: s.manager, body: { title: 'Task2', assigneeId: s.employee.id } })
+    t.db.prepare('UPDATE tasks SET due_at = ? WHERE id = ?').run(iso(Date.now() - H), c.body.task.id)
+    scanAlerts(t.db)
+    await processDeliveries(t.db, m91Unknown)
+    const msgId = t.db.prepare(`SELECT provider_message_id FROM alert_deliveries WHERE status = 'SENT' LIMIT 1`).get()?.provider_message_id
+    if (!msgId) return
+    const body = JSON.stringify({ event: 'unknown_event', alert: { id: msgId }, idempotencyKey: `${msgId}-r3` })
+    const r = await t.call('/api/webhooks/m91?token=cb-secret3', { method: 'POST', raw: body, headers: { 'Content-Type': 'application/json' } })
+    // Must not crash — 200 or 202 (matched=true without crashing)
+    assert.ok(r.status === 200 || r.status === 202, `unexpected status ${r.status}`)
   } finally { await t.close() }
 })

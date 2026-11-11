@@ -28,6 +28,8 @@ export function loadConfig(overrides = {}) {
     uploadMaxBytes: Number(env.UPLOAD_MAX_BYTES) || 5 * 1024 * 1024,
     m91: {
       apiKey: env.M91_API_KEY || '',
+      // A channel send link (secret): alerts the whole M91 channel. Takes precedence over the API key.
+      sendLink: (env.M91_SEND_LINK || '').trim(),
       callbackToken: env.M91_CALLBACK_TOKEN || ''
     },
     viasocket: {
@@ -36,6 +38,32 @@ export function loadConfig(overrides = {}) {
       secret: env.VIASOCKET_EMBED_SECRET || ''
     },
     localScheduler: env.LOCAL_SCHEDULER === '1',
+    // Transactional email for verification and password reset (see server/auth/mailer.js).
+    legal: { termsUrl: env.TERMS_URL || null, privacyUrl: env.PRIVACY_URL || null },
+    mail: {
+      provider: (env.MAIL_PROVIDER || '').toLowerCase(),
+      from: env.MAIL_FROM || '',
+      fromName: env.MAIL_FROM_NAME || 'TeamPulse',
+      smtp: { host: env.SMTP_HOST || '', port: Number(env.SMTP_PORT) || 587, secure: env.SMTP_SECURE === 'true', user: env.SMTP_USER || '', pass: env.SMTP_PASS || '' },
+      viasocket: { userId: env.MAIL_VIASOCKET_USER_ID || '', connectionId: env.MAIL_VIASOCKET_CONNECTION_ID || '' }
+    },
+    // AI work measurement (server/ai/provider.js). Keys stay on the server.
+    ai: {
+      provider: (env.AI_PROVIDER || '').toLowerCase(),
+      apiKey: env.ANTHROPIC_API_KEY || '',
+      model: env.AI_MODEL || 'claude-opus-5-5',
+      viasocketService: env.AI_VIASOCKET_SERVICE || 'anthropic',
+      viasocketModel: env.AI_VIASOCKET_MODEL || 'claude-sonnet-5-5',
+      // Set to true ONLY after viaSocket has answered the open data-policy questions (docs/viasocket-ai-data-policy.md).
+      viasocketPolicyConfirmed: env.AI_VIASOCKET_POLICY_CONFIRMED === 'true',
+      effort: env.AI_EFFORT || 'medium',
+      timeoutMs: Number(env.AI_TIMEOUT_MS) || 120000,
+      fallbacks: env.AI_FALLBACKS !== 'off',
+      // off | supervised | on. Default: supervised for a real provider (only AI_SUPERVISED_TASKS, admins only, no
+      // automatic runs, no notifications); on for the development simulator; off otherwise.
+      mode: (env.AI_MODE || '').toLowerCase(),
+      supervisedTasks: env.AI_SUPERVISED_TASKS || ''
+    },
     ...overrides
   }
   // The callback defaults to APP_URL + /auth/google/callback, so production only needs the client id and secret.

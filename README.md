@@ -8,8 +8,8 @@ TeamPulse helps managers see what each person is working on, what is pending, bl
 
 | Area | What works |
 | --- | --- |
-| Sign-in | Continue with Google (OAuth 2.0 / OpenID Connect, PKCE, state, nonce, RS256 ID-token verification). Identity = Google `sub`. |
-| Organizations | Create an organization (creator becomes admin), invitations bound to a Google-verified email, join-by-code with manager/admin approval. No role is ever granted from an email domain. |
+| Sign-in | Continue with Google (OAuth 2.0 / OpenID Connect, PKCE, state, nonce, RS256 ID-token verification), and email + password (Argon2id, email verification, reset, lockout) once an email provider is configured. See [docs/email-auth.md](docs/email-auth.md). |
+| Organizations | Create an organization (creator becomes admin), invitations bound to a verified email, join-by-code with manager/admin approval. No role is ever granted from an email domain. |
 | Roles | Admin, Manager, Employee — enforced on the server for every route. Managers see only the teams they manage; other organizations are invisible (404). |
 | Tasks | Full CRUD, assignment/reassignment, priorities, start/due dates, links, statuses `ASSIGNED → IN_PROGRESS → BLOCKED → SUBMITTED_FOR_REVIEW → COMPLETED`, `CANCELLED`, reopen/restore as recorded events. Overdue and at-risk are **derived**. |
 | Permissions | Per-employee `can_create_tasks`, `can_create_directly`, `can_self_assign`, `can_assign_others`, `approval_required`; every change audited. |
@@ -20,6 +20,9 @@ TeamPulse helps managers see what each person is working on, what is pending, bl
 | Dashboards | Manager: counts, team workload, attention required, recent activity, verified team impact. Employee: my work, awaiting me, deadlines, feedback, my impact, daily reflection. |
 | Reports | Weekly team summary, workload, status distribution, overdue, blocker history, contributions, verified impact — date and person filters, CSV export. |
 | Alerts | In-app notifications for every alert rule; configurable thresholds; M91 phone alerts (Platform API) with retries, history, answers read back from M91, and automatic close on resolution. |
+| Contribution analysis | AI work measurement: per-task complexity (L1–L4) and five dimensions with reasons, evidence and confidence; claimed vs estimated vs verified impact; employee confirm/correct/dispute; manager approve/adjust/dispute with history. Deterministic guardrails; never a score or ranking. See [docs/ai-work-measurement.md](docs/ai-work-measurement.md). |
+| Work evidence | GitHub, Slack, Gmail, Google Calendar, Google Sheets evidence from each person's own connections (viaSocket triggers), attributed by identity, matched to tasks (rules; AI only proposes), used in on-demand analyses; Team intelligence for managers. See [docs/work-evidence.md](docs/work-evidence.md). |
+| Work intelligence | AI Work Assistant ("Analyse my day", questions answered from records, optional AI write-up when `AI_MODE=on`), contribution journeys from request to outcome, Manager Copilot, Contribution Reviews, proactive signals with dismiss/resolve history. See [docs/work-intelligence.md](docs/work-intelligence.md). |
 | Automation Center | ViaSocket: curated Connected Apps (Slack, Gmail, GitHub, Google Calendar, Google Sheets), three ready-made automations, and the full ViaSocket Embed builder. |
 
 ## Stack and decisions
@@ -72,6 +75,9 @@ Then sign in as `manager@demo.teampulse`, `admin@demo.teampulse`, or employees `
 | `npm run migrate` | Apply pending migrations and exit |
 | `npm test` | Unit + API tests (`node:test`, in-memory database) |
 | `npm run test:e2e` | Browser journeys in Chromium (Playwright) against a temporary server |
+| `npm run test:e2e:measurement` | Browser journeys for contribution analysis (simulated analyser, not AI) |
+| `npm run test:e2e:evidence` | Browser journeys for work evidence and team intelligence (webhook deliveries; viaSocket not called) |
+| `npm run test:e2e:auth` | Browser journeys for email/password sign-in (mail through a local SMTP sink) |
 | `npm run lint` | ESLint |
 | `npm run seed:demo` | Demo organization for local development |
 
@@ -81,9 +87,11 @@ Every secret comes from environment variables; see [.env.example](.env.example).
 
 | Integration | Needed for | Without it |
 | --- | --- | --- |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Signing in | The login page says sign-in is not configured |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Google sign-in | The login page says Google sign-in is not configured |
+| `MAIL_PROVIDER`, `MAIL_FROM`, `SMTP_*` (or `MAIL_VIASOCKET_*`) | Email/password sign-up, verification, password reset | Only Google sign-in is offered; email sign-up says it is unavailable |
 | `VIASOCKET_ORG_ID`, `VIASOCKET_PROJECT_ID`, `VIASOCKET_EMBED_SECRET` | Connected apps, Slack/Gmail delivery, builder | Automation Center shows it is not configured; external requests and in-app alerts still work |
-| `M91_API_KEY`, `M91_CALLBACK_TOKEN` | M91 phone alerts | Alerts are in-app only |
+| `M91_SEND_LINK` (channel) or `M91_API_KEY` (per person), `M91_CALLBACK_TOKEN` | M91 alerts | Alerts are in-app only |
+| `AI_PROVIDER=anthropic`, `ANTHROPIC_API_KEY` (optional `AI_MODEL`, `AI_EFFORT`) | AI contribution analysis | The task card says AI analysis is not set up; work with too little evidence is still flagged by rules |
 
 ## Deploying
 
@@ -96,7 +104,10 @@ server/
   index.js            boot: config, database, integrations, HTTP
   app.js              routes, middleware (security headers, CSRF guard, rate limits, sessions), scheduled-job routes
   access.js           roles, scopes, task visibility — the authorization core
-  auth/               Google OIDC and sessions
+  auth/               Google OIDC, email/password accounts, password hashing, mailer, sessions
+  ai/                 AI provider interface (Anthropic SDK; simulated dev provider)
+  measurement/        evidence pack, rubric, schema, guardrails, engine, assessments
+  evidence/           collectors, sources, ingestion, matching, evidence service (sprint 2)
   services/           orgs, permissions, tasks, requests, impact, evidence, alerts, reports, dashboards
   integrations/       viaSocket gateway, connections, actions; M91 transport
   automations/        ready-made automations engine

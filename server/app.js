@@ -7,6 +7,9 @@ import { AppError, forbidden } from './errors.js'
 import { assignableUserIds, loadContext, isAdmin, isManager } from './access.js'
 import { COOKIE, cookieHeader, createSession, destroySession, readCookie, sessionUser } from './auth/sessions.js'
 import { finishGoogleLogin, googleTransport, startGoogleLogin, upsertGoogleUser } from './auth/google.js'
+import * as accounts from './auth/accounts.js'
+import { sha256 } from './auth/sessions.js'
+import { createMailer } from './auth/mailer.js'
 import * as orgs from './services/orgs.js'
 import * as perms from './services/permissions.js'
 import * as tasks from './services/tasks.js'
@@ -20,12 +23,24 @@ import { listNotifications, markRead } from './services/notify.js'
 import { listAudit } from './services/audit.js'
 import * as alerts from './services/alerts.js'
 import { onEvent, recoverOutbox, useOutbox } from './services/events.js'
+import { transaction as txn, uuid } from './db.js'
 import { backupIfDue, lastBackup } from './services/backups.js'
 import * as conns from './integrations/connections.js'
 import { sendThrough, slackChannels, slackUsers } from './integrations/actions.js'
 import * as auto from './automations/engine.js'
 import * as intake from './automations/intake.js'
 import * as contextFlows from './automations/context-flows.js'
+import { createAiProvider } from './ai/provider.js'
+import { seedRubrics } from './measurement/rubric.js'
+import { onWorkEvent, recoverRuns } from './measurement/engine.js'
+import * as measure from './measurement/assessments.js'
+import * as evidenceSources from './evidence/sources.js'
+import * as evidenceSvc from './evidence/service.js'
+import { receiveEvidenceEvent, retryInbox } from './evidence/ingest.js'
+import * as journeys from './intelligence/journeys.js'
+import * as signals from './intelligence/signals.js'
+import * as assistant from './intelligence/assistant.js'
+import { notifyInApp } from './services/notify.js'
 import * as v from './validate.js'
 import { now } from './db.js'
 
@@ -43,7 +58,11 @@ export function rateLimiter({ windowMs, max }) {
   }
 }
 
-export function createApp({ db, cfg, vs = { configured: false }, m91, google = googleTransport(), listen = true }) {
+export function createApp({ db, cfg, vs = { configured: false }, m91, google = googleTransport(), listen = true, mailer = null, ai = null }) {
+  mailer ||= createMailer(cfg.mail || {}, { db, vs })
+  ai ||= createAiProvider(cfg, { vs })
+  const aiModeNow = measure.aiMode(cfg, ai)
+  seedRubrics(db)
   const app = express()
   app.disable('x-powered-by')
   app.set('trust proxy', 1)
@@ -56,12 +75,17 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     onEvent((e) => (e.type === 'task.assigned' ? auto.runNewTaskNotification(db, vs, { ...e, appUrl: cfg.appUrl }) : null)),
     onEvent((e) => contextFlows.onTaskEvent(db, vs, e, cfg.appUrl)),
     onEvent(() => alerts.processDeliveries(db, m91)),
-    onEvent((e) => alerts.closeResolvedAlerts(db, m91, e))
+    onEvent((e) => alerts.closeResolvedAlerts(db, m91, e)),
+    onEvent((e) => onWorkEvent(db, ai, e, aiModeNow)),
+    onEvent((e) => (e.type === 'assessment.ready' ? notifyInApp(db, { orgId: e.orgId, userId: e.subjectId, kind: 'assessment_ready', title: 'Your work analysis is ready to review', link: `#/tasks/${e.taskId}`, taskId: e.taskId, dedupeKey: `assessment-ready:${e.assessmentId}` }) : null))
   ] : []
   app.locals.stopListening = () => unsubscribe.forEach((fn) => fn())
   app.locals.events = { recoverOutbox }
+  app.locals.ai = ai
+  app.locals.aiMode = aiModeNow
 
   const limitAuth = rateLimiter({ windowMs: 60000, max: 30 })
+  const limitLogin = rateLimiter({ windowMs: 60000, max: 10 })
   const limitApi = rateLimiter({ windowMs: 60000, max: 600 })
   const limitInbound = rateLimiter({ windowMs: 60000, max: 60 })
   const ip = (req) => req.ip || 'unknown'
@@ -84,7 +108,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   // cookie is SameSite=Lax. Token-authenticated machine endpoints are exempt.
   app.use('/api', (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store')
-    const machine = req.path.startsWith('/inbound/') || req.path.startsWith('/webhooks/') || req.path.startsWith('/viasocket/events/')
+    const machine = req.path.startsWith('/inbound/') || req.path.startsWith('/webhooks/') || req.path.startsWith('/viasocket/events/') || req.path.startsWith('/work-evidence/events/')
     if (!machine && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.get('x-requested-with') !== 'TeamPulse') {
       return next(new AppError(403, 'csrf', 'Missing request header.'))
     }
@@ -124,7 +148,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   // ---------- health ----------
   app.get('/api/health', h(() => {
     db.prepare('SELECT 1').get()
-    return { ok: true, database: 'ok', google: cfg.google.configured ? 'configured' : 'not_configured', viasocket: vs.configured ? 'configured' : 'not_configured', m91: m91.status().state, time: now() }
+    return { ok: true, database: 'ok', google: cfg.google.configured ? 'configured' : 'not_configured', email: mailer.configured ? 'configured' : 'not_configured', viasocket: vs.configured ? 'configured' : 'not_configured', ai: ai.configured ? (ai.simulated ? 'simulated' : 'configured') : 'not_configured', aiMode: aiModeNow.mode, m91: m91.status().state, time: now() }
   }))
 
   // ---------- authentication ----------
@@ -154,18 +178,78 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     setSession(res, user.id, req)
     return { ok: true }
   }))
+  // ---------- email and password ----------
+  const authPost = (path, fn) => app.post(path, h(async (req, res) => {
+    limitAuth(ip(req))
+    if (req.get('x-requested-with') !== 'TeamPulse') throw new AppError(403, 'csrf', 'Missing request header.')
+    return fn(req, res)
+  }))
+  authPost('/auth/register', (req) => accounts.register(db, mailer, cfg, req.body))
+  authPost('/auth/register-direct', async (req, res) => { const user = await accounts.registerDirect(db, req.body); setSession(res, user.id, req); return { ok: true } })
+  authPost('/auth/email/resend', (req) => accounts.resendVerification(db, mailer, cfg, req.body))
+  authPost('/auth/email/verify', async (req, res) => { const user = await accounts.verifyEmail(db, req.body); setSession(res, user.id, req); return { ok: true } })
+  authPost('/auth/login', async (req, res) => {
+    limitLogin(ip(req))
+    const user = await accounts.login(db, mailer, cfg, req.body)
+    setSession(res, user.id, req)
+    return { ok: true }
+  })
+  authPost('/auth/password/forgot', (req) => accounts.forgotPassword(db, mailer, cfg, req.body))
+  authPost('/auth/password/check', (req) => accounts.describeToken(db, req.body))
+  authPost('/auth/password/reset', async (req, res) => { const user = await accounts.resetPassword(db, req.body); setSession(res, user.id, req); return { ok: true } })
+  // Public invitation lookup (by token — no auth required, returns only non-sensitive invitation info)
+  app.get('/api/invite/:token', h((req) => {
+    const token = String(req.params.token || '')
+    if (!token || token.length < 10 || token.length > 200) return { valid: false, reason: 'invalid' }
+    const inv = db.prepare(`SELECT i.*, o.name AS org_name, u.name AS invited_by_name FROM invitations i JOIN organizations o ON o.id = i.org_id JOIN users u ON u.id = i.invited_by WHERE i.token_hash = ? AND i.status = 'pending'`).get(sha256(token))
+    if (!inv) return { valid: false, reason: 'invalid' }
+    if (inv.expires_at < now()) return { valid: false, reason: 'expired' }
+    // Check if an account with this email already exists
+    // Only reveal hasAccount to an already-authenticated caller whose session email matches the invitation email.
+    // Unauthenticated callers must not learn whether an email address is registered.
+    const callerEmail = req.user?.email?.toLowerCase()
+    const invEmail = inv.email.toLowerCase()
+    const hasAccount = (callerEmail && callerEmail === invEmail)
+      ? Boolean(db.prepare('SELECT 1 FROM users WHERE lower(email) = ? AND email_verified = 1').get(invEmail))
+      : undefined
+    const resp = { valid: true, id: inv.id, email: inv.email, role: inv.role, orgName: inv.org_name, invitedBy: inv.invited_by_name, expiresAt: inv.expires_at }
+    if (hasAccount !== undefined) resp.hasAccount = hasAccount
+    return resp
+  }))
+  // Register a new account using an invitation token (no email verification step needed)
+  authPost('/auth/register-and-accept', async (req, res) => {
+    const token = String(req.body?.inviteToken || '')
+    if (!token) throw new AppError(400, 'validation_failed', 'Invitation token is required.')
+    const inv = db.prepare(`SELECT * FROM invitations WHERE token_hash = ? AND status = 'pending'`).get(sha256(token))
+    if (!inv || inv.expires_at < now()) throw new AppError(400, 'invitation_invalid', 'This invitation link is not valid or has expired.')
+    const user = await accounts.registerForInvitation(db, req.body, inv.email)
+    const tsNow = now()
+    txn(db, () => {
+      if (!db.prepare('SELECT 1 FROM memberships WHERE user_id = ?').get(user.id)) {
+        db.prepare(`INSERT INTO memberships (id, org_id, user_id, role, team_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`)
+          .run(uuid(), inv.org_id, user.id, inv.role, inv.team_id, tsNow, tsNow)
+        db.prepare(`UPDATE invitations SET status = 'accepted', accepted_by = ?, updated_at = ? WHERE id = ?`).run(user.id, tsNow, inv.id)
+        db.prepare(`UPDATE join_requests SET status = 'withdrawn', updated_at = ? WHERE user_id = ? AND status = 'pending'`).run(tsNow, user.id)
+      }
+    })
+    setSession(res, user.id, req)
+    return { ok: true }
+  })
+  app.post('/api/account/password', h((req) => accounts.changePassword(db, signedIn(req), req.body, readCookie(req))))
+  app.post('/api/account/password-link', h((req) => { limitAuth(ip(req)); return accounts.requestPasswordLink(db, mailer, cfg, signedIn(req)) }))
+
   app.post('/api/session/logout', h((req, res) => {
     destroySession(db, readCookie(req))
     res.setHeader('Set-Cookie', cookieHeader(COOKIE, '', { maxAgeSeconds: 0, secure: cfg.production }))
     return { ok: true }
   }))
   app.get('/api/session', h((req) => {
-    const base = { googleConfigured: cfg.google.configured, devLogin: cfg.devLogin, integrations: { viasocket: vs.configured }, ...(cfg.google.configured ? {} : { googleCallbackUrl: cfg.google.redirectUri || null }) }
+    const base = { googleConfigured: cfg.google.configured, devLogin: cfg.devLogin, emailAuth: { available: true }, legal: cfg.legal || {}, integrations: { viasocket: vs.configured, ai: ai.configured ? (ai.simulated ? 'simulated' : 'configured') : 'not_configured' }, ...(cfg.google.configured ? {} : { googleCallbackUrl: cfg.google.redirectUri || null }) }
     if (!req.user) return { ...base, user: null }
     const c = req.ctx
     return {
       ...base,
-      user: { id: req.user.id, name: req.user.name, email: req.user.email, emailVerified: Boolean(req.user.email_verified), pictureUrl: req.user.picture_url, phone: req.user.phone },
+      user: { id: req.user.id, name: req.user.name, email: req.user.email, emailVerified: Boolean(req.user.email_verified), pictureUrl: req.user.picture_url, phone: req.user.phone, signIn: accounts.signInMethods(req.user) },
       membership: c?.membership ? { orgId: c.orgId, orgName: c.orgName, role: c.role, teamId: c.teamId, managedTeamIds: c.managedTeamIds, permissions: c.permissions, creationMode: perms.creationMode(c) } : null,
       deactivated: Boolean(c?.deactivated)
     }
@@ -210,7 +294,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     if (!out.phone || !m91.ready) return { ...out, m91: m91.ready ? null : 'not_configured' }
     try {
       const inv = await m91.invite(out.phone, `TeamPulse — ${req.user.name}`.slice(0, 80))
-      return { ...out, m91: inv.reachable ? 'reachable' : 'invited' }
+      return { ...out, m91: inv.state === 'channel' ? 'channel' : inv.reachable ? 'reachable' : 'invited' }
     } catch (error) {
       return { ...out, m91: 'invite_failed', m91Error: String(error.message).slice(0, 200) }
     }
@@ -387,6 +471,62 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   }))
   app.get('/vendor/viasocket-apps-browser.js', (req, res) => res.type('text/javascript').sendFile(VIASOCKET_BROWSER))
 
+  // ---------- AI work measurement ----------
+  const limitAnalyse = rateLimiter({ windowMs: 3600000, max: 30 })
+  app.get('/api/tasks/:id/assessment', h((req) => measure.getTaskAssessment(db, member(req), ai, req.params.id, aiModeNow)))
+  app.get('/api/tasks/:id/assessment/preview', h((req) => measure.previewAnalysis(db, member(req), ai, req.params.id, aiModeNow)))
+  app.post('/api/tasks/:id/assessment/analyse', h((req) => {
+    const ctx = member(req)
+    limitAnalyse(`analyse:${ctx.user.id}`)
+    const out = measure.analyseTask(db, ctx, ai, req.params.id, { mode: aiModeNow })
+    return { ...out, view: measure.getTaskAssessment(db, ctx, ai, req.params.id, aiModeNow) }
+  }))
+  app.post('/api/tasks/:id/assessment/respond', h((req) => { const ctx = member(req); measure.employeeRespond(db, ctx, req.params.id, req.body); return measure.getTaskAssessment(db, ctx, ai, req.params.id, aiModeNow) }))
+  app.post('/api/tasks/:id/assessment/review', h((req) => { const ctx = member(req); measure.managerReview(db, ctx, req.params.id, req.body); return measure.getTaskAssessment(db, ctx, ai, req.params.id, aiModeNow) }))
+  app.get('/api/assessments/:id', h((req) => measure.getAssessmentById(db, member(req), req.params.id)))
+  app.get('/api/contribution/team', h((req) => measure.teamOverview(db, member(req), req.query)))
+  const limitWork = rateLimiter({ windowMs: 3600000, max: 6 })
+  app.post('/api/contribution/analyse', h((req) => { const ctx = member(req); limitWork(`work:${ctx.user.id}`); return measure.analyseWork(db, ctx, ai, aiModeNow, { userId: req.body?.userId }) }))
+  app.get('/api/contribution/intelligence', h((req) => measure.teamIntelligence(db, member(req), req.query)))
+
+  // ---------- final sprint: assistant, copilot, contribution journeys, signals ----------
+  const limitAssistant = rateLimiter({ windowMs: 60000, max: 30 })
+  app.get('/api/assistant/day', h((req) => assistant.dayDigest(db, member(req), { day: req.query.day, tz: req.query.tz, userId: req.query.userId })))
+  app.get('/api/assistant/suggestions', h((req) => { const ctx = member(req); return { mine: assistant.suggestions(false), team: isManager(ctx) ? assistant.suggestions(true) : [], ai: measure.aiMode(cfg, ai).mode === 'on' && ai.configured } }))
+  app.post('/api/assistant/ask', h((req) => { const ctx = member(req); limitAssistant(`ask:${ctx.user.id}`); return assistant.ask(db, ctx, req.body || {}) }))
+  app.post('/api/assistant/day/ai', h(async (req) => { const ctx = member(req); limitAnalyse(`analyse:${ctx.user.id}`); return assistant.aiWriteUp(db, ctx, ai, aiModeNow, req.body || {}) }))
+  app.get('/api/journeys', h((req) => journeys.listJourneys(db, member(req), req.query)))
+  app.get('/api/journeys/:taskId', h((req) => journeys.taskJourney(db, member(req), req.params.taskId)))
+  app.get('/api/signals', h((req) => signals.listSignals(db, member(req), req.query)))
+  app.post('/api/signals/:id', h((req) => signals.actOnSignal(db, member(req), req.params.id, req.body)))
+
+  // ---------- sprint 2: external evidence ----------
+  const limitEvidenceIn = rateLimiter({ windowMs: 60000, max: 120 })
+  app.post('/api/work-evidence/events/:id', h((req) => {
+    limitEvidenceIn(`evidence:${req.params.id}`)
+    const auth = req.get('authorization') || ''
+    return receiveEvidenceEvent(db, req.params.id, auth.startsWith('Bearer ') ? auth.slice(7).trim() : null, req.body)
+  }))
+  app.get('/api/work-evidence/catalog', h((req) => { member(req); return { configured: vs.configured, apps: evidenceSources.catalog() } }))
+  app.get('/api/work-evidence/sources', h((req) => evidenceSources.listSources(db, member(req), { userId: req.query.userId })))
+  app.get('/api/work-evidence/scope-options', h((req) => evidenceSources.scopeOptions(db, vs, member(req), { app: req.query.app, connectionId: req.query.connectionId, parent: req.query.parent, search: req.query.search })))
+  app.post('/api/work-evidence/sources', h((req) => evidenceSources.createSource(db, vs, member(req), req.body, { appUrl: cfg.appUrl })))
+  app.post('/api/work-evidence/sources/:id/status', h((req) => evidenceSources.setSourceStatus(db, vs, member(req), req.params.id, req.body)))
+  app.get('/api/work-evidence/identities', h((req) => evidenceSources.listIdentities(db, member(req), req.query.userId || undefined)))
+  app.post('/api/work-evidence/identities', h((req) => evidenceSources.addIdentity(db, member(req), req.body)))
+  app.delete('/api/work-evidence/identities/:id', h((req) => evidenceSources.removeIdentity(db, member(req), req.params.id)))
+  app.get('/api/work-evidence', h((req) => evidenceSvc.listEvidence(db, member(req), req.query)))
+  app.get('/api/work-evidence/:id', h((req) => evidenceSvc.getEvidence(db, member(req), req.params.id)))
+  app.delete('/api/work-evidence/:id', h((req) => evidenceSvc.removeEvidence(db, member(req), req.params.id)))
+  app.post('/api/work-evidence/:id/links', h((req) => evidenceSvc.linkToTask(db, member(req), req.params.id, req.body)))
+  app.post('/api/work-evidence/:id/dispute', h((req) => evidenceSvc.disputeAttribution(db, member(req), req.params.id, req.body)))
+  app.post('/api/work-evidence/:id/attribution', h((req) => evidenceSvc.resolveAttribution(db, member(req), req.params.id, req.body)))
+  app.post('/api/work-evidence-links/:id', h((req) => evidenceSvc.decideLink(db, member(req), req.params.id, req.body)))
+  app.post('/api/work-evidence-links/:id/share', h((req) => evidenceSvc.setShare(db, member(req), req.params.id, req.body)))
+  app.get('/api/tasks/:id/external-evidence', h((req) => evidenceSvc.taskEvidence(db, member(req), req.params.id)))
+
+  app.get('/api/contribution/people/:userId', h((req) => measure.personProfile(db, member(req), req.params.userId, req.query)))
+
   // ---------- scheduled jobs (Embarko schedules call these with CRON_SECRET) ----------
   const cronOk = (req) => {
     const expected = cfg.cronSecret
@@ -394,7 +534,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   }
   app.get('/tasks/alerts', h(async (req, res) => {
     cronOk(req)
-    const out = await runAlertJob({ db, vs, m91, cfg })
+    const out = await runAlertJob({ db, vs, m91, cfg, ai })
     res.type('text/plain').send(out.text)
   }))
   app.get('/tasks/weekly-report', h(async (req, res) => {
@@ -404,6 +544,9 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   }))
 
   app.use('/api', (req, res, next) => next(new AppError(404, 'not_found', 'No such API route.')))
+  /* Path-based entry points for the landing → SPA hash routes */
+  app.get('/login', (_req, res) => res.redirect(302, '/#/login'))
+  app.get('/signup', (_req, res) => res.redirect(302, '/#/signup'))
   app.use(express.static(join(ROOT, 'public'), { index: 'index.html', maxAge: cfg.production ? '1h' : 0 }))
 
   // Errors: a stable JSON shape; internal errors are logged without user data and never leak details.
@@ -423,7 +566,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
  * A lease in app_state stops overlapping runs (e.g. a manual run during a scheduled one) from double-processing;
  * every step is also idempotent through dedupe keys, so a redeploy or duplicate call never repeats an alert.
  */
-export async function runAlertJob({ db, vs, m91, cfg }) {
+export async function runAlertJob({ db, vs, m91, cfg, ai = null }) {
   const lease = db.prepare(`INSERT INTO app_state (key, value, updated_at) VALUES ('alert_job_lease', ?, ?)
                             ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at WHERE app_state.value < ?`)
     .run(new Date(Date.now() + 4 * 60000).toISOString(), now(), now()).changes
@@ -433,6 +576,10 @@ export async function runAlertJob({ db, vs, m91, cfg }) {
     const raised = alerts.scanAlerts(db)
     const sent = await alerts.processDeliveries(db, m91)
     const retried = await auto.retryFailedRuns(db, vs, { appUrl: cfg.appUrl })
+    const analyses = ai ? recoverRuns(db, ai) : 0
+    const evidence = retryInbox(db)
+    const sig = signals.detectAll(db)
+    const health = await evidenceSources.checkSourceHealth(db, vs).catch((e) => ({ checked: 0, error: e.message }))
     db.prepare(`INSERT INTO app_state (key, value, updated_at) VALUES ('alert_job_last', ?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(now(), now())
     let backup = null
     try { backup = await backupIfDue(db, cfg.dataDir) } catch (error) { console.error('[backup] failed:', error.message); backup = { error: error.message } }
@@ -443,7 +590,7 @@ export async function runAlertJob({ db, vs, m91, cfg }) {
     const backupText = backup?.error ? `backup FAILED (${backup.error})`
       : backup ? `backup made (off-host ${backup.offsite}${backup.offsiteError ? `: ${backup.offsiteError}` : ''}; ${backup.restoreVerified ? 'restore verified' : `restore NOT verified: ${backup.restoreDetail}`})`
         : last ? `last backup ${last.at} (off-host ${last.offsite}; ${last.restoreVerifiedAt ? 'restore verified' : 'restore not verified'})` : 'no backup yet'
-    return { raised, sent, retried, replayed, text: `Alerts raised ${raised}; M91 sent ${sent.sent}, retrying ${sent.retrying}, failed ${sent.failed}, not configured ${sent.notConfigured}; automation retries ${retried.retried}; outbox replayed ${replayed}; ${backupText}; ${stats}` }
+    return { raised, sent, retried, replayed, analyses, text: `Alerts raised ${raised}; M91 sent ${sent.sent}, retrying ${sent.retrying}, failed ${sent.failed}, not configured ${sent.notConfigured}; automation retries ${retried.retried}; AI analyses resumed ${analyses}; evidence events retried ${evidence.retried}; evidence sources checked ${health.checked}; signals opened ${sig.opened}, resolved ${sig.resolved}; outbox replayed ${replayed}; ${backupText}; ${stats}` }
   } finally {
     db.prepare(`UPDATE app_state SET value = ?, updated_at = ? WHERE key = 'alert_job_lease'`).run(new Date(0).toISOString(), now())
   }

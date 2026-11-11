@@ -16,7 +16,8 @@ export function employeePermissions(db, orgId, userId) {
 export function loadContext(db, user) {
   const m = db.prepare(`SELECT m.*, o.name AS org_name FROM memberships m JOIN organizations o ON o.id = m.org_id WHERE m.user_id = ?`).get(user.id)
   if (!m || m.status !== 'active') return { user, membership: null, deactivated: Boolean(m) }
-  const managedTeamIds = m.role === 'manager'
+  // Admins have org-wide access, but also load their directly managed teams for the Manager experience.
+  const managedTeamIds = (m.role === 'manager' || m.role === 'admin')
     ? db.prepare('SELECT id FROM teams WHERE org_id = ? AND manager_id = ?').all(m.org_id, user.id).map((r) => r.id)
     : []
   const ctx = {

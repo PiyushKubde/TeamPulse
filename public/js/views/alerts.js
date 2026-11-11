@@ -1,11 +1,11 @@
-import { api, html, raw, ago, dt, empty, toast, errorText } from '../ui.js'
+import { api, html, raw, ago, dt, empty, toast, errorText, icon } from '../ui.js'
 import { app } from '../app.js'
 
 const DELIVERY = { QUEUED: 'info', SENDING: 'info', SENT: 'ok', DELIVERED: 'ok', FAILED: 'bad', NOT_CONFIGURED: 'warn', SKIPPED: 'outline' }
 
 export async function renderAlerts(main, q) {
   const tab = q.get('tab') || 'inbox'
-  main.innerHTML = html`<div class="page-head"><div><h1>Alerts &amp; notifications</h1><p>In-app notifications for everything that needs you. Important alerts can also go out through M91.</p></div>
+  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('alerts', 'xs')}Alerts</div><h1>Alerts &amp; notifications</h1><p>In-app notifications for everything that needs you. Important alerts can also go out through M91.</p></div>
     ${app.isAdmin ? html`<a class="btn ghost" href="#/settings/alerts">Alert settings</a>` : ''}</div>
     <div class="tabs">${[['inbox', 'Notifications'], ['history', 'M91 alert history']].map(([k, l]) => html`<a href="#/alerts?tab=${k}" ${tab === k ? raw('aria-current="page"') : ''}>${l}</a>`)}</div><div id="tb"></div>`
   const tb = main.querySelector('#tb')

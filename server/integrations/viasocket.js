@@ -24,6 +24,9 @@ export function createViasocketGateway({ orgId, projectId, secret }) {
     sampleEvent: (triggerId, authId, authType, inputData) => viasocket.sampleEvent(triggerId, authId, authType, inputData),
     subscribe: (userId, app, triggerKey, params) => user(userId).subscribe(app, triggerKey, params),
     updateSubscription: (userId, scriptId, params) => user(userId).updateSubscription(scriptId, params),
+    // viaSocket's built-in AI (https://viasocket.com/docs/ai.md): one message to the assistant viaSocket runs for
+    // this identifier. Used by the work-measurement engine with its own identifier, never an employee's chat.
+    aiSend: (identifier, params) => user(identifier).ai.send(params),
     // Runs of one of this user's flows, last 30 days (https://viasocket.com/docs/automations.md?format=sdk, runHistory).
     // The user-scoped token is derived per call and never stored; viaSocket answers 403 for another user's flow.
     flowRuns: async (userId, scriptId, { page = 1, limit = 20 } = {}) => {

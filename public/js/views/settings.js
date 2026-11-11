@@ -1,4 +1,4 @@
-import { api, html, raw, modal, bindForm, toast, errorText, ago, dt, empty, confirmDialog } from '../ui.js'
+import { api, html, raw, modal, bindForm, toast, errorText, ago, dt, empty, confirmDialog, icon, avatar, themePref, setThemePref } from '../ui.js'
 import { app, reloadSession } from '../app.js'
 import { deliveryForm } from './automations.js'
 
@@ -8,7 +8,7 @@ const PERMS = [['can_create_tasks', 'Can create tasks', 'Without this, the emplo
 export async function renderSettings(main, tab) {
   const tabs = TABS()
   if (!tabs.some(([k]) => k === tab)) tab = 'profile'
-  main.innerHTML = html`<div class="page-head"><div><h1>Settings</h1></div></div>
+  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('settings', 'xs')}Settings</div><h1>Settings</h1></div></div>
     <div class="tabs">${tabs.map(([k, l]) => html`<a href="#/settings/${k}" ${k === tab ? raw('aria-current="page"') : ''}>${l}</a>`)}</div><div id="sb"></div>`
   const sb = main.querySelector('#sb')
   const reload = () => renderSettings(main, tab)
@@ -17,17 +17,52 @@ export async function renderSettings(main, tab) {
 
 async function profile(sb) {
   const s = app.session
-  sb.innerHTML = html`<section class="card" style="max-width:640px"><dl class="kv"><dt>Name</dt><dd>${s.user.name}</dd><dt>Email</dt><dd>${s.user.email} ${s.user.emailVerified ? html`<span class="badge ok">verified by Google</span>` : ''}</dd>
-    <dt>Organization</dt><dd>${s.membership.orgName}</dd><dt>Role</dt><dd style="text-transform:capitalize">${s.membership.role}</dd></dl>
-    <p class="small muted" style="margin-top:8px">Name, email and picture come from your Google account and refresh each time you sign in.</p>
-    <form id="pf" style="margin-top:14px"><div class="form-error"></div><div class="field"><label for="ph">Phone for urgent alerts (optional)</label><input id="ph" name="phone" type="tel" value="${s.user.phone || ''}" placeholder="+919876543210"><div class="hint">Used only for important alerts through M91 when your admin turns them on.</div></div><button class="btn" type="submit">Save</button></form>
-    <h3 style="margin:18px 0 6px">My notifications</h3><div id="my-notif">${raw('<div class="loading">Loading…</div>')}</div>
-    ${app.role === 'employee' ? html`<h3 style="margin:18px 0 8px">My task permissions</h3><ul class="list">${PERMS.map(([k, l]) => html`<li><span class="badge ${s.membership.permissions[k] ? 'ok' : 'outline'}">${s.membership.permissions[k] ? 'Yes' : 'No'}</span><div class="grow">${l}</div></li>`)}</ul>` : ''}</section>`
+  sb.innerHTML = html`<div class="stack settings-stack">
+    <section class="card"><div class="row nowrap" style="gap:14px;margin-bottom:16px">${avatar(s.user.name, s.user.pictureUrl, 'lg')}<div style="min-width:0"><h2>${s.user.name}</h2><div class="small muted" style="text-transform:capitalize">${s.membership.role} · ${s.membership.orgName}</div></div></div>
+      <dl class="kv"><dt>Email</dt><dd>${s.user.email} ${s.user.emailVerified ? html`<span class="badge ok">verified</span>` : ''}</dd>
+      <dt>Organization</dt><dd>${s.membership.orgName}</dd><dt>Role</dt><dd style="text-transform:capitalize">${s.membership.role}</dd></dl>
+      ${s.user.signIn?.google ? html`<p class="small muted" style="margin:10px 0 0">Name, email and picture come from your Google account and refresh each time you sign in with Google.</p>` : ''}</section>
+    <section class="card" aria-labelledby="ap-h"><div class="card-head"><div><h2 id="ap-h"><span class="card-icon">${icon('sun')}</span>Appearance</h2><p>Light, dark, or follow your device. Saved in this browser and applied instantly.</p></div></div>
+      <div class="theme-switch wide" role="radiogroup" aria-label="Theme">${[['light', 'Light', 'sun'], ['dark', 'Dark', 'moon'], ['system', 'System', 'monitor']].map(([k, l, i]) => html`<button type="button" role="radio" data-theme-setting="${k}" aria-checked="${themePref() === k}">${icon(i)}<span>${l}</span></button>`)}</div></section>
+    <section class="card" aria-labelledby="si-h"><div class="card-head"><h2 id="si-h"><span class="card-icon">${icon('shield')}</span>Sign-in methods</h2></div><div id="signin"></div></section>
+    <section class="card" aria-labelledby="ct-h"><div class="card-head"><h2 id="ct-h"><span class="card-icon">${icon('alerts')}</span>Contact for urgent alerts</h2></div>
+      <form id="pf"><div class="form-error"></div><div class="field"><label for="ph">Phone (optional)</label><input id="ph" name="phone" type="tel" value="${s.user.phone || ''}" placeholder="+919876543210"><div class="hint">Used only for important alerts through M91 when your admin turns them on.</div></div><button class="btn" type="submit">Save</button></form></section>
+    <section class="card" aria-labelledby="mn-h"><div class="card-head"><h2 id="mn-h"><span class="card-icon">${icon('message')}</span>My notifications</h2></div><div id="my-notif">${raw('<div class="loading">Loading…</div>')}</div></section>
+    ${app.role === 'employee' ? html`<section class="card"><div class="card-head"><h2><span class="card-icon">${icon('tasks')}</span>My task permissions</h2></div><ul class="list">${PERMS.map(([k, l]) => html`<li><span class="badge ${s.membership.permissions[k] ? 'ok' : 'outline'}">${s.membership.permissions[k] ? 'Yes' : 'No'}</span><div class="grow">${l}</div></li>`)}</ul></section>` : ''}</div>`
+  sb.querySelectorAll('[data-theme-setting]').forEach((b) => b.addEventListener('click', () => {
+    setThemePref(b.dataset.themeSetting)
+    sb.querySelectorAll('[data-theme-setting]').forEach((x) => x.setAttribute('aria-checked', String(x === b)))
+    document.querySelectorAll('#profile-menu [data-theme-pick]').forEach((x) => x.setAttribute('aria-checked', String(x.dataset.themePick === b.dataset.themeSetting)))
+  }))
   renderMyNotifications(sb.querySelector('#my-notif'))
+  renderSignInMethods(sb.querySelector('#signin'))
   bindForm(sb.querySelector('#pf'), (d) => api('/api/profile', { method: 'PATCH', body: { phone: d.phone || null } }), { onSuccess: (out) => {
-    const M = { reachable: 'Saved. M91 can reach this phone.', invited: 'Saved. Accept the TeamPulse invitation in the M91 app to receive urgent alerts.', invite_failed: `Saved, but the M91 invitation failed: ${out.m91Error || ''}` }
+    const M = { channel: 'Saved. Urgent alerts go to your team’s M91 channel — ask your admin to add this phone there in the M91 app.', reachable: 'Saved. M91 can reach this phone.', invited: 'Saved. Accept the TeamPulse invitation in the M91 app to receive urgent alerts.', invite_failed: `Saved, but the M91 invitation failed: ${out.m91Error || ''}` }
     toast(M[out.m91] || 'Saved.'); reloadSession()
   } })
+}
+
+function renderSignInMethods(box) {
+  const s = app.session
+  const m = s.user.signIn || {}
+  box.innerHTML = html`<ul class="list">
+    <li><span class="badge ${m.google ? 'ok' : 'outline'}">${m.google ? 'On' : 'Off'}</span><div class="grow">Google<div class="small muted">${m.google ? 'Linked to your Google account.' : 'Sign in once with Continue with Google using this same email to link it.'}</div></div></li>
+    <li><span class="badge ${m.password ? 'ok' : 'outline'}">${m.password ? 'On' : 'Off'}</span><div class="grow">Email and password</div>
+      ${m.password ? html`<button class="btn small ghost" id="chpw">Change password</button>` : s.emailAuth?.available ? html`<button class="btn small ghost" id="addpw">Add password sign-in</button>` : html`<span class="small muted">Not available on this server</span>`}</li></ul>`.toString()
+  box.querySelector('#addpw')?.addEventListener('click', async (e) => {
+    e.target.disabled = true
+    try { const r = await api('/api/account/password-link', { method: 'POST' }); toast(r.message, { error: !r.ok }) } catch (err) { toast(errorText(err), { error: true }) } finally { e.target.disabled = false }
+  })
+  box.querySelector('#chpw')?.addEventListener('click', () => {
+    modal(html`<h2 id="modal-title">Change password</h2><form id="cpf" class="stack" novalidate><div class="form-error"></div>
+      <div><label for="cp0">Current password</label><input id="cp0" name="currentPassword" type="password" required autocomplete="current-password" maxlength="128"></div>
+      <div><label for="cp1">New password</label><input id="cp1" name="password" type="password" required minlength="12" maxlength="128" autocomplete="new-password"><div class="hint">At least 12 characters, three kinds of characters (or 20+ characters).</div></div>
+      <div><label for="cp2">Confirm new password</label><input id="cp2" name="confirmPassword" type="password" required maxlength="128" autocomplete="new-password"></div>
+      <p class="small muted">Other devices will be signed out.</p>
+      <div class="row end"><button class="btn ghost" data-close>Cancel</button><button class="btn" type="submit">Change password</button></div></form>`.toString(), (body, close) => {
+      bindForm(body.querySelector('#cpf'), (d) => api('/api/account/password', { method: 'POST', body: d }), { onSuccess: () => { close(true); toast('Password changed. Other devices were signed out.') } })
+    })
+  })
 }
 
 async function organization(sb, reload) {

@@ -10,7 +10,12 @@ export const ALERT_RULES = {
   unassigned: { label: 'Unassigned task', recipients: ['manager'], m91Default: false, threshold: 'unassignedHours' },
   critical_blocked: { label: 'Critical task blocked', recipients: ['assignee', 'manager'], m91Default: true, threshold: null },
   blocker_unresolved: { label: 'Blocker unresolved', recipients: ['manager'], m91Default: true, threshold: 'blockerUnresolvedHours' },
-  submitted_for_review: { label: 'Task submitted for review', recipients: ['manager'], m91Default: false, threshold: null }
+  submitted_for_review: { label: 'Task submitted for review', recipients: ['manager'], m91Default: false, threshold: null },
+  // Sprint 2: human interventions only — never for ordinary evidence events or sync errors.
+  evidence_attribution_review: { label: 'Disputed evidence on an assessed task needs your decision', recipients: ['manager'], m91Default: true, threshold: null },
+  evidence_attribution_note: { label: 'Evidence attribution disputed', recipients: ['manager'], m91Default: false, threshold: null },
+  assessment_disputed: { label: 'An employee disputes an analysis of their work', recipients: ['manager'], m91Default: true, threshold: null },
+  impact_verification_needed: { label: 'A reported figure was linked to an outcome awaiting verification', recipients: ['manager'], m91Default: false, threshold: null }
 }
 
 export const DEFAULT_ALERT_SETTINGS = {
