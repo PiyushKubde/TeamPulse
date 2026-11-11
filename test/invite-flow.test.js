@@ -375,6 +375,77 @@ test('confirmToken: confirmed: true alone is no longer accepted', async () => {
   } finally { await t.close() }
 })
 
+// ───────────────────── Copilot invite-to-workspace ─────────────────────
+
+test('add_to_team: returns notFound with email when employee not in org', async () => {
+  const t = await startApp()
+  try {
+    const s = seedOrg(t.db)
+    const r = await t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, intent: 'add_to_team', question: 'Add unknown@external.com to my team' } })
+    assert.equal(r.status, 200)
+    assert.equal(r.body.intent, 'add_to_team')
+    assert.equal(r.body.notFound, true)
+    assert.equal(r.body.email, 'unknown@external.com')
+  } finally { await t.close() }
+})
+
+test('POST /api/invitations: manager can create invitation from copilot flow', async () => {
+  const t = await startApp()
+  try {
+    const s = seedOrg(t.db)
+    const r = await t.call('/api/invitations', { method: 'POST', as: s.manager, body: { email: 'newperson@example.com', role: 'employee' } })
+    assert.equal(r.status, 200)
+    assert.equal(r.body.email, 'newperson@example.com')
+    assert.ok(r.body.link, 'invitation link returned')
+    assert.match(r.body.link, /#\/invite\//, 'link uses invite hash route')
+  } finally { await t.close() }
+})
+
+test('POST /api/invitations: duplicate active invitation returns revoked + new (not error)', async () => {
+  const t = await startApp()
+  try {
+    const s = seedOrg(t.db)
+    const r1 = await t.call('/api/invitations', { method: 'POST', as: s.manager, body: { email: 'dup@example.com', role: 'employee' } })
+    assert.equal(r1.status, 200)
+    // Second invite for same email revokes the first and issues a new one
+    const r2 = await t.call('/api/invitations', { method: 'POST', as: s.manager, body: { email: 'dup@example.com', role: 'employee' } })
+    assert.equal(r2.status, 200)
+    assert.ok(r2.body.link, 'new invitation link returned')
+    assert.notEqual(r2.body.id, r1.body.id, 'a new invitation was created')
+  } finally { await t.close() }
+})
+
+test('POST /api/invitations: manager cannot invite outside their org scope', async () => {
+  const t = await startApp()
+  try {
+    const s = seedOrg(t.db)
+    // A manager with no managed team cannot invite
+    const unassigned = makeUser(t.db, { name: 'Unassigned Mgr' })
+    addMember(t.db, s.org.id, unassigned, 'manager', null)
+    const r = await t.call('/api/invitations', { method: 'POST', as: unassigned, body: { email: 'outside@example.com', role: 'employee' } })
+    assert.equal(r.status, 403)
+  } finally { await t.close() }
+})
+
+test('POST /api/invitations: admin can invite org-wide', async () => {
+  const t = await startApp()
+  try {
+    const s = seedOrg(t.db)
+    const r = await t.call('/api/invitations', { method: 'POST', as: s.admin, body: { email: 'admin-invite@example.com', role: 'employee' } })
+    assert.equal(r.status, 200)
+    assert.equal(r.body.email, 'admin-invite@example.com')
+  } finally { await t.close() }
+})
+
+test('POST /api/invitations: cannot invite existing org member', async () => {
+  const t = await startApp()
+  try {
+    const s = seedOrg(t.db)
+    const r = await t.call('/api/invitations', { method: 'POST', as: s.admin, body: { email: s.employee.email, role: 'employee' } })
+    assert.equal(r.status, 409)
+  } finally { await t.close() }
+})
+
 test('POST /auth/register-and-accept: returns email_exists_sign_in when account exists', async () => {
   const t = await startApp()
   try {

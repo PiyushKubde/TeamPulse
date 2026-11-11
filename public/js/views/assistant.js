@@ -9,10 +9,29 @@ const today = () => new Date(Date.now() + tz() * 60000).toISOString().slice(0, 1
 const SEV = { high: ['Important', 'bad'], medium: ['Worth a look', 'warn'], low: ['FYI', 'outline'] }
 
 function answerBlock(a, question) {
+  // Pending confirmation: show Confirm and Cancel buttons (uses server-issued confirmToken)
+  const confirmSection = a.pendingConfirmation && a.confirmToken
+    ? html`<div class="copilot-action-row" style="margin-top:12px"><button class="btn brand" data-confirm-token="${a.confirmToken}" data-confirm-intent="${a.intent}">${icon('check')}Confirm</button><button class="btn subtle" data-cancel-confirm>Cancel</button></div>`
+    : ''
+  // Team selection: clickable team chips
+  const teamSelectSection = a.pendingTeamSelection
+    ? html`<div class="chips" style="margin-top:10px">${a.items.map((i) => html`<button class="chip brand" data-select-team="${i.teamId}" data-select-email="${i.email}" data-select-intent="${i.intent}">${i.text}</button>`)}</div>`
+    : ''
+  // Not found: invite to workspace button
+  const inviteSection = a.notFound && a.email && !a.pendingConfirmation
+    ? html`<div class="copilot-invite-box" style="margin-top:14px;padding:14px;background:var(--surface-2,#f5f5f4);border-radius:8px;border:1px solid var(--border,#e7e7e5)">
+        <p style="margin:0 0 10px"><b>This person is not in your workspace.</b> Send them an invitation link to join before adding them to your team.</p>
+        <button class="btn brand" data-invite-email="${a.email}">${icon('send')}Invite to Workspace</button>
+        <div class="copilot-invite-result" style="margin-top:10px"></div>
+      </div>`
+    : ''
   return html`<div class="turn">${question ? html`<div class="ask-bubble"><span class="sr">You asked: </span>${question}</div>` : ''}
     <div class="answer card flat"><h3>${a.title}</h3><p>${a.answer}</p>
-    ${a.items?.length ? html`<ul class="list">${a.items.map((i) => html`<li><div class="grow" style="min-width:0">${i.href ? html`<a href="${i.href}" ${/^https?:/.test(i.href) ? raw('target="_blank" rel="noopener noreferrer"') : ''}><b>${i.text}</b></a>` : html`<b>${i.text}</b>`}
+    ${!a.pendingTeamSelection && a.items?.length ? html`<ul class="list">${a.items.map((i) => html`<li><div class="grow" style="min-width:0">${i.href ? html`<a href="${i.href}" ${/^https?:/.test(i.href) ? raw('target="_blank" rel="noopener noreferrer"') : ''}><b>${i.text}</b></a>` : html`<b>${i.text}</b>`}
       ${i.detail ? html`<div class="small muted">${i.detail}</div>` : ''}${i.taskId ? html`<button class="btn small link" data-ask-task="${i.taskId}">Find evidence for this</button>` : ''}</div>${i.severity ? html`<span class="badge ${SEV[i.severity][1]}">${SEV[i.severity][0]}</span>` : ''}</li>`)}</ul>` : ''}
+    ${teamSelectSection}
+    ${confirmSection}
+    ${inviteSection}
     ${a.suggestions?.length ? html`<div class="chips">${a.suggestions.map((s) => html`<button class="chip" data-intent="${s.intent}">${s.label}</button>`)}</div>` : ''}
     ${a.journeyHref ? html`<p class="small" style="margin:10px 0 0"><a href="${a.journeyHref}">See the whole contribution journey ${icon('arrowRight', 'xs')}</a></p>` : ''}
     <div class="answer-foot">${prov('fact', 'From records')}<span class="small muted">${a.note || 'Answered from your TeamPulse records and linked evidence — not generated text.'}</span></div></div></div>`
@@ -50,6 +69,51 @@ export function questionBox(box, { team = false, suggestions = [] }) {
     if (chip) { e.preventDefault(); run({ intent: chip.dataset.intent, question: chip.textContent }, chip.textContent.trim()) }
     const t = e.target.closest('[data-ask-task]')
     if (t) run({ intent: 'find_evidence', taskId: t.dataset.askTask }, 'Find evidence for this task')
+    // Confirm a pending team-management action (server-issued token)
+    const confirmBtn = e.target.closest('[data-confirm-token]')
+    if (confirmBtn && !confirmBtn.disabled) {
+      e.preventDefault()
+      run({ intent: confirmBtn.dataset.confirmIntent, confirmToken: confirmBtn.dataset.confirmToken }, 'Confirm')
+    }
+    // Cancel a pending confirmation (remove just the action row)
+    const cancelBtn = e.target.closest('[data-cancel-confirm]')
+    if (cancelBtn) { e.preventDefault(); cancelBtn.closest('.copilot-action-row')?.remove() }
+    // Select a team for add_to_team
+    const teamBtn = e.target.closest('[data-select-team]')
+    if (teamBtn && !teamBtn.disabled) {
+      e.preventDefault()
+      run({ intent: teamBtn.dataset.selectIntent || 'add_to_team', question: teamBtn.dataset.selectEmail ? `Add ${teamBtn.dataset.selectEmail} to my team` : '', teamId: teamBtn.dataset.selectTeam }, `Add to ${teamBtn.textContent.trim()}`)
+    }
+    // Invite to workspace
+    const inviteBtn = e.target.closest('[data-invite-email]')
+    if (inviteBtn && !inviteBtn.disabled) {
+      e.preventDefault()
+      inviteBtn.disabled = true
+      inviteBtn.textContent = 'Sending invitation…'
+      const email = inviteBtn.dataset.inviteEmail
+      const resultBox = inviteBtn.closest('.copilot-invite-box')?.querySelector('.copilot-invite-result')
+      api('/api/invitations', { method: 'POST', body: { email, role: 'employee' } })
+        .then((inv) => {
+          if (resultBox) {
+            const link = inv.link || ''
+            resultBox.innerHTML = html`<div class="notice ok" style="margin:0"><b>Invitation created for ${inv.email}.</b><br>Share this link with them:</div>
+              <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap"><code class="small" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--surface-1,#fff);border:1px solid var(--border,#e7e7e5);border-radius:4px;padding:4px 8px">${link}</code>
+              <button class="btn small ghost" data-copy-link="${link}">${icon('copy', 'xs')}Copy Link</button></div>`.toString()
+          }
+          inviteBtn.remove()
+        })
+        .catch((err) => {
+          if (resultBox) resultBox.innerHTML = html`<div class="notice err">${errorText(err)}</div>`.toString()
+          inviteBtn.disabled = false
+          inviteBtn.innerHTML = `${icon('send')}Invite to Workspace`
+        })
+    }
+    // Copy invitation link
+    const copyBtn = e.target.closest('[data-copy-link]')
+    if (copyBtn) {
+      e.preventDefault()
+      navigator.clipboard?.writeText(copyBtn.dataset.copyLink).then(() => toast('Link copied!')).catch(() => toast('Copy failed — select the link manually.', { error: true }))
+    }
   }
   if (!box.dataset.qbWired) {
     box.dataset.qbWired = '1'
