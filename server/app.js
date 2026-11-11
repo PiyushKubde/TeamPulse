@@ -8,6 +8,7 @@ import { assignableUserIds, loadContext, isAdmin, isManager } from './access.js'
 import { COOKIE, cookieHeader, createSession, destroySession, readCookie, sessionUser } from './auth/sessions.js'
 import { finishGoogleLogin, googleTransport, startGoogleLogin, upsertGoogleUser } from './auth/google.js'
 import * as accounts from './auth/accounts.js'
+import { sha256 } from './auth/sessions.js'
 import { createMailer } from './auth/mailer.js'
 import * as orgs from './services/orgs.js'
 import * as perms from './services/permissions.js'
@@ -22,6 +23,7 @@ import { listNotifications, markRead } from './services/notify.js'
 import { listAudit } from './services/audit.js'
 import * as alerts from './services/alerts.js'
 import { onEvent, recoverOutbox, useOutbox } from './services/events.js'
+import { transaction as txn, uuid } from './db.js'
 import { backupIfDue, lastBackup } from './services/backups.js'
 import * as conns from './integrations/connections.js'
 import { sendThrough, slackChannels, slackUsers } from './integrations/actions.js'
@@ -195,6 +197,36 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   authPost('/auth/password/forgot', (req) => accounts.forgotPassword(db, mailer, cfg, req.body))
   authPost('/auth/password/check', (req) => accounts.describeToken(db, req.body))
   authPost('/auth/password/reset', async (req, res) => { const user = await accounts.resetPassword(db, req.body); setSession(res, user.id, req); return { ok: true } })
+  // Public invitation lookup (by token — no auth required, returns only non-sensitive invitation info)
+  app.get('/api/invite/:token', h((req) => {
+    const token = String(req.params.token || '')
+    if (!token || token.length < 10 || token.length > 200) return { valid: false, reason: 'invalid' }
+    const inv = db.prepare(`SELECT i.*, o.name AS org_name, u.name AS invited_by_name FROM invitations i JOIN organizations o ON o.id = i.org_id JOIN users u ON u.id = i.invited_by WHERE i.token_hash = ? AND i.status = 'pending'`).get(sha256(token))
+    if (!inv) return { valid: false, reason: 'invalid' }
+    if (inv.expires_at < now()) return { valid: false, reason: 'expired' }
+    // Check if an account with this email already exists
+    const hasAccount = Boolean(db.prepare('SELECT 1 FROM users WHERE lower(email) = ? AND email_verified = 1').get(inv.email.toLowerCase()))
+    return { valid: true, id: inv.id, email: inv.email, role: inv.role, orgName: inv.org_name, invitedBy: inv.invited_by_name, hasAccount, expiresAt: inv.expires_at }
+  }))
+  // Register a new account using an invitation token (no email verification step needed)
+  authPost('/auth/register-and-accept', async (req, res) => {
+    const token = String(req.body?.inviteToken || '')
+    if (!token) throw new AppError(400, 'validation_failed', 'Invitation token is required.')
+    const inv = db.prepare(`SELECT * FROM invitations WHERE token_hash = ? AND status = 'pending'`).get(sha256(token))
+    if (!inv || inv.expires_at < now()) throw new AppError(400, 'invitation_invalid', 'This invitation link is not valid or has expired.')
+    const user = await accounts.registerForInvitation(db, req.body, inv.email)
+    const tsNow = now()
+    txn(db, () => {
+      if (!db.prepare('SELECT 1 FROM memberships WHERE user_id = ?').get(user.id)) {
+        db.prepare(`INSERT INTO memberships (id, org_id, user_id, role, team_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`)
+          .run(uuid(), inv.org_id, user.id, inv.role, inv.team_id, tsNow, tsNow)
+        db.prepare(`UPDATE invitations SET status = 'accepted', accepted_by = ?, updated_at = ? WHERE id = ?`).run(user.id, tsNow, inv.id)
+        db.prepare(`UPDATE join_requests SET status = 'withdrawn', updated_at = ? WHERE user_id = ? AND status = 'pending'`).run(tsNow, user.id)
+      }
+    })
+    setSession(res, user.id, req)
+    return { ok: true }
+  })
   app.post('/api/account/password', h((req) => accounts.changePassword(db, signedIn(req), req.body, readCookie(req))))
   app.post('/api/account/password-link', h((req) => { limitAuth(ip(req)); return accounts.requestPasswordLink(db, mailer, cfg, signedIn(req)) }))
 

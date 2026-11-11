@@ -1,6 +1,6 @@
 // TeamPulse browser app. Talks only to this server's /api; the server decides every permission.
 import { api, html, raw, esc, avatar, loading, errorBlock, toast, icon, themePref, setThemePref } from './ui.js'
-import { renderLogin, renderWelcome, renderSignup, renderForgot, renderReset, renderVerify } from './views/onboarding.js'
+import { renderLogin, renderWelcome, renderSignup, renderForgot, renderReset, renderVerify, renderInviteAccept } from './views/onboarding.js'
 import { renderLanding } from './views/landing.js'
 import { renderDashboard } from './views/dashboard.js'
 import { renderTaskList, renderTaskDetail } from './views/tasks.js'
@@ -216,7 +216,12 @@ async function route() {
   const q = new URLSearchParams(query)
   if (!app.session) app.session = await api('/api/session')
   const s = app.session
-  if (path.startsWith('#/invite/')) sessionStorage.setItem('tp_invite', path.slice('#/invite/'.length))
+  // Invitation pages are handled before anything else — they work for signed-in and signed-out users.
+  if (path.startsWith('#/invite/')) {
+    sessionStorage.setItem('tp_invite', path.slice('#/invite/'.length))
+    currentShellKey = null
+    return renderInviteAccept(root, path.slice('#/invite/'.length))
+  }
   // Links from emails work whether or not someone is signed in on this browser.
   if (path.startsWith('#/verify/')) { currentShellKey = null; return renderVerify(root, path.slice('#/verify/'.length)) }
   if (path.startsWith('#/reset/')) { currentShellKey = null; return renderReset(root, path.slice('#/reset/'.length)) }
@@ -230,7 +235,7 @@ async function route() {
     return renderLanding(root)
   }
   if (!s.membership) { currentShellKey = null; return renderWelcome(root) }
-  if (path === '' || path === '#/' || path === '#/landing' || path === '#/login' || path === '#/signup' || path === '#/forgot' || path === '#/welcome' || path.startsWith('#/invite/')) { location.replace('#/dashboard'); return }
+  if (path === '' || path === '#/' || path === '#/landing' || path === '#/login' || path === '#/signup' || path === '#/forgot' || path === '#/welcome') { location.replace('#/dashboard'); return }
   const hit = ROUTES.map(([re, key, fn]) => { const m = path.match(re); return m ? { key, view: fn(m) } : null }).find(Boolean)
   let key = hit?.key || 'dashboard'
   if (app.isManager && path.startsWith('#/tasks/')) key = 'team-tasks'

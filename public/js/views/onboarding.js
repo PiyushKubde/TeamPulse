@@ -146,6 +146,98 @@ export async function renderVerify(root, token) {
   })
 }
 
+export async function renderInviteAccept(root, token) {
+  root.innerHTML = html`<div class="auth"><div class="panel card" style="padding:28px"><div class="logo">${LOGO}<span>TeamPulse</span></div><div class="loading">Loading invitation…</div></div></div>`
+  let inv, sess
+  try {
+    [inv, sess] = await Promise.all([api(`/api/invite/${encodeURIComponent(token)}`), api('/api/session')])
+  } catch (e) {
+    root.innerHTML = html`<div class="auth"><div class="panel card" style="padding:28px"><div class="logo">${LOGO}<span>TeamPulse</span></div><div class="notice err" role="alert">Could not load invitation: ${errorText(e)}</div><p><a href="#/login">Sign in</a></p></div></div>`
+    return
+  }
+  if (!inv.valid) {
+    root.innerHTML = html`<div class="auth"><div class="panel card" style="padding:28px"><div class="logo">${LOGO}<span>TeamPulse</span></div>
+      <div class="notice err" role="alert">${inv.reason === 'expired' ? 'This invitation has expired. Ask someone to send you a new one.' : 'This invitation link is not valid or has already been used.'}</div>
+      <p>${sess.user ? html`<a href="#/dashboard">Go to dashboard</a>` : html`<a href="#/login">Sign in</a>`}</p></div></div>`
+    return
+  }
+  const { email, role, orgName, invitedBy } = inv
+  const meta = html`<p class="muted">Invited by <b>${invitedBy}</b> to join <b>${orgName}</b> as <b>${role}</b>.<br><small>Sent to ${email}</small></p>`
+  // Case A/B: signed in
+  if (sess.user) {
+    if (sess.membership) {
+      // Already in an org; check if the invitation email matches
+      if (sess.user.email.toLowerCase() !== email.toLowerCase()) {
+        root.innerHTML = html`<div class="auth"><div class="panel card" style="padding:28px"><div class="logo">${LOGO}<span>TeamPulse</span></div>
+          <h1>Invitation for a different email</h1>${meta}
+          <div class="notice warn" role="alert">You are signed in as <b>${sess.user.email}</b>. This invitation is for <b>${email}</b>. Sign in with that email to accept it.</div>
+          <p><a href="#/dashboard">Go to your dashboard</a> · <button class="btn link" id="out">Sign out</button></p></div></div>`
+        document.getElementById('out').onclick = async () => { await api('/api/session/logout', { method: 'POST' }); navigate(`#/invite/${token}`) }
+        return
+      }
+      root.innerHTML = html`<div class="auth"><div class="panel card" style="padding:28px"><div class="logo">${LOGO}<span>TeamPulse</span></div>
+        <h1>Accept invitation</h1>${meta}
+        <div class="notice warn" role="alert">You are already a member of another organization. Accepting this invitation will not remove your current membership.</div>
+        <p><a href="#/dashboard">Stay in your current workspace</a></p></div></div>`
+      return
+    }
+    if (sess.user.email.toLowerCase() !== email.toLowerCase()) {
+      root.innerHTML = html`<div class="auth"><div class="panel card" style="padding:28px"><div class="logo">${LOGO}<span>TeamPulse</span></div>
+        <h1>Invitation for a different email</h1>${meta}
+        <div class="notice warn" role="alert">You are signed in as <b>${sess.user.email}</b>. This invitation was sent to <b>${email}</b>. <button class="btn link" id="out">Sign out</button> and sign in with that email to accept it.</div></div></div>`
+      document.getElementById('out').onclick = async () => { await api('/api/session/logout', { method: 'POST' }); navigate(`#/invite/${token}`) }
+      return
+    }
+    // Signed in with matching email, no membership — accept directly
+    root.innerHTML = html`<div class="auth"><div class="panel card" style="padding:28px"><div class="logo">${LOGO}<span>TeamPulse</span></div>
+      <h1>Accept your invitation</h1>${meta}
+      <p>You are signed in as <b>${sess.user.email}</b>. Click below to join <b>${orgName}</b>.</p>
+      <button class="btn" id="ia-accept">Join ${orgName}</button></div></div>`
+    document.getElementById('ia-accept').addEventListener('click', async (e) => {
+      const btn = e.currentTarget; btn.disabled = true
+      try { await api(`/api/invitations/${inv.id}/accept`, { method: 'POST' }); sessionStorage.removeItem('tp_invite'); navigate('#/dashboard', { replace: true }) } catch (err) { toast(errorText(err), { error: true }); btn.disabled = false }
+    })
+    return
+  }
+  // Not signed in
+  if (inv.hasAccount) {
+    // Case C: existing account, sign in first
+    root.innerHTML = html`<div class="auth"><div class="panel card" style="padding:28px"><div class="logo">${LOGO}<span>TeamPulse</span></div>
+      <h1>Sign in to accept</h1>${meta}
+      <div class="notice" role="note">An account already exists for <b>${email}</b>. Sign in to accept the invitation.</div>
+      ${sess.googleConfigured ? html`<a class="btn google" style="width:100%;margin:16px 0 8px" href="/auth/google?returnTo=${encodeURIComponent(`#/invite/${token}`)}">${GOOGLE} Continue with Google</a>${divider}` : ''}
+      <form id="ia-login" class="stack" novalidate><div class="form-error"></div>
+        <div><label for="ia-email">Email</label><input id="ia-email" name="email" type="email" value="${email}" readonly maxlength="254" autocomplete="username"></div>
+        ${pwField('ia-pw', 'password', 'Password', 'current-password')}
+        <button class="btn" type="submit">Sign in and accept</button>
+      </form>
+      <p style="margin-top:14px"><a href="#/forgot">Forgot password?</a></p></div></div>`
+    const f = document.getElementById('ia-login')
+    if (f) {
+      wirePasswordToggles(f)
+      bindForm(f, (d) => api('/auth/login', { method: 'POST', body: d }), { onSuccess: () => navigate(`#/invite/${token}`, { replace: true }) })
+    }
+    return
+  }
+  // Case D: new user — register and accept in one step
+  root.innerHTML = html`<div class="auth"><div class="panel card" style="padding:28px"><div class="logo">${LOGO}<span>TeamPulse</span></div>
+    <h1>Create account and join</h1>${meta}
+    ${sess.googleConfigured ? html`<a class="btn google" style="width:100%;margin:16px 0 8px" href="/auth/google?returnTo=${encodeURIComponent(`#/invite/${token}`)}">${GOOGLE} Continue with Google</a>${divider}` : ''}
+    <form id="ia-reg" class="stack" novalidate><div class="form-error"></div>
+      <div><label for="ia-name">Full name</label><input id="ia-name" name="name" type="text" required maxlength="120" autocomplete="name"></div>
+      <div><label for="ia-email2">Email</label><input id="ia-email2" name="email" type="email" value="${email}" readonly maxlength="254" autocomplete="username"></div>
+      ${pwField('ia-pw', 'password', 'Password', 'new-password', POLICY_HINT)}
+      ${pwField('ia-pw2', 'confirmPassword', 'Confirm password', 'new-password')}
+      <button class="btn" type="submit">Create account and join ${orgName}</button>
+    </form>
+    <p class="small muted" style="margin-top:14px">Already have an account? <a href="#/login">Sign in</a></p></div></div>`
+  const f = document.getElementById('ia-reg')
+  if (f) {
+    wirePasswordToggles(f)
+    bindForm(f, (d) => api('/auth/register-and-accept', { method: 'POST', body: { ...d, inviteToken: token } }), { onSuccess: () => { toast('Welcome aboard!'); navigate('#/dashboard', { replace: true }) } })
+  }
+}
+
 export async function renderWelcome(root) {
   const invite = sessionStorage.getItem('tp_invite')
   const [sess, ob] = await Promise.all([api('/api/session'), api(`/api/onboarding${invite ? `?inviteToken=${encodeURIComponent(invite)}` : ''}`)])

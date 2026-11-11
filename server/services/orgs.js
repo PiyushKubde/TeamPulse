@@ -248,13 +248,21 @@ export function invitationsFor(db, user, token) {
   }))
 }
 
-/** Accepting requires the invitation's email to equal the user's Google-verified email. */
+/** Look up a pending invitation by token (public — no auth required). Returns null when not found/expired. */
+export function getInvitationByToken(db, token) {
+  if (!token || typeof token !== 'string') return null
+  const i = db.prepare(`SELECT i.*, o.name AS org_name, u.name AS invited_by_name FROM invitations i JOIN organizations o ON o.id = i.org_id JOIN users u ON u.id = i.invited_by WHERE i.token_hash = ? AND i.status = 'pending'`).get(sha256(token))
+  if (!i || i.expires_at < now()) return null
+  return { id: i.id, email: i.email, role: i.role, orgName: i.org_name, invitedBy: i.invited_by_name, teamId: i.team_id, expiresAt: i.expires_at }
+}
+
+/** Accepting requires the invitation's email to equal the user's verified email. */
 export function acceptInvitation(db, user, invitationId) {
   if (db.prepare('SELECT 1 FROM memberships WHERE user_id = ?').get(user.id)) throw conflict('You already belong to an organization.', 'already_member')
   const i = db.prepare(`SELECT * FROM invitations WHERE id = ? AND status = 'pending'`).get(v.id(invitationId, 'Invitation', { required: true }))
   if (!i || i.expires_at < now()) throw notFound('Invitation')
   if (!user.email_verified || i.email.toLowerCase() !== user.email.toLowerCase()) {
-    throw new AppError(403, 'invitation_email_mismatch', `This invitation was sent to ${i.email}. Sign in with that Google account to accept it.`)
+    throw new AppError(403, 'invitation_email_mismatch', `This invitation was sent to ${i.email}. Sign in with that email to accept it.`)
   }
   const ts = now()
   transaction(db, () => {

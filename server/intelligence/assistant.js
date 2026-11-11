@@ -5,7 +5,7 @@
 // provider, data-policy and supervised gates. Nothing here counts activity or ranks people.
 import { json, now } from '../db.js'
 import { AppError, invalid } from '../errors.js'
-import { isManager, requireManager, scopeUserIds, taskScopeSql } from '../access.js'
+import { isAdmin, isManager, requireManager, scopeUserIds, taskScopeSql } from '../access.js'
 import { deriveConditions } from '../services/tasks.js'
 import { managerDashboard } from '../services/dashboard.js'
 import { canSeeEvidence } from '../evidence/service.js'
@@ -138,7 +138,12 @@ const MANAGER_INTENTS = [
   ['review', /\b(review|approv|disput)\w*/i, 'Which contributions need review?'],
   ['delays', /\b(delay|late|overdue|slip|behind)\w*/i, 'Where is work getting delayed?'],
   ['help', /\b(help|assist|support|struggl)\w*/i, 'Which employees may need assistance?'],
-  ['attention', /\b(attention|focus|today|intervene|priorit)\w*/i, 'What should I pay attention to today?']
+  ['attention', /\b(attention|focus|today|intervene|priorit)\w*/i, 'What should I pay attention to today?'],
+  ['find_employee', /\b(find|look up|search|who is)\b.*\b(employee|person|member|user)\b|\bemail\b.*@/i, 'Find an employee by name or email'],
+  ['team_members', /\b(who|members?|people)\b.*\b(team|my team|in my)\b|\bmy team\b.*\b(who|member)/i, 'Who is in my team?'],
+  ['org_teams', /\b(teams?|groups?)\b.*\b(org|organization|exist|all)\b|\ball (teams?|groups?)\b/i, 'What teams exist?'],
+  ['add_to_team', /\b(add|move|assign|put|want)\b.*\b(to|into|in)\b.*\b(team|my team)\b|\bteam\b.*\b(add|join)/i, 'Add someone to a team'],
+  ['remove_from_team', /\b(remov\w*|kick|take out|transfer out)\b.*\b(from|out of)\b.*\bteam\b|\bremov\w*\b.*\bteam\b/i, 'Remove someone from a team']
 ]
 export const suggestions = (team) => (team ? MANAGER_INTENTS : EMPLOYEE_INTENTS).map(([k, , label]) => ({ intent: k, label }))
 
@@ -298,6 +303,86 @@ function teamAnswer(db, ctx, intent, body) {
     return ans(intent, 'Pay attention to today', top.length ? 'The most important signals, with what to do:' : 'Nothing needs urgent attention. Review queue and blockers are clear.',
       top.map((s) => ({ text: `${s.kindLabel}${s.personName ? ` — ${s.personName}` : ''}${s.task ? `: ${s.task.title}` : ''}`, detail: `${s.reason} → ${s.action}`, href: s.task ? `#/tasks/${s.task.id}` : '#/reviews', severity: s.severity })))
   }
+
+  // ----- employee / team management intents -----
+  if (intent === 'find_employee') {
+    const q = String(body.question || '').toLowerCase()
+    const emailMatch = q.match(/([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/)
+    const rows = db.prepare(`SELECT u.id, u.name, u.email, m.role, m.team_id, t.name AS team_name FROM memberships m JOIN users u ON u.id = m.user_id LEFT JOIN teams t ON t.id = m.team_id WHERE m.org_id = ? AND m.status = 'active'`).all(ctx.orgId)
+    let matches
+    if (emailMatch) {
+      matches = rows.filter((r) => r.email.toLowerCase() === emailMatch[1])
+    } else {
+      const terms = q.split(/\W+/).filter((w) => w.length > 2 && !['find','look','who','search','employee','person','member'].includes(w))
+      matches = terms.length ? rows.filter((r) => terms.some((w) => r.name.toLowerCase().includes(w) || r.email.toLowerCase().includes(w))) : []
+    }
+    if (!matches.length) {
+      const hint = emailMatch ? `No employee with email ${emailMatch[1]} found in your organization.` : 'No matching employee found. Try their email address for an exact match.'
+      return ans(intent, 'Employee search', hint, [], { notFound: true, query: emailMatch?.[1] })
+    }
+    return ans(intent, 'Employee search', `Found ${matches.length} match${matches.length > 1 ? 'es' : ''}:`, matches.map((r) => ({ text: r.name, detail: `${r.email} · ${r.role}${r.team_name ? ` · ${r.team_name}` : ''}`, href: `#/contribution/${r.id}`, userId: r.id, teamId: r.team_id, teamName: r.team_name, role: r.role, email: r.email })))
+  }
+
+  if (intent === 'team_members') {
+    const teams = db.prepare('SELECT * FROM teams WHERE org_id = ?').all(ctx.orgId)
+    const myTeams = isAdmin(ctx) ? teams : teams.filter((t) => ctx.managedTeamIds.includes(t.id))
+    if (!myTeams.length) return ans(intent, 'Your team members', 'You are not set as the manager of any team. Ask an admin to assign you as team manager.', [])
+    const items = []
+    for (const team of myTeams) {
+      const members = db.prepare(`SELECT u.id, u.name, u.email, m.role FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.org_id = ? AND m.team_id = ? AND m.status = 'active' ORDER BY u.name`).all(ctx.orgId, team.id)
+      for (const r of members) items.push({ text: r.name, detail: `${r.email} · ${r.role} · ${team.name}`, href: `#/contribution/${r.id}`, userId: r.id, teamId: team.id, teamName: team.name })
+    }
+    return ans(intent, 'Your team members', items.length ? `${items.length} member(s) across ${myTeams.length} team(s):` : 'No active members found in your team(s).', items)
+  }
+
+  if (intent === 'org_teams') {
+    const teams = db.prepare(`SELECT t.*, u.name AS manager_name, (SELECT COUNT(*) FROM memberships m WHERE m.team_id = t.id AND m.status = 'active') AS n FROM teams t LEFT JOIN users u ON u.id = t.manager_id WHERE t.org_id = ? ORDER BY t.name`).all(ctx.orgId)
+    return ans(intent, 'Organization teams', `${teams.length} team(s):`, teams.map((t) => ({ text: t.name, detail: `${t.n} member(s)${t.manager_name ? ` · manager: ${t.manager_name}` : ' · no manager assigned'}`, href: '#/settings/teams', teamId: t.id, teamName: t.name })))
+  }
+
+  if (intent === 'add_to_team' || intent === 'remove_from_team') {
+    const q = String(body.question || '').toLowerCase()
+    const emailMatch = q.match(/([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/)
+    // If a confirmed action is passed (after user confirmed), execute it
+    if (body.confirmed && body.action === 'add_to_team' && body.userId && body.teamId) {
+      if (!isAdmin(ctx) && !ctx.managedTeamIds.includes(body.teamId)) return ans(intent, 'Not authorized', 'You can only add employees to teams you manage.', [], { error: true })
+      const target = db.prepare(`SELECT u.id, u.name, m.role, m.team_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.org_id = ? AND m.user_id = ? AND m.status = 'active'`).get(ctx.orgId, body.userId)
+      if (!target) return ans(intent, 'Not found', 'That employee is not in this organization.', [], { error: true })
+      if (target.role !== 'employee') return ans(intent, 'Cannot add', 'Only employees can be moved between teams. Managers and admins manage their own team assignment.', [], { error: true })
+      const team = db.prepare('SELECT * FROM teams WHERE id = ? AND org_id = ?').get(body.teamId, ctx.orgId)
+      if (!team) return ans(intent, 'Not found', 'That team was not found.', [], { error: true })
+      db.prepare('UPDATE memberships SET team_id = ?, updated_at = ? WHERE org_id = ? AND user_id = ? AND status = ?').run(body.teamId, now(), ctx.orgId, body.userId, 'active')
+      return ans('add_to_team', 'Done', `${target.name} has been added to ${team.name}.`, [], { executed: true, userId: body.userId, teamId: body.teamId })
+    }
+    if (body.confirmed && body.action === 'remove_from_team' && body.userId) {
+      const target = db.prepare(`SELECT u.id, u.name, m.role, m.team_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.org_id = ? AND m.user_id = ? AND m.status = 'active'`).get(ctx.orgId, body.userId)
+      if (!target) return ans(intent, 'Not found', 'That employee is not in this organization.', [], { error: true })
+      if (!isAdmin(ctx) && !ctx.managedTeamIds.includes(target.team_id)) return ans(intent, 'Not authorized', 'You can only remove employees from teams you manage.', [], { error: true })
+      db.prepare('UPDATE memberships SET team_id = NULL, updated_at = ? WHERE org_id = ? AND user_id = ? AND status = ?').run(now(), ctx.orgId, body.userId, 'active')
+      return ans('remove_from_team', 'Done', `${target.name} has been removed from their team.`, [], { executed: true, userId: body.userId })
+    }
+    // Otherwise, look up the employee and return a pending confirmation
+    if (!emailMatch) return ans(intent, 'Employee not specified', 'Please include the employee\'s email address in your message, e.g. "Add alice@company.com to my team".', [])
+    const target = db.prepare(`SELECT u.id, u.name, u.email, m.role, m.team_id, t.name AS team_name FROM memberships m JOIN users u ON u.id = m.user_id LEFT JOIN teams t ON t.id = m.team_id WHERE m.org_id = ? AND lower(u.email) = ? AND m.status = 'active'`).get(ctx.orgId, emailMatch[1])
+    if (!target) return ans(intent, 'Employee not found', `No employee with email ${emailMatch[1]} is registered in this organization. They may need to be invited first.`, [], { notFound: true, email: emailMatch[1] })
+    if (intent === 'remove_from_team') {
+      if (!target.team_id) return ans(intent, 'Not in a team', `${target.name} is not currently in any team.`, [])
+      if (!isAdmin(ctx) && !ctx.managedTeamIds.includes(target.team_id)) return ans(intent, 'Not authorized', `${target.name} is in ${target.team_name}, which you do not manage.`, [], { error: true })
+      return ans(intent, 'Confirm removal', `Remove ${target.name} (${target.email}) from ${target.team_name}?`, [], { pendingConfirmation: true, action: 'remove_from_team', userId: target.id, teamId: target.team_id, teamName: target.team_name, personName: target.name })
+    }
+    // add_to_team
+    const myTeams = isAdmin(ctx) ? db.prepare('SELECT * FROM teams WHERE org_id = ? ORDER BY name').all(ctx.orgId) : db.prepare(`SELECT * FROM teams WHERE org_id = ? AND id IN (${ctx.managedTeamIds.map(() => '?').join(',') || "''"}) ORDER BY name`).all(ctx.orgId, ...ctx.managedTeamIds)
+    if (!myTeams.length) return ans(intent, 'No managed teams', 'You are not set as the manager of any team.', [], { error: true })
+    if (target.team_id && ctx.managedTeamIds.includes(target.team_id)) return ans(intent, 'Already in your team', `${target.name} is already in ${target.team_name}.`, [{ text: target.name, detail: `${target.email} · ${target.team_name}`, href: `#/contribution/${target.id}` }])
+    // Pick the team from body or from managed teams (if only one)
+    const targetTeam = body.teamId ? myTeams.find((t) => t.id === body.teamId) : myTeams.length === 1 ? myTeams[0] : null
+    if (!targetTeam) {
+      return ans(intent, 'Which team?', `${target.name} (${target.email}) found. Which team should they join?${target.team_name ? ` They are currently in ${target.team_name}.` : ''}`, myTeams.map((t) => ({ text: t.name, detail: 'click to select this team', teamId: t.id, intent: 'add_to_team', userId: target.id, email: target.email })), { pendingTeamSelection: true })
+    }
+    if (!isAdmin(ctx) && !ctx.managedTeamIds.includes(targetTeam.id)) return ans(intent, 'Not authorized', `You do not manage ${targetTeam.name}.`, [], { error: true })
+    return ans('add_to_team', 'Confirm addition', `Add ${target.name} (${target.email}) to ${targetTeam.name}?${target.team_name ? ` They are currently in ${target.team_name}.` : ''}`, [], { pendingConfirmation: true, action: 'add_to_team', userId: target.id, teamId: targetTeam.id, teamName: targetTeam.name, personName: target.name })
+  }
+
   throw invalid('Unknown question.')
 }
 

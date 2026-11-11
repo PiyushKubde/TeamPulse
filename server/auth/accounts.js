@@ -272,3 +272,30 @@ export async function registerDirect(db, body) {
 }
 
 export const signInMethods = (u) => ({ google: Boolean(u.google_sub), password: Boolean(u.password_hash) })
+
+/**
+ * Register with email+password via an invitation token: no email verification needed.
+ * Returns the created/updated user. The caller must accept the invitation and set the session.
+ */
+export async function registerForInvitation(db, body, invitedEmail) {
+  const name = v.text(body?.name, 'Full name', { required: true, max: 120 })
+  const email = invitedEmail.toLowerCase()
+  if (body?.password !== body?.confirmPassword) throw invalid('The two passwords do not match.', { field: 'confirmPassword' })
+  checkPasswordPolicy(body?.password, { email, name })
+  const hash = await hashPassword(body.password)
+  const existing = usersByEmail(db, email)
+  if (existing.some((u) => u.email_verified)) throw invalid('An account with this email already exists. Sign in to accept the invitation.', { field: 'email' })
+  const ts = now()
+  let user = existing[0]
+  if (user) {
+    db.prepare('UPDATE users SET name = ?, email_verified = 1, email_verified_at = ?, password_hash = ?, password_updated_at = ?, failed_logins = 0, locked_until = NULL, updated_at = ? WHERE id = ?')
+      .run(name, ts, hash, ts, ts, user.id)
+  } else {
+    user = { id: uuid() }
+    db.prepare(`INSERT INTO users (id, google_sub, email, email_verified, email_verified_at, name, password_hash, password_updated_at, created_at, updated_at)
+                VALUES (?, NULL, ?, 1, ?, ?, ?, ?, ?, ?)`)
+      .run(user.id, email, ts, name, hash, ts, ts, ts)
+  }
+  authAudit(db, user.id, 'auth.registered_via_invitation')
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(user.id)
+}
