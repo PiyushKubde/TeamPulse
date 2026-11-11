@@ -160,6 +160,30 @@ test("Manager Copilot: grounded, scoped to the manager's people, no rankings", a
     }
     assert.equal((await t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, question: 'Who is blocked and why?' } })).body.intent, 'blocked')
     assert.equal((await ask(s.otherAdmin, 'blocked')).body.items.length, 0, 'another organization sees nothing')
+
+    // Intent classification: add/remove verb must win over team_members noun match
+    const q = (question) => t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, question } })
+    assert.equal((await q('add new team member to my team alice@example.com')).body.intent, 'add_to_team', 'add + team member + email → add_to_team')
+    assert.equal((await q('I want this employee in my team alice@example.com')).body.intent, 'add_to_team', 'want + team + email → add_to_team')
+    assert.equal((await q('invite bob@example.com to my team')).body.intent, 'add_to_team', 'invite + email → add_to_team')
+    assert.equal((await q('who is in my team')).body.intent, 'team_members', 'who + in my team → team_members')
+    assert.equal((await q('show me my team members')).body.intent, 'team_members', 'show team members → team_members')
+    assert.equal((await q('remove alice@example.com from my team')).body.intent, 'remove_from_team', 'remove + email → remove_from_team')
+
+    // Self-addition: manager adds themselves
+    const selfAdd = (await q(`add me to my team ${s.manager.email}`)).body
+    assert.ok(selfAdd.intent === 'add_to_team', 'self-add intent fires')
+    assert.ok(/already|membership|admin/i.test(selfAdd.answer), 'self-add explains membership status')
+
+    // find_employee: returns employee from same org
+    const found = (await t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, intent: 'find_employee', question: `find ${s.employee.email}` } })).body
+    assert.ok(found.items.length, 'find_employee returns match')
+    assert.equal(found.items[0].email, s.employee.email)
+
+    // team_members: manager with assigned team sees members
+    const members = (await ask(s.manager, 'team_members')).body
+    assert.ok(members.items.length, 'manager with assigned team sees members')
+    assert.ok(members.items.every((i) => i.href), 'each member has a link')
   } finally { await t.close() }
 })
 

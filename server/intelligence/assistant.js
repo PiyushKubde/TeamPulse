@@ -162,10 +162,12 @@ const MANAGER_INTENTS = [
   ['help', /\b(help|assist|support|struggl)\w*/i, 'Which employees may need assistance?'],
   ['attention', /\b(attention|focus|today|intervene|priorit)\w*/i, 'What should I pay attention to today?'],
   ['find_employee', /\b(find|look up|search|who is)\b.*\b(employee|person|member|user)\b|\bemail\b.*@/i, 'Find an employee by name or email'],
+  // add_to_team and remove_from_team must come before team_members: "add new team member to my team"
+  // contains "member" and "team" which would match the team_members regex first otherwise.
+  ['add_to_team', /\b(add|invite|include|assign|move|put|want)\b.*\b(to|into|in|join)\b.*\bteam\b|\b(add|invite|include)\b.*[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}/i, 'Add someone to a team'],
+  ['remove_from_team', /\b(remov\w*|kick|take out|transfer out)\b.*\b(from|out of)\b.*\bteam\b|\bremov\w*\b.*\bteam\b/i, 'Remove someone from a team'],
   ['team_members', /\b(who|members?|people)\b.*\b(team|my team|in my)\b|\bmy team\b.*\b(who|member)/i, 'Who is in my team?'],
   ['org_teams', /\b(teams?|groups?)\b.*\b(org|organization|exist|all)\b|\ball (teams?|groups?)\b/i, 'What teams exist?'],
-  ['add_to_team', /\b(add|move|assign|put|want)\b.*\b(to|into|in)\b.*\b(team|my team)\b|\bteam\b.*\b(add|join)/i, 'Add someone to a team'],
-  ['remove_from_team', /\b(remov\w*|kick|take out|transfer out)\b.*\b(from|out of)\b.*\bteam\b|\bremov\w*\b.*\bteam\b/i, 'Remove someone from a team']
 ]
 export const suggestions = (team) => (team ? MANAGER_INTENTS : EMPLOYEE_INTENTS).map(([k, , label]) => ({ intent: k, label }))
 
@@ -348,7 +350,7 @@ function teamAnswer(db, ctx, intent, body) {
   if (intent === 'team_members') {
     const teams = db.prepare('SELECT * FROM teams WHERE org_id = ?').all(ctx.orgId)
     const myTeams = isAdmin(ctx) ? teams : teams.filter((t) => ctx.managedTeamIds.includes(t.id))
-    if (!myTeams.length) return ans(intent, 'Your team members', 'You are not set as the manager of any team. Ask an admin to assign you as team manager.', [])
+    if (!myTeams.length) return ans(intent, 'Your team members', 'You are not set as the manager of any team. Ask an admin to go to Settings → Teams and assign you as team manager.', [])
     const items = []
     for (const team of myTeams) {
       const members = db.prepare(`SELECT u.id, u.name, u.email, m.role FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.org_id = ? AND m.team_id = ? AND m.status = 'active' ORDER BY u.name`).all(ctx.orgId, team.id)
@@ -392,6 +394,17 @@ function teamAnswer(db, ctx, intent, body) {
     if (!emailMatch) return ans(intent, 'Employee not specified', 'Please include the employee\'s email address in your message, e.g. "Add alice@company.com to my team".', [])
     const target = db.prepare(`SELECT u.id, u.name, u.email, m.role, m.team_id, t.name AS team_name FROM memberships m JOIN users u ON u.id = m.user_id LEFT JOIN teams t ON t.id = m.team_id WHERE m.org_id = ? AND lower(u.email) = ? AND m.status = 'active'`).get(ctx.orgId, emailMatch[1])
     if (!target) return ans(intent, 'Employee not found', `No employee with email ${emailMatch[1]} is registered in this organization. They may need to be invited first.`, [], { notFound: true, email: emailMatch[1] })
+    // Self-addition: explain membership status instead of treating as an external employee action.
+    if (target.id === ctx.user.id) {
+      if (intent === 'remove_from_team') {
+        if (!target.team_id) return ans(intent, 'Your team membership', 'You are not currently in any team.', [])
+        return ans(intent, 'Your team membership', `You are currently in ${target.team_name}. Managers cannot change their own team assignment — an admin must do this.`, [], { error: true })
+      }
+      // add_to_team for self
+      if (target.team_id && ctx.managedTeamIds.includes(target.team_id)) return ans(intent, 'Already in your team', `You (${target.email}) are already a member of ${target.team_name}.`, [])
+      if (target.team_id) return ans(intent, 'Your team membership', `You (${target.email}) are currently in ${target.team_name}. Managers cannot change their own team assignment — an admin must do this.`, [], { error: true })
+      return ans(intent, 'Your team membership', `You (${target.email}) are not currently in any team. An admin must assign you to a team.`, [], { error: true })
+    }
     if (intent === 'remove_from_team') {
       if (!target.team_id) return ans(intent, 'Not in a team', `${target.name} is not currently in any team.`, [])
       if (!isAdmin(ctx) && !ctx.managedTeamIds.includes(target.team_id)) return ans(intent, 'Not authorized', `${target.name} is in ${target.team_name}, which you do not manage.`, [], { error: true })
@@ -400,7 +413,7 @@ function teamAnswer(db, ctx, intent, body) {
     }
     // add_to_team
     const myTeams = isAdmin(ctx) ? db.prepare('SELECT * FROM teams WHERE org_id = ? ORDER BY name').all(ctx.orgId) : db.prepare(`SELECT * FROM teams WHERE org_id = ? AND id IN (${ctx.managedTeamIds.map(() => '?').join(',') || "''"}) ORDER BY name`).all(ctx.orgId, ...ctx.managedTeamIds)
-    if (!myTeams.length) return ans(intent, 'No managed teams', 'You are not set as the manager of any team.', [], { error: true })
+    if (!myTeams.length) return ans(intent, 'No managed teams', 'You are not set as the manager of any team. An admin can assign you as team manager in Settings → Teams.', [], { error: true })
     if (target.team_id && ctx.managedTeamIds.includes(target.team_id)) return ans(intent, 'Already in your team', `${target.name} is already in ${target.team_name}.`, [{ text: target.name, detail: `${target.email} · ${target.team_name}`, href: `#/contribution/${target.id}` }])
     // Pick the team from body or from managed teams (if only one)
     const targetTeam = body.teamId ? myTeams.find((t) => t.id === body.teamId) : myTeams.length === 1 ? myTeams[0] : null

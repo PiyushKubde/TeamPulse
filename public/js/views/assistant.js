@@ -26,7 +26,12 @@ export function questionBox(box, { team = false, suggestions = [] }) {
     ${suggestions.length ? html`<div class="chips suggestions" aria-label="Suggested questions">${suggestions.map((s) => html`<button type="button" class="chip" data-intent="${s.intent}">${s.label}</button>`)}</div>` : ''}
     <div class="ask-out" aria-live="polite"></div>`.toString()
   const out = box.querySelector('.ask-out')
+  let inFlight = false
   const run = async (body, shown) => {
+    if (inFlight) return
+    inFlight = true
+    const submitBtn = box.querySelector('form button[type=submit]')
+    if (submitBtn) submitBtn.disabled = true
     const pending = document.createElement('div')
     pending.className = 'turn'
     pending.innerHTML = html`${shown ? html`<div class="ask-bubble">${shown}</div>` : ''}<div class="answer card flat"><span class="loading-label"><span class="spinner" aria-hidden="true"></span>Looking through your records…</span><span class="skel" style="margin-top:10px"></span><span class="skel" style="width:70%;margin-top:8px"></span></div>`.toString()
@@ -35,15 +40,23 @@ export function questionBox(box, { team = false, suggestions = [] }) {
       const a = await api('/api/assistant/ask', { method: 'POST', body: { ...body, team, tz: tz() } })
       pending.outerHTML = answerBlock(a, shown).toString()
     } catch (e) { pending.innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString() }
+    finally { inFlight = false; if (submitBtn) submitBtn.disabled = false }
   }
-  box.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); const q = e.target.question.value.trim(); if (q) { run({ question: q }, q); e.target.question.value = '' } })
-  box.addEventListener('ask', (e) => run({ intent: e.detail.intent, question: e.detail.shown }, e.detail.shown))
-  box.addEventListener('click', (e) => {
+  // Use named handlers so we can deduplicate if questionBox is called more than once on the same element.
+  const onSubmit = (e) => { e.preventDefault(); const q = e.target.question.value.trim(); if (q) { run({ question: q }, q); e.target.question.value = '' } }
+  const onAsk = (e) => run({ intent: e.detail.intent, question: e.detail.shown }, e.detail.shown)
+  const onClick = (e) => {
     const chip = e.target.closest('[data-intent]')
     if (chip) { e.preventDefault(); run({ intent: chip.dataset.intent, question: chip.textContent }, chip.textContent.trim()) }
     const t = e.target.closest('[data-ask-task]')
     if (t) run({ intent: 'find_evidence', taskId: t.dataset.askTask }, 'Find evidence for this task')
-  })
+  }
+  if (!box.dataset.qbWired) {
+    box.dataset.qbWired = '1'
+    box.addEventListener('ask', onAsk)
+    box.addEventListener('click', onClick)
+  }
+  box.querySelector('form').addEventListener('submit', onSubmit)
 }
 
 const WHY = {
