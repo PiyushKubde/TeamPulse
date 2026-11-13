@@ -596,7 +596,9 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   /* Path-based entry points for the landing → SPA hash routes */
   app.get('/login', (_req, res) => res.redirect(302, '/#/login'))
   app.get('/signup', (_req, res) => res.redirect(302, '/#/signup'))
-  app.use(express.static(join(ROOT, 'public'), { index: 'index.html', maxAge: cfg.production ? '1h' : 0 }))
+  // The page, scripts and stylesheet live at fixed URLs, so they are revalidated on every load (a cheap 304 when unchanged): a deploy then reaches
+  // everyone at once instead of up to an hour later. Fonts and images, which rarely change, keep the one-hour cache.
+  app.use(express.static(join(ROOT, 'public'), { index: 'index.html', maxAge: cfg.production ? '1h' : 0, setHeaders: (res, file) => { if (/\.(html|js|css)$/i.test(file)) res.setHeader('Cache-Control', 'no-cache') } }))
 
   // Errors: a stable JSON shape; internal errors are logged without user data and never leak details.
   // eslint-disable-next-line no-unused-vars
