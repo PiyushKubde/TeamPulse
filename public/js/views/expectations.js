@@ -1,7 +1,7 @@
 // Manager-led expectations: the task's Expectations panel (confirmed values, suggestions, history, priority recommendation,
 // change requests), the manager's review queue, and work analytics. The server decides every permission; nothing here edits a
 // confirmed value except through the manager's own routes, and employees only ever see read-only values and can request a change.
-import { api, html, raw, modal, bindForm, toast, errorText, ago, dt, icon, empty, prioBadge, statusBadge, toLocalInput, fromLocalInput } from '../ui.js'
+import { api, html, raw, modal, bindForm, toast, errorText, ago, dt, icon, empty, prioBadge, toLocalInput, fromLocalInput } from '../ui.js'
 import { app } from '../app.js'
 
 const PRIORITIES = [['CRITICAL', 'Critical'], ['HIGH', 'High'], ['MEDIUM', 'Medium'], ['LOW', 'Low']]
@@ -223,93 +223,4 @@ export async function renderReviewQueue(main) {
     }))
   }
   paint()
-}
-
-// ================= analytics =================
-const FILTERS = ['from', 'to', 'userId', 'teamId', 'priority', 'complexity', 'status', 'deadline', 'outcome', 'workType']
-const STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'BLOCKED', 'SUBMITTED_FOR_REVIEW', 'COMPLETED', 'CANCELLED', 'PENDING_ACCEPTANCE', 'DECLINED']
-const n0 = (v) => (v === null || v === undefined ? '—' : String(v))
-const dateInput = (iso) => (iso ? String(iso).slice(0, 10) : '')
-
-export async function renderAnalytics(main, q) {
-  const manager = app.isManager
-  const tab = manager ? (['team', 'person', 'task'].includes(q.get('tab')) ? q.get('tab') : 'team') : 'person'
-  const [people, teams] = manager ? await Promise.all([api('/api/members').catch(() => []), api('/api/teams').catch(() => [])]) : [[], []]
-  const params = new URLSearchParams()
-  for (const k of FILTERS) if (q.get(k)) params.set(k, k === 'from' || k === 'to' ? `${q.get(k)}${q.get(k).length === 10 ? (k === 'from' ? 'T00:00:00.000Z' : 'T23:59:59.000Z') : ''}` : q.get(k))
-  const personId = tab === 'person' ? (manager ? q.get('userId') || people[0]?.userId : app.me.id) : null
-  if (tab === 'person') params.delete('userId')
-  let data = null
-  let err = null
-  try {
-    if (tab === 'team') data = await api(`/api/analytics/team?${params}`)
-    else if (tab === 'person' && personId) data = await api(`/api/analytics/person/${personId}?${params}`)
-    else if (tab === 'task' && q.get('taskId')) data = await api(`/api/analytics/task/${q.get('taskId')}`)
-  } catch (e) { err = e }
-  let tasks = []
-  if (tab === 'task' && manager) tasks = await api('/api/tasks?view=team').catch(() => [])
-  const filt = (k) => q.get(k) || ''
-  const tabLink = (k, label) => { const u = new URLSearchParams(q); u.set('tab', k); return html`<a href="#/analytics?${u}" role="tab" ${tab === k ? raw('aria-selected="true" aria-current="page"') : raw('aria-selected="false"')} class="tab-link ${tab === k ? 'active' : ''}" data-testid="tab-${k}">${label}</a>` }
-  const notes = data?.notes || ['Priority and deadlines are what managers expected. They are context for the work, never a performance score.']
-  main.innerHTML = html`<header class="page-head"><div><h1>Work analytics</h1><p class="muted">What was expected, what changed and what came out of it. Computed from records you are allowed to see.</p></div></header>
-    <div class="notice" data-testid="analytics-notes" role="note"><ul style="margin:0;padding-left:18px">${notes.map((x) => html`<li>${x}</li>`)}</ul></div>
-    ${manager ? html`<div class="tabs" role="tablist" style="margin:12px 0">${tabLink('team', 'Team')}${tabLink('person', 'Person')}${tabLink('task', 'Task')}</div>` : ''}
-    <form id="af" class="card analytics-filters" data-testid="analytics-filters" style="margin:12px 0"><input type="hidden" name="tab" value="${tab}">
-      <div class="fields">
-        ${tab === 'task' ? '' : html`<div class="field"><label for="af-from">From</label><input id="af-from" name="from" type="date" value="${dateInput(filt('from'))}"></div><div class="field"><label for="af-to">To</label><input id="af-to" name="to" type="date" value="${dateInput(filt('to'))}"></div>`}
-        ${manager && tab === 'person' ? html`<div class="field"><label for="af-user">Employee</label><select id="af-user" name="userId" data-testid="af-user">${people.map((p) => html`<option value="${p.userId}" ${p.userId === personId ? raw('selected') : ''}>${p.name}</option>`)}</select></div>` : ''}
-        ${manager && tab === 'team' ? html`<div class="field"><label for="af-user">Employee</label><select id="af-user" name="userId"><option value="">Everyone</option>${people.map((p) => html`<option value="${p.userId}" ${p.userId === filt('userId') ? raw('selected') : ''}>${p.name}</option>`)}</select></div><div class="field"><label for="af-team">Team</label><select id="af-team" name="teamId"><option value="">All teams</option>${teams.map((x) => html`<option value="${x.id}" ${x.id === filt('teamId') ? raw('selected') : ''}>${x.name}</option>`)}</select></div>` : ''}
-        ${tab === 'task' ? html`<div class="field"><label for="af-task">Task</label><select id="af-task" name="taskId" data-testid="af-task"><option value="">Choose a task</option>${tasks.map((x) => html`<option value="${x.id}" ${x.id === q.get('taskId') ? raw('selected') : ''}>${x.title}</option>`)}</select></div>` : html`
-        <div class="field"><label for="af-pr">Priority</label><select id="af-pr" name="priority" data-testid="af-priority"><option value="">Any</option>${[...PRIORITIES, ['UNRESOLVED', 'Not set']].map(([k, l]) => html`<option value="${k}" ${filt('priority') === k ? raw('selected') : ''}>${l}</option>`)}</select></div>
-        <div class="field"><label for="af-cx">Complexity expected</label><select id="af-cx" name="complexity"><option value="">Any</option>${COMPLEXITY.map(([k, l]) => html`<option value="${k}" ${filt('complexity') === k ? raw('selected') : ''}>${l}</option>`)}</select></div>
-        <div class="field"><label for="af-st">Status</label><select id="af-st" name="status"><option value="">Any</option>${STATUSES.map((s) => html`<option value="${s}" ${filt('status') === s ? raw('selected') : ''}>${s.replace(/_/g, ' ').toLowerCase()}</option>`)}</select></div>
-        <div class="field"><label for="af-dl">Deadline</label><select id="af-dl" name="deadline"><option value="">Any</option>${[['CONFIRMED', 'Confirmed'], ['NOT_CONFIRMED', 'Not confirmed'], ['OVERDUE', 'Overdue now'], ['MISSED', 'Missed'], ['MET', 'Met']].map(([k, l]) => html`<option value="${k}" ${filt('deadline') === k ? raw('selected') : ''}>${l}</option>`)}</select></div>
-        <div class="field"><label for="af-oc">Outcome</label><select id="af-oc" name="outcome"><option value="">Any</option>${[['VERIFIED', 'Verified'], ['CLAIMED', 'Claimed, not verified'], ['NONE', 'None recorded']].map(([k, l]) => html`<option value="${k}" ${filt('outcome') === k ? raw('selected') : ''}>${l}</option>`)}</select></div>
-        <div class="field"><label for="af-wt">Work type</label><input id="af-wt" name="workType" type="text" maxlength="40" value="${filt('workType')}"></div>`}
-      </div>
-      <div class="row"><button class="btn" type="submit" data-testid="af-apply">Apply filters</button><a class="btn ghost" href="#/analytics?tab=${tab}">Clear</a></div></form>
-    <div id="an-body" data-testid="analytics-body">${err ? html`<div class="notice err" role="alert">${errorText(err)}</div>` : data ? (data.view === 'task' ? taskBody(data) : summaryBody(data)) : empty('Choose what to look at', tab === 'task' ? 'Pick a task above.' : 'No data yet.')}</div>`.toString()
-  main.querySelector('#af').addEventListener('submit', (e) => {
-    e.preventDefault()
-    const u = new URLSearchParams()
-    for (const [k, v] of new FormData(e.target)) if (String(v).trim()) u.set(k, String(v).trim())
-    location.hash = `#/analytics?${u}`
-  })
-  main.querySelector('#af-task')?.addEventListener('change', (e) => e.target.form.requestSubmit())
-  main.querySelector('#af-user')?.addEventListener('change', (e) => { if (tab === 'person') e.target.form.requestSubmit() })
-}
-
-const table = (title, obj, testid) => {
-  const entries = Object.entries(obj || {})
-  return html`<section class="card" data-testid="${testid}"><h3 style="margin:0 0 6px">${title}</h3><table class="small"><tbody>${entries.length ? entries.map(([k, v]) => html`<tr><td>${String(k).replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase())}</td><td style="text-align:right"><b>${v}</b></td></tr>`) : html`<tr><td class="muted">Nothing in this range</td></tr>`}</tbody></table></section>`
-}
-
-function summaryBody(d) {
-  const s = d.summary
-  const stat = (label, value, id) => html`<div class="stat" data-testid="stat-${id}"><div class="label">${label}</div><div class="value">${value}</div></div>`
-  const max = Math.max(1, ...s.trend.map((w) => Math.max(w.created, w.completed)))
-  return html`${d.view === 'person' ? html`<section class="card" style="margin-bottom:12px" data-testid="person-measure"><h2 style="margin:0 0 4px">${d.person.name}</h2><p class="small muted" style="margin:0">${d.person.team || ''} · ${d.measurement.narrative}</p></section>` : ''}
-    <div class="stats" data-testid="analytics-summary">${stat('Tasks', s.tasks, 'tasks')}${stat('Open', s.open, 'open')}${stat('Completed', s.completed, 'completed')}${stat('Overdue now', s.overdue, 'overdue')}${stat('At risk', s.atRisk, 'atrisk')}${stat('Blocked', s.blocked, 'blocked')}${stat('Priority not set', s.unresolved.priority, 'unresolved-priority')}${stat('No confirmed deadline', s.unresolved.deadline, 'unresolved-deadline')}${stat('Verified outcomes (shared counted once)', s.outcomes.distinctVerifiedOutcomes, 'outcomes')}${stat('Pending change requests', s.changes.pendingRequests, 'pending-requests')}</div>
-    <div class="grid three" style="margin-bottom:12px">${table('By priority', s.byPriority, 'by-priority')}${table('By complexity expected', s.byComplexityExpectation, 'by-complexity')}${table('By observed complexity', s.byObservedComplexity, 'by-observed')}</div>
-    <div class="grid three" style="margin-bottom:12px">${table('By status', Object.fromEntries(Object.entries(s.byStatus)), 'by-status')}${table('By work type', s.byWorkType, 'by-worktype')}${table('Deadlines', { 'Confirmed': s.deadlines.confirmed, 'Not confirmed': s.deadlines.notConfirmed, 'Met': s.deadlines.met, 'Missed (see context)': s.deadlines.missed, 'Overdue now': s.deadlines.overdueNow }, 'deadlines')}</div>
-    <div class="grid three" style="margin-bottom:12px">${table('Changes', { 'Deadlines changed': s.changes.deadlineChanged, 'Priorities changed': s.changes.priorityChanged, 'Tasks with changes': s.changes.tasksWithChanges, 'Change requests': s.changes.requests }, 'changes')}${table('Outcomes', { 'Tasks with a verified outcome': s.outcomes.verified, 'Claimed, not verified': s.outcomes.claimed, 'None recorded': s.outcomes.none, 'Distinct verified outcomes': s.outcomes.distinctVerifiedOutcomes }, 'outcomes-table')}${table('How tasks started', s.byOrigin, 'by-origin')}</div>
-    <section class="card" style="margin-bottom:12px" data-testid="trend"><h3 style="margin:0 0 6px">Weekly trend</h3>${s.trend.length ? html`<table class="small"><thead><tr><th>Week of</th><th>Created</th><th>Completed</th></tr></thead><tbody>${s.trend.map((w) => html`<tr><td>${w.weekStart}</td><td><span class="bar" style="display:inline-block;height:8px;width:${Math.round((w.created / max) * 120)}px;background:var(--text-3);border-radius:4px"></span> ${w.created}</td><td><span class="bar" style="display:inline-block;height:8px;width:${Math.round((w.completed / max) * 120)}px;background:var(--text);border-radius:4px"></span> ${w.completed}</td></tr>`)}</tbody></table><p class="small muted" style="margin:6px 0 0">Counts of tasks are not a measure of contribution.</p>` : html`<p class="muted small">No activity in this range.</p>`}</section>
-    ${d.view === 'team' ? html`<section class="card" style="margin-bottom:12px" data-testid="people"><h3 style="margin:0 0 6px">People <span class="small muted">(alphabetical, not a ranking)</span></h3><div class="table-wrap"><table class="small"><thead><tr><th>Name</th><th>Team</th><th>Tasks</th><th>Open</th><th>Completed</th><th>Overdue</th><th>Priority not set</th><th>Verified outcomes</th><th></th></tr></thead><tbody>${d.people.map((p) => html`<tr><td>${p.name}</td><td>${p.team || '—'}</td><td>${p.tasks}</td><td>${p.open}</td><td>${p.completed}</td><td>${p.overdue}</td><td>${p.unresolvedPriority}</td><td>${p.verifiedOutcomes}${p.sharedOutcomes ? ` (${p.sharedOutcomes} shared)` : ''}</td><td><a href="#/analytics?tab=person&userId=${p.userId}">Open</a></td></tr>`)}</tbody></table></div></section>` : ''}
-    <section class="card" data-testid="analytics-tasks"><h3 style="margin:0 0 6px">Tasks (${d.tasks.length}${s.tasks > d.tasks.length ? ` of ${s.tasks}` : ''})</h3><div class="table-wrap"><table class="small task-table"><thead><tr><th>Task</th><th>Owner</th><th>Status</th><th>Priority</th><th>Deadline</th><th class="hide-sm">Expected</th><th class="hide-sm">Observed</th><th class="hide-sm">Changes</th><th>Outcome</th></tr></thead><tbody>
-      ${d.tasks.map((r) => html`<tr data-task="${r.id}"><td>${app.isManager ? html`<a href="#/analytics?tab=task&taskId=${r.id}">${r.title}</a>` : html`<a href="#/tasks/${r.id}">${r.title}</a>`}</td><td>${r.assigneeName || '—'}</td><td>${statusBadge(r.status)}</td><td>${prioBadge(r.priority)}</td>
-        <td>${r.deadline ? dt(r.deadline) : html`<span class="muted">${r.deadlineState === 'UNCONFIRMED' ? 'Unconfirmed' : 'Not set'}</span>`}${r.overdue ? html` <span class="badge bad">Overdue</span>` : ''}${r.missedDeadline ? html` <span class="badge outline">Missed</span>` : ''}</td>
-        <td class="hide-sm">${n0(r.complexityExpectation)}</td><td class="hide-sm">${n0(r.observedComplexity)}</td><td class="hide-sm">${r.priorityChanges + r.deadlineChanges}${r.pendingChangeRequests ? ` (+${r.pendingChangeRequests} pending)` : ''}</td><td>${r.outcome === 'VERIFIED' ? 'Verified' : r.outcome === 'CLAIMED' ? 'Claimed' : '—'}</td></tr>`)}
-    </tbody></table></div></section>`
-}
-
-function taskBody(d) {
-  const r = d.task
-  const orig = d.original
-  return html`<section class="card" data-testid="task-analytics"><h2 style="margin:0 0 6px"><a href="#/tasks/${r?.id}">${r?.title || 'Task'}</a></h2><div class="row small">${r ? statusBadge(r.status) : ''} ${r ? prioBadge(r.priority) : ''} ${r?.overdue ? html`<span class="badge bad">Overdue</span>` : ''}</div>
-    <div class="grid two" style="margin-top:12px"><div data-testid="task-original"><h3 style="margin:0 0 6px">Original expectation</h3><dl class="kv"><dt>Priority</dt><dd>${orig.priority ? pretty('priority', orig.priority) : '—'}</dd><dt>Deadline</dt><dd>${pretty('deadline', orig.deadline)}</dd><dt>Expected outcome</dt><dd class="pre">${pretty('expectedOutcome', orig.expected_outcome)}</dd></dl></div>
-      <div data-testid="task-current"><h3 style="margin:0 0 6px">Now</h3><dl class="kv"><dt>Priority</dt><dd>${d.current.priority ? pretty('priority', d.current.priority) : 'Not set'}</dd><dt>Deadline</dt><dd>${d.current.deadline ? dt(d.current.deadline) : 'Not confirmed'}</dd><dt>Expected outcome</dt><dd class="pre">${pretty('expectedOutcome', d.current.expectedOutcome)}</dd></dl></div></div>
-    ${r ? html`<p class="small muted">Priority changed ${r.priorityChanges}×, deadline changed ${r.deadlineChanges}×, ${r.changeRequests} change request(s). A change by a manager or through an approved request is context, not a mark against anyone.</p>` : ''}</section>
-    <section class="card" style="margin-top:12px" data-testid="task-history"><h3 style="margin:0 0 6px">History of expectations</h3>${d.history.length ? html`<ul class="timeline">${d.history.map((e) => html`<li><div><b>${e.actorName || 'System'}</b> ${e.status.toLowerCase()} <b>${LABEL_BY_FIELD[e.field] || e.field.replace(/_/g, ' ')}</b>: ${e.kind === 'CHANGE' ? html`${histValue(e.field, e.oldValue)} → ` : ''}${histValue(e.field, e.value)} <span class="small muted">· ${sourceText(e.source)}${e.reason ? ` · ${e.reason}` : ''}</span></div><div class="when">${dt(e.at)}</div></li>`)}</ul>` : html`<p class="muted small">No recorded history.</p>`}</section>
-    <div class="grid two" style="margin-top:12px"><section class="card"><h3 style="margin:0 0 6px">Change requests</h3>${d.changeRequests.length ? html`<ul class="list">${d.changeRequests.map((c) => html`<li><div class="grow small"><b>${c.requestedBy}</b> · ${CR_KIND[c.kind]} · ${(CR_STATUS[c.status] || [0, c.status])[1]}<div class="pre">${c.reason}</div>${c.decisionNote ? html`<div class="muted">${c.decidedBy}: ${c.decisionNote}</div>` : ''}</div></li>`)}</ul>` : html`<p class="muted small">None.</p>`}</section>
-      <section class="card"><h3 style="margin:0 0 6px">Blockers and outcomes</h3>${d.blockers.length ? html`<ul class="list">${d.blockers.map((b) => html`<li><div class="grow small">${b.description} <span class="badge ${b.status === 'OPEN' ? 'bad' : 'ok'}">${b.status.toLowerCase()}</span></div></li>`)}</ul>` : html`<p class="muted small">No blockers.</p>`}${d.outcomes.length ? html`<ul class="list">${d.outcomes.map((o) => html`<li><div class="grow small">${o.title} · ${o.category} · ${o.state.toLowerCase()}${o.shared ? ' · shared' : ''}</div></li>`)}</ul>` : ''}</section></div>`
 }

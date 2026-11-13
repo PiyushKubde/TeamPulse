@@ -121,3 +121,79 @@ test('a missed deadline is context, not a penalty: approved changes are shown be
     assert.doesNotMatch(body, /"(score|rank|ranking|performance|productivity)"/i)
   } finally { await t.close() }
 })
+
+test('dashboard data: health buckets are exclusive and add up, people carry their own status counts, nothing is invented', async () => {
+  const { t, s, make, team } = await boot()
+  try {
+    const mk = (title, extra = {}) => make({ title, priority: 'MEDIUM', ...extra })
+    await mk('Overdue one', { dueAt: iso(Date.now() - 2 * D) })
+    const blocked = await mk('Blocked one', { dueAt: iso(Date.now() + 9 * D) })
+    const onTrack = await mk('On track one', { dueAt: iso(Date.now() + 9 * D) })
+    const review = await mk('In review', { dueAt: iso(Date.now() + 9 * D), assigneeId: s.employee2.id })
+    await mk('At risk one', { dueAt: iso(Date.now() + 6 * H) })
+    const noDeadline = await make({ title: 'No deadline yet' })
+    const done = await mk('Done one', { dueAt: iso(Date.now() + 9 * D) })
+    const loose = await mk('Nobody yet', { assigneeId: null, dueAt: iso(Date.now() + 9 * D) })
+    t.db.prepare(`UPDATE tasks SET status = 'BLOCKED' WHERE id = ?`).run(blocked.id)
+    t.db.prepare(`UPDATE tasks SET status = 'SUBMITTED_FOR_REVIEW', submitted_at = ? WHERE id = ?`).run(iso(Date.now()), review.id)
+    t.db.prepare(`UPDATE tasks SET status = 'COMPLETED', completed_at = ? WHERE id = ?`).run(iso(Date.now()), done.id)
+    t.db.prepare('UPDATE tasks SET last_meaningful_at = ? WHERE id = ?').run('2026-11-10T10:00:00.000Z', onTrack.id)
+    void loose
+    const d = (await team()).body
+    const h = d.summary.health
+    assert.deepEqual(h, { onTrack: 3, atRisk: 1, blocked: 1, overdue: 1, unconfirmedDeadline: 1 }, 'on track = open, a confirmed deadline, not overdue, blocked or at risk')
+    assert.equal(h.onTrack + h.atRisk + h.blocked + h.overdue + h.unconfirmedDeadline, d.summary.open, 'every open task is in exactly one bucket')
+    assert.equal(d.tasks.find((x) => x.id === done.id).health, null, 'a completed task has no health')
+    assert.equal(d.tasks.find((x) => x.id === noDeadline.id).health, 'UNCONFIRMED_DEADLINE')
+    // People: their own counts, so the stacked bar reconciles with the total once unassigned work is added.
+    const eve = d.people.find((p) => p.userId === s.employee.id)
+    assert.equal(eve.blocked, 1); assert.equal(eve.byStatus.COMPLETED, 1); assert.equal(eve.lastMeaningfulAt, '2026-11-10T10:00:00.000Z'); assert.equal(typeof eve.health.onTrack, 'number')
+    const ed = d.people.find((p) => p.userId === s.employee2.id)
+    assert.equal(ed.awaitingReview, 1); assert.equal(ed.lastMeaningfulAt, null, 'no meaningful activity is shown as none, never invented')
+    assert.equal(d.unassigned.tasks, 1)
+    assert.equal(d.people.reduce((n, p) => n + p.tasks, 0) + d.unassigned.tasks, d.summary.tasks, 'people + unassigned = total')
+    // Needs attention: the same definitions, each task once per reason, ordered by urgency; unconfirmed is context, not a fault.
+    const a = d.attention
+    assert.deepEqual(a.totals, { OVERDUE: 1, REVIEW: 1, CHANGE_REQUEST: 0, BLOCKED: 1, UNCONFIRMED: 1 })
+    assert.deepEqual(a.items.map((x) => x.kind), ['OVERDUE', 'REVIEW', 'BLOCKED', 'UNCONFIRMED'])
+    assert.equal(a.items[0].title, 'Overdue one'); assert.equal(a.items[0].ownerName, 'Eve Employee'); assert.match(a.items[3].issue, /No confirmed priority or deadline/)
+    // A pending change request is listed with its task.
+    await t.call(`/api/tasks/${onTrack.id}/change-requests`, { method: 'POST', as: s.employee, body: { kind: 'PRIORITY', proposed: { priority: 'LOW' }, reason: 'Less urgent now' } })
+    assert.equal((await team()).body.attention.totals.CHANGE_REQUEST, 1)
+    // Another team's manager sees none of it; an employee gets no team view.
+    assert.deepEqual((await team('', s.manager2)).body.summary.health, { onTrack: 0, atRisk: 0, blocked: 0, overdue: 0, unconfirmedDeadline: 0 })
+    assert.equal((await team('', s.manager2)).body.attention.items.length, 0)
+    assert.equal((await team('', s.employee)).status, 403)
+  } finally { await t.close() }
+})
+
+test('dashboard data: outcomes list counts a shared outcome once and keeps verified apart from claimed; the task view carries progress, people and suggestions', async () => {
+  const { t, s, make, team, impact } = await boot()
+  try {
+    const a = await make({ title: 'Launch A', priority: 'HIGH' })
+    const b = await make({ title: 'Launch B', priority: 'HIGH', assigneeId: s.employee2.id })
+    const c = await make({ title: 'Claimed only', priority: 'LOW' })
+    impact(a.id, s.employee.id, { key: 'launch' }); impact(b.id, s.employee2.id, { key: 'launch' }); impact(c.id, s.employee.id, { status: 'PENDING' })
+    impact(c.id, s.employee.id, { status: 'REJECTED' })
+    const o = (await team()).body.outcomeList
+    assert.equal(o.verified, 1, 'one shared outcome, however many people recorded it'); assert.equal(o.claimed, 1); assert.equal(o.shared, 1)
+    const shared = o.items.find((x) => x.shared)
+    assert.deepEqual(shared.people.sort(), ['Ed Employee', 'Eve Employee']); assert.equal(shared.state, 'VERIFIED')
+    assert.equal(o.items.length, 2, 'rejected records are not listed')
+    // The task view.
+    t.db.prepare('UPDATE tasks SET progress = 40 WHERE id = ?').run(c.id)
+    t.db.prepare(`INSERT INTO task_participants (id, org_id, task_id, user_id, role, source, created_at) VALUES ('p1', ?, ?, ?, 'SUPPORT', 'test', ?)`).run(s.org.id, c.id, s.employee2.id, iso(Date.now()))
+    const grant = await t.call(`/api/permissions/${s.employee.id}`, { method: 'PATCH', as: s.manager, body: { can_create_directly: true, approval_required: false, can_self_assign: true } })
+    assert.equal(grant.status, 200)
+    const mine = (await t.call('/api/tasks', { method: 'POST', as: s.employee, body: { title: 'Proposed by Eve', priority: 'HIGH', assigneeId: s.employee.id } })).body.task
+    const tv = (await t.call(`/api/analytics/task/${c.id}`, { as: s.manager })).body
+    assert.equal(tv.progress, 40); assert.equal(tv.owner.name, 'Eve Employee'); assert.deepEqual(tv.contributors, [{ name: 'Ed Employee', role: 'support' }]); assert.equal(typeof tv.evidenceCount, 'number')
+    const pv = (await t.call(`/api/analytics/task/${mine.id}`, { as: s.manager })).body
+    assert.equal(pv.suggestions.find((x) => x.field === 'priority').status, 'PROPOSED', 'a proposal is shown as a proposal, never as the current value')
+    assert.equal(pv.current.priority, null)
+    // The person view carries its own outcome and attention lists, only for people the caller may see.
+    const person = (await t.call(`/api/analytics/person/${s.employee.id}`, { as: s.manager })).body
+    assert.ok(person.outcomeList.items.length >= 1); assert.ok(Array.isArray(person.recent)); assert.ok('attention' in person)
+    assert.equal((await t.call(`/api/analytics/person/${s.employee.id}`, { as: s.manager2 })).status, 404)
+  } finally { await t.close() }
+})

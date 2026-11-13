@@ -161,6 +161,7 @@ try {
   check((await manager.textContent('[data-testid=analytics-notes]')).includes('never a performance score'), 'the fairness notes are not shown')
   const total = Number(await manager.textContent('[data-testid=stat-tasks] .value'))
   check(total >= 3, `the team view lists too few tasks (${total})`)
+  await manager.click('[data-testid=filters-toggle]')
   await manager.selectOption('[data-testid=af-priority]', 'HIGH')
   await manager.click('[data-testid=af-apply]')
   await manager.waitForFunction((t) => Number(document.querySelector('[data-testid=stat-tasks] .value')?.textContent) < t, total)

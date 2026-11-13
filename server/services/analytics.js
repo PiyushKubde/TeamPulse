@@ -72,7 +72,7 @@ function collect(db, ctx, f, { subjectIds = null } = {}) {
     requests.get(r.task_id).push(r)
   }
   const impact = new Map()
-  for (const r of inRows(db, `SELECT task_id, id, verification_status, shared_outcome_key FROM impact_records WHERE task_id IN (?)`, ids)) {
+  for (const r of inRows(db, `SELECT task_id, id, title, category, user_id, verification_status, shared_outcome_key FROM impact_records WHERE task_id IN (?)`, ids)) {
     if (!impact.has(r.task_id)) impact.set(r.task_id, [])
     impact.get(r.task_id).push(r)
   }
@@ -93,6 +93,10 @@ function collect(db, ctx, f, { subjectIds = null } = {}) {
     const verified = outcomes.filter((o) => o.verification_status === 'VERIFIED')
     const claimed = outcomes.filter((o) => o.verification_status === 'PENDING')
     const outcome = verified.length ? 'VERIFIED' : claimed.length ? 'CLAIMED' : 'NONE'
+    // Task health, from the same definitions as the rest of the app (deriveConditions, status BLOCKED, the confirmed deadline). One bucket per open task,
+    // in this order: overdue, blocked, at risk, no confirmed deadline (so it cannot be judged against one), on track. Closed tasks have none.
+    const health = CLOSED.includes(t.status) ? null : c.overdue ? 'OVERDUE' : t.status === 'BLOCKED' ? 'BLOCKED' : c.atRisk ? 'AT_RISK' : !t.due_at ? 'UNCONFIRMED_DEADLINE' : 'ON_TRACK'
+    const outcomeItems = outcomes.filter((o) => o.verification_status !== 'REJECTED').map((o) => ({ id: o.id, key: o.shared_outcome_key ? `shared:${o.shared_outcome_key}` : `impact:${o.id}`, title: o.title, category: CATEGORY_LABELS[o.category] || o.category, state: o.verification_status === 'VERIFIED' ? 'VERIFIED' : 'CLAIMED', shared: Boolean(o.shared_outcome_key), userId: o.user_id }))
     const doneAt = t.completed_at || null
     const missed = Boolean(t.due_at && doneAt && Date.parse(doneAt) > Date.parse(t.due_at))
     const met = Boolean(t.due_at && doneAt && !missed)
@@ -103,7 +107,8 @@ function collect(db, ctx, f, { subjectIds = null } = {}) {
       deadline: t.due_at, deadlineState: t.due_at ? 'CONFIRMED' : (h.some((e) => e.field === 'deadline' && ['SUGGESTED', 'PROPOSED'].includes(e.status)) ? 'UNCONFIRMED' : 'NOT_SET'),
       originalPriority: first('priority'), originalDeadline: first('deadline'), priorityChanges: changes('priority'), deadlineChanges: changes('deadline'),
       complexityExpectation: ex?.complexity_expectation ?? null, observedComplexity: observed.get(t.id) ?? null, workType: ex?.work_type ?? null,
-      overdue: c.overdue, atRisk: c.atRisk, missedDeadline: missed, metDeadline: met,
+      overdue: c.overdue, atRisk: c.atRisk, missedDeadline: missed, metDeadline: met, health, progress: t.progress, lastMeaningfulAt: t.last_meaningful_at ?? null,
+      awaitingReview: t.status === 'SUBMITTED_FOR_REVIEW', outcomeItems,
       blockers: blockers.get(t.id) || { total: 0, open: 0 }, pendingChangeRequests: (requests.get(t.id) || []).filter((r) => r.status === 'PENDING').length,
       changeRequests: (requests.get(t.id) || []).length,
       outcome, outcomeKeys: verified.map((o) => (o.shared_outcome_key ? `shared:${o.shared_outcome_key}` : `impact:${o.id}`))
@@ -132,7 +137,8 @@ function summarise(rows, f) {
     byWorkType: {}, byOrigin: {},
     deadlines: { confirmed: 0, notConfirmed: 0, met: 0, missed: 0, overdueNow: 0 },
     changes: { deadlineChanged: 0, priorityChanged: 0, tasksWithChanges: 0, requests: 0, pendingRequests: 0 },
-    unresolved: { priority: 0, deadline: 0 },
+    unresolved: { priority: 0, deadline: 0 }, awaitingReview: 0,
+    health: { onTrack: 0, atRisk: 0, blocked: 0, overdue: 0, unconfirmedDeadline: 0 },
     outcomes: { verified: 0, claimed: 0, none: 0, distinctVerifiedOutcomes: 0 }
   }
   const keys = new Set()
@@ -143,6 +149,8 @@ function summarise(rows, f) {
     if (r.overdue) out.overdue++
     if (r.atRisk) out.atRisk++
     if (r.status === 'BLOCKED') out.blocked++
+    if (r.awaitingReview) out.awaitingReview++
+    if (r.health) out.health[{ ON_TRACK: 'onTrack', AT_RISK: 'atRisk', BLOCKED: 'blocked', OVERDUE: 'overdue', UNCONFIRMED_DEADLINE: 'unconfirmedDeadline' }[r.health]]++
     bump(out.byStatus, r.status)
     out.byPriority[r.priority || 'UNRESOLVED']++
     out.byComplexityExpectation[r.complexityExpectation || 'NOT_ASSESSED']++
@@ -166,6 +174,47 @@ function summarise(rows, f) {
 }
 
 const present = (rows) => rows.slice(0, 200)
+const latest = (a, b) => (!a ? b : !b ? a : a > b ? a : b)
+
+/**
+ * The outcomes recorded on a set of tasks, as one list: a shared outcome appears once however many people or tasks record it, and
+ * "verified" (a manager confirmed it) stays separate from "claimed" (recorded, not yet verified). Rejected records are left out.
+ */
+function outcomeList(db, rows) {
+  const byKey = new Map()
+  for (const r of rows) {
+    for (const o of r.outcomeItems) {
+      const x = byKey.get(o.key) || { key: o.key, id: o.id, title: o.title, category: o.category, state: o.state, shared: o.shared, taskId: r.id, taskTitle: r.title, people: [] }
+      if (o.state === 'VERIFIED') x.state = 'VERIFIED'
+      const n = nameOf(db, o.userId)
+      if (n && !x.people.includes(n)) x.people.push(n)
+      byKey.set(o.key, x)
+    }
+  }
+  const all = [...byKey.values()].sort((a, b) => (a.state === b.state ? a.title.localeCompare(b.title) : a.state === 'VERIFIED' ? -1 : 1))
+  return { verified: all.filter((x) => x.state === 'VERIFIED').length, claimed: all.filter((x) => x.state === 'CLAIMED').length, shared: all.filter((x) => x.shared).length, items: all.slice(0, 50) }
+}
+
+const ATTENTION_RANK = { OVERDUE: 1, REVIEW: 2, CHANGE_REQUEST: 3, BLOCKED: 4, UNCONFIRMED: 5 }
+/**
+ * What a manager may need to act on, from the same definitions as the rest of the app. Open tasks only; a task can appear once per reason.
+ * Blocked work is listed as context for the manager (a blocker is not a fault of the owner).
+ */
+function attention(rows, limit = 30) {
+  const items = []
+  const totals = { OVERDUE: 0, REVIEW: 0, CHANGE_REQUEST: 0, BLOCKED: 0, UNCONFIRMED: 0 }
+  const add = (r, kind, issue) => { totals[kind]++; items.push({ taskId: r.id, title: r.title, ownerName: r.assigneeName, status: r.status, kind, issue }) }
+  for (const r of rows) {
+    if (!r.health) continue
+    if (r.overdue) add(r, 'OVERDUE', 'Past its confirmed deadline')
+    if (r.awaitingReview) add(r, 'REVIEW', 'Submitted and waiting for a manager’s review')
+    if (r.pendingChangeRequests) add(r, 'CHANGE_REQUEST', `${r.pendingChangeRequests} change request${r.pendingChangeRequests === 1 ? '' : 's'} waiting for a decision`)
+    if (r.status === 'BLOCKED') add(r, 'BLOCKED', r.blockers.open ? `Blocked: ${r.blockers.open} open blocker${r.blockers.open === 1 ? '' : 's'}` : 'Marked as blocked')
+    if (!r.priority || !r.deadline) add(r, 'UNCONFIRMED', !r.priority && !r.deadline ? 'No confirmed priority or deadline' : !r.priority ? 'No confirmed priority' : 'No confirmed deadline')
+  }
+  items.sort((a, b) => ATTENTION_RANK[a.kind] - ATTENTION_RANK[b.kind] || a.title.localeCompare(b.title))
+  return { totals, items: items.slice(0, limit), more: Math.max(0, items.length - limit) }
+}
 
 // ---------- views ----------
 /** One person: the measurement profile (complexity, verified outcomes) beside what was expected of their work. Self or a manager in scope. */
@@ -177,7 +226,9 @@ export function personAnalytics(db, ctx, userId, q = {}) {
   const rows = collect(db, { ...ctx }, { ...f }, { subjectIds: [uid] })
   const mine = uid === ctx.user.id
   return {
-    view: 'person', filters: f, person: profile.person, period: profile.period, summary: summarise(rows, f), tasks: present(rows),
+    view: 'person', filters: f, person: profile.person, period: profile.period, summary: summarise(rows, f), tasks: present(rows), truncated: rows.length > 200,
+    outcomeList: outcomeList(db, rows), attention: attention(rows), lastMeaningfulAt: rows.reduce((m, r) => latest(m, r.lastMeaningfulAt), null),
+    recent: rows.slice().sort((a, b) => String(b.lastMeaningfulAt || b.createdAt).localeCompare(String(a.lastMeaningfulAt || a.createdAt))).slice(0, 8).map((r) => ({ id: r.id, title: r.title, status: r.status, health: r.health, at: r.lastMeaningfulAt || null, createdAt: r.createdAt })),
     measurement: { complexityMix: profile.complexityMix, verifiedOutcomes: profile.verified.length, sharedOutcomes: profile.verified.filter((o) => o.shared).length, narrative: profile.narrative },
     viewingOwn: mine, notes: NOTES
   }
@@ -193,11 +244,13 @@ export function teamAnalytics(db, ctx, q = {}) {
   const people = overview.people.map((p) => {
     const mine = rows.filter((r) => r.assigneeId === p.userId)
     const s = summarise(mine, f)
-    return { userId: p.userId, name: p.name, team: p.team, tasks: s.tasks, open: s.open, completed: s.completed, overdue: s.overdue, byPriority: s.byPriority, unresolvedPriority: s.unresolved.priority, verifiedOutcomes: p.verifiedOutcomes, sharedOutcomes: p.sharedOutcomes }
+    return { userId: p.userId, name: p.name, team: p.team, tasks: s.tasks, open: s.open, completed: s.completed, overdue: s.overdue, byPriority: s.byPriority, byStatus: s.byStatus, blocked: s.blocked, atRisk: s.atRisk, inProgress: s.byStatus.IN_PROGRESS || 0, awaitingReview: s.awaitingReview, health: s.health, lastMeaningfulAt: mine.reduce((m, r) => latest(m, r.lastMeaningfulAt), null), unresolvedPriority: s.unresolved.priority, verifiedOutcomes: p.verifiedOutcomes, sharedOutcomes: p.sharedOutcomes }
   })
   const teams = db.prepare('SELECT id, name FROM teams WHERE org_id = ?').all(ctx.orgId)
   const byTeam = teams.map((tm) => ({ teamId: tm.id, team: tm.name, rows: rows.filter((r) => r.teamId === tm.id) })).filter((x) => x.rows.length).map((x) => ({ teamId: x.teamId, team: x.team, ...summarise(x.rows, f) }))
-  return { view: 'team', filters: f, period: overview.period, summary: summarise(rows, f), teams: byTeam, people: people.sort((a, b) => a.name.localeCompare(b.name)), ordering: 'alphabetical', tasks: present(rows), notes: NOTES }
+  return { view: 'team', filters: f, period: overview.period, summary: summarise(rows, f), teams: byTeam, people: people.sort((a, b) => a.name.localeCompare(b.name)), ordering: 'alphabetical', tasks: present(rows), truncated: rows.length > 200,
+    unassigned: (() => { const u = rows.filter((r) => !r.assigneeId); return { ...(({ tasks, open, completed, blocked, byStatus }) => ({ tasks, open, completed, blocked, byStatus }))(summarise(u, f)) } })(),
+    outcomeList: outcomeList(db, rows), attention: attention(rows), notes: NOTES }
 }
 
 /** A single task: expectations (original and revised), their history, change requests, blockers, outcomes and the journey. Managers of the task only. */
@@ -217,6 +270,10 @@ export function taskAnalytics(db, ctx, taskId) {
   const current = { priority: task.priority, deadline: task.due_at, expectedOutcome: task.expected_outcome }
   return {
     view: 'task', task: row, original: baseline, current, history, changeRequests: requests, blockers, outcomes,
+    suggestions: openSuggestions(db, task.id), progress: task.progress, lastMeaningfulAt: task.last_meaningful_at ?? null,
+    owner: task.assignee_id ? { id: task.assignee_id, name: nameOf(db, task.assignee_id) } : null,
+    contributors: db.prepare('SELECT user_id, role FROM task_participants WHERE task_id = ? AND org_id = ? ORDER BY created_at').all(task.id, ctx.orgId).map((p) => ({ name: nameOf(db, p.user_id), role: p.role.toLowerCase() })),
+    evidenceCount: db.prepare('SELECT COUNT(*) AS n FROM evidence WHERE task_id = ? AND org_id = ?').get(task.id, ctx.orgId).n,
     journey: taskJourney(db, ctx, task.id), notes: NOTES
   }
 }

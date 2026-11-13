@@ -16,7 +16,8 @@ import { renderAssistant, renderCopilot } from './views/assistant.js'
 import { renderContributions, renderJourney } from './views/journeys.js'
 import { renderReviews } from './views/reviews.js'
 import { renderSlackIntake } from './views/assignments.js'
-import { renderReviewQueue, renderAnalytics } from './views/expectations.js'
+import { renderReviewQueue } from './views/expectations.js'
+import { renderAnalytics } from './views/work-intelligence.js'
 import { BRAND, logoMark } from './brand.js'
 
 const LOGO = raw(logoMark(28))
