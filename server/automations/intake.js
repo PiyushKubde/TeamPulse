@@ -91,10 +91,10 @@ export async function createIntake(db, vs, ctx, body, { appUrl }) {
   } catch (error) {
     throw viasocketError(error, `read a sample ${t.app} message`)
   }
-  const mapped = parseEvent(app, sample)
-  console.log(`[intake] ${app} sample before switch-on: keys ${keyPaths(sample).slice(0, 40).join(', ')}; ${mapped.title && mapped.externalRef ? 'mapped' : 'NOT mapped'}`)
+  const mapped = parseEvent(app, sample, { account: accountKey(conn.auth_id || conn.id) })
+  console.log(`[intake] ${app} sample before switch-on: keys ${keyPaths(sample).slice(0, 60).join(', ')}; ${mapped.title && mapped.externalRef ? 'mapped' : `NOT mapped (missing ${mapped.missing.join(', ')})`}`)
   if (!sample || !Object.keys(sample).length) throw new AppError(409, 'no_sample', `No message found in that ${app === 'gmail' ? 'label' : 'channel'} yet. Send one test message there, then switch the intake on.`)
-  if (!mapped.title || !mapped.externalRef) throw new AppError(409, 'unmapped_sample', `KONVO could not read a title and a message id from the latest ${t.app} message, so the intake was not switched on. Fields seen: ${keyPaths(sample).slice(0, 15).join(', ')}.`)
+  if (!mapped.title || !mapped.externalRef) throw new AppError(409, 'unmapped_sample', unmappedMessage(app, t.app, mapped, sample), { missing: mapped.missing })
   const dup = db.prepare(`SELECT 1 FROM intake_subscriptions WHERE org_id = ? AND owner_id = ? AND app = ? AND status IN ('ACTIVE','PAUSED') AND input_data = ?`).get(ctx.orgId, ctx.user.id, app, JSON.stringify(inputData))
   if (dup) throw conflict('You already have an intake on that label or channel.', 'intake_exists')
 
@@ -168,8 +168,19 @@ export async function sampleIntake(db, vs, ctx, body) {
   }
   // Key paths only go to the log (never values): enough to check the mapping against the real shape.
   console.log(`[intake] ${app} sample keys: ${keyPaths(event).slice(0, 60).join(', ')}`)
-  const parsed = parseEvent(app, event)
-  return { found: Boolean(event && Object.keys(event).length), preview: parsed, keys: keyPaths(event).slice(0, 60) }
+  const parsed = parseEvent(app, event, { account: accountKey(conn.auth_id || conn.id) })
+  return { found: Boolean(event && Object.keys(event).length), preview: parsed, missing: parsed.missing, problem: parsed.missing.length ? unmappedMessage(app, t.app, parsed, event) : null, keys: keyPaths(event).slice(0, 60) }
+}
+
+/** The connected Gmail account behind an intake (viaSocket's auth id, then the connection row, then the owner): the "source account" of a message. */
+// Only a hash is used, so viaSocket's auth id (which never leaves the server) is not written into a request's reference.
+export const accountKey = (authId) => `acct-${sha(authId).slice(0, 16)}`
+const accountFor = (db, connectionId, ownerId) => accountKey(connectionId ? (db.prepare('SELECT auth_id FROM app_connections WHERE id = ?').get(connectionId)?.auth_id || connectionId) : `owner:${ownerId}`)
+
+/** What the preview and the switch-on error say: exactly which required fields are missing and where each was looked for. */
+function unmappedMessage(app, appName, parsed, sample) {
+  const where = app === 'gmail' ? `title: subject, headers or body; message id: ${GMAIL_ID_FIELDS.join(', ')}` : 'title: text; message id: ts'
+  return `KONVO could not read ${parsed.missing.join(' and ') || 'a title and a message id'} from the latest ${appName} message, so the intake was not switched on. Looked for (${where}). Fields seen: ${keyPaths(sample).slice(0, 60).join(', ')}.`
 }
 
 function keyPaths(o, prefix = '', out = [], depth = 0) {
@@ -183,20 +194,81 @@ function keyPaths(o, prefix = '', out = [], depth = 0) {
 }
 
 const first = (...vals) => vals.find((x) => typeof x === 'string' && x.trim())?.trim() ?? null
-const header = (headers, name) => (Array.isArray(headers) ? headers.find((h) => String(h?.name).toLowerCase() === name)?.value : null)
+const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : null)
+// Headers arrive as a { Name: value } object (the Gmail trigger's rawPayloadHeaders) or as a [{ name, value }] list (payload.headers).
+const header = (headers, name) => {
+  if (Array.isArray(headers)) return first(headers.find((h) => String(h?.name).toLowerCase() === name)?.value)
+  const o = obj(headers)
+  const key = o && Object.keys(o).find((k) => k.toLowerCase() === name)
+  return key ? first(o[key]) : null
+}
+// A person is either a "Name <a@b.co>" string or an { name, email } object.
+const person = (x) => {
+  const o = obj(x)
+  if (!o) return first(x)
+  const email = first(o.email, o.address)
+  const name = first(o.name)
+  return email ? (name && name.toLowerCase() !== email.toLowerCase() ? `${name} <${email}>` : email) : name
+}
+const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
+/** Email HTML as plain text: scripts, styles and tags are dropped, never executed or kept as markup. */
+export function htmlToText(html) {
+  const raw = first(html)
+  if (!raw) return null
+  const text = raw.slice(0, 200000)
+    .replace(/<(script|style|head)[\s\S]*?<\/\1\s*>/gi, ' ')
+    .replace(/<br\s*\/?>|<\/(p|div|li|tr|h[1-6])\s*>/gi, '\n')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&(#\d{1,7}|#x[0-9a-f]{1,6}|[a-z]{2,6});/gi, (m, e) => {
+      if (e[0] === '#') { const cp = e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10); return cp > 31 && cp < 0x10ffff ? String.fromCodePoint(cp) : ' ' }
+      return ENTITIES[e.toLowerCase()] ?? ' '
+    })
+    .split('').filter((c) => { const n = c.charCodeAt(0); return n > 31 || n === 9 || n === 10 || n === 13 }).join('')
+    .replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+  return text || null
+}
+// Where the Gmail message id is looked for, in this order (the first is Gmail's own immutable id for the message in that mailbox).
+export const GMAIL_ID_FIELDS = ['rawId', 'id', 'messageId', 'message_id', 'Message-ID header']
+const MAX_REF_ID = 100
+/**
+ * The deduplication key for one Gmail message: the connected Gmail account (the mailbox) plus the message id. A Gmail id is only unique
+ * inside one mailbox, and the same email delivered to two mailboxes is two different messages for two different managers, so the account is
+ * part of the key. Requests are additionally unique per organization (task_requests.org_id + external_ref).
+ */
+export function gmailRef(account, id, kind = 'gmail') {
+  if (!account || !id) return null
+  const body = id.length > MAX_REF_ID ? `h:${sha(id).slice(0, 40)}` : id
+  return `gmail:${account}:${kind === 'rfc' ? 'rfc:' : ''}${body}`
+}
 const unwrapEvent = (e) => (e && typeof e === 'object' && e.event && typeof e.event === 'object' && !e.subject && !e.text ? e.event : e)
 
-/** Maps a Gmail or Slack event to a request: { title, description, requester, externalRef, ignore? }. */
-export function parseEvent(app, raw, { threads = false } = {}) {
+/**
+ * Maps a Gmail or Slack event to a request: { title, description, requester, externalRef, missing, ignore? }.
+ * `account` identifies the connected mailbox for Gmail (part of the deduplication key). `missing` names what could not be read.
+ * The message content is untrusted data: it only ever becomes the text of a pending request, never an instruction.
+ */
+export function parseEvent(app, raw, { threads = false, account = null } = {}) {
   const e = unwrapEvent(Array.isArray(raw) ? raw[0] : raw) || {}
   if (app === 'gmail') {
-    const h = e.payload?.headers
-    const subject = first(e.subject, e.Subject, header(h, 'subject'))
-    const from = first(e.from, e.From, e.sender, e.senderEmail, header(h, 'from'))
-    const body = first(e.textPlain, e.text, e.body, e.plainBody, e.bodyText, e.snippet, e.textHtml?.replace?.(/<[^>]+>/g, ' '))
-    const id = first(e.messageId, e.message_id, e.id, header(h, 'message-id'))
+    const hdr = (name) => first(header(e.rawPayloadHeaders, name), header(e.payload?.headers, name), header(e.headers, name))
+    const subject = first(e.subject, e.Subject, hdr('subject'))
+    const from = first(person(e.From), person(e.from), person(e.sender), e.senderEmail, hdr('from'))
+    const body = first(e.bodyPlain, e.textPlain, e.text, e.body, e.plainBody, e.bodyText, e.snippet) ?? htmlToText(first(e.bodyHtml, e.textHtml))
+    const gmailId = first(e.rawId, e.id, e.messageId, e.message_id)
+    const rfcId = (first(hdr('message-id'), e['Message-ID'], e.messageIdHeader) || '').replace(/^<|>$/g, '').trim() || null
+    const externalRef = gmailId ? gmailRef(account, gmailId) : gmailRef(account, rfcId, 'rfc')
     const ownMessage = isOwnMessage(body) || /\b(?:KONVO|TeamPulse)\b/.test(from || '')
-    return { title: subject || (body ? body.split('\n')[0].slice(0, 120) : null), description: body ? body.slice(0, 4000) : null, requester: from, externalRef: id ? `gmail:${id}` : null, ignore: ownMessage ? 'sent by KONVO' : null }
+    const firstLine = body ? body.split('\n').map((l) => l.trim()).find(Boolean) : null
+    const attachments = Number(e.attachmentCount) > 0 ? Number(e.attachmentCount) : (Array.isArray(e.attachmentDetails) ? e.attachmentDetails.length : 0)
+    const note = attachments ? `\n\n(${attachments} attachment${attachments === 1 ? '' : 's'} in the email were not imported.)` : ''
+    const missing = []
+    if (!(gmailId || rfcId)) missing.push('message id')
+    else if (!account) missing.push('source account')
+    return {
+      title: (subject || firstLine?.slice(0, 120) || '(no subject)').slice(0, 200),
+      description: body || note ? `${(body || '').slice(0, 3800)}${note}`.trim() : null,
+      requester: from ? from.slice(0, 200) : null, externalRef, missing, ignore: ownMessage ? 'sent by KONVO' : null
+    }
   }
   const text = first(e.text, e.message?.text)
   const bot = Boolean(e.bot_id || e.bot_profile || e.subtype === 'bot_message' || e.message?.bot_id)
@@ -210,6 +282,7 @@ export function parseEvent(app, raw, { threads = false } = {}) {
   return {
     title: text ? text.split('\n')[0].replace(/[*_`]/g, '').slice(0, 120) : null, description: text ? text.slice(0, 4000) : null,
     requester: first(e.user_name, e.username, e.user_profile?.real_name, e.user), externalRef: ts ? `slack:${channel || ''}:${ts}` : null,
+    missing: [...(text ? [] : ['message text']), ...(ts ? [] : ['message timestamp'])],
     // Task-from-mention intakes also read thread replies (a reply can carry the real request); requests ignore them as before.
     ignore: ownMessage ? 'sent by KONVO' : bot ? 'posted by a bot' : !threads && e.thread_ts && e.thread_ts !== e.ts ? 'a thread reply' : null,
     text, mentions: extractMentions(text), senderId: senderId && /^[UW][A-Z0-9]{6,20}$/.test(senderId) ? senderId : null, ts, threadTs, channel,
@@ -225,7 +298,7 @@ export function receiveIntakeEvent(db, id, bearer, body) {
   if (!r || !bearer || !timingSafeEqual(given, Buffer.from(r.token_hash))) throw new AppError(401, 'unauthorized', 'Unauthorized')
   if (r.status !== 'ACTIVE') return { status: 'ignored', reason: 'intake paused' }
   const assigning = r.app === 'slack' && r.assign_from_mentions === 1
-  const parsed = parseEvent(r.app, body?.event ?? body, { threads: assigning })
+  const parsed = parseEvent(r.app, body?.event ?? body, { threads: assigning, account: r.app === 'gmail' ? accountFor(db, r.connection_id, r.owner_id) : null })
   console.log(`[intake] ${r.app} event for intake ${r.id}: keys ${keyPaths(body?.event ?? body).slice(0, 40).join(', ')}; ${parsed.ignore ? `ignored (${parsed.ignore})` : parsed.title ? 'mapped' : 'no title'}`)
   const logId = startLog(db, { orgId: r.org_id, key: 'gmail_slack_intake', trigger: r.app, subjectType: 'intake', subjectId: r.id })
   const ts = now()
@@ -240,6 +313,13 @@ export function receiveIntakeEvent(db, id, bearer, body) {
       finishLog(db, logId, null, { status: 'FAILED', error: String(error.message).slice(0, 300) })
       return { status: 'failed', error: error.message }
     }
+  }
+  if (r.app === 'gmail' && !parsed.ignore && !parsed.externalRef) {
+    // Without a stable id a repeated delivery could not be recognised, so no request is made; the owner sees why.
+    const why = `The email had no ${parsed.missing.join(' or ') || 'message id'}, so it was not imported.`
+    db.prepare('UPDATE intake_subscriptions SET last_error = ? WHERE id = ?').run(why.slice(0, 300), r.id)
+    finishLog(db, logId, null, { status: 'SKIPPED', summary: why })
+    return { status: 'ignored', reason: 'no message id' }
   }
   if (parsed.ignore || !parsed.title) {
     finishLog(db, logId, null, { status: 'SKIPPED', summary: `Ignored: ${parsed.ignore || 'no subject or text'}` })

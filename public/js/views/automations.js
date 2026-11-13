@@ -273,7 +273,9 @@ async function addIntake(conns, done) {
       $('#i-preview').innerHTML = loading('Reading a recent message…').toString()
       try {
         const out = await api('/api/intakes/sample', { method: 'POST', body: read() })
-        $('#i-preview').innerHTML = out.found && out.preview?.title
+        $('#i-preview').innerHTML = out.found && out.problem
+          ? html`<div class="notice err small"><b>This message cannot be used yet.</b><br>${out.problem}</div>`.toString()
+          : out.found && out.preview?.title
           ? html`<div class="notice ok small"><b>A request would look like:</b><br>Title: ${out.preview.title}<br>From: ${out.preview.requester || '—'}${out.preview.ignore ? html`<br><i>This one would be ignored: ${out.preview.ignore}</i>` : ''}</div>`.toString()
           : html`<div class="notice warn small">No recent message found there yet. Send one, then preview again.</div>`.toString()
       } catch (e) { $('#i-preview').innerHTML = html`<div class="notice err small">${errorText(e)}</div>`.toString() }
