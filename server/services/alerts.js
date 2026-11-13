@@ -4,11 +4,13 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import { now, transaction, uuid } from '../db.js'
 import { invalid } from '../errors.js'
 import { managersForTask, requireAdmin } from '../access.js'
-import { deriveConditions } from './tasks.js'
+import { deriveConditions, markDeadlineMissed } from './tasks.js'
 import { notifyInApp } from './notify.js'
 import { audit } from './audit.js'
 import { orgSettings } from './orgs.js'
 import { ALERT_RULES, DEFAULT_ALERT_SETTINGS, THRESHOLD_LIMITS } from './alert-rules.js'
+import { REASONS } from './deadline-explanations.js'
+import { orgTimezone } from '../time.js'
 
 const HOUR = 3600000
 const MAX_ATTEMPTS = 5
@@ -39,6 +41,22 @@ export function raiseAlert(db, { orgId, rule, userIds, taskId = null, title, bod
 
 const taskLink = (id) => `#/tasks/${id}`
 const nameOf = (db, id) => db.prepare('SELECT name FROM users WHERE id = ?').get(id)?.name || 'Someone'
+/** A deadline as people read it: in the organization's timezone, not the server's. */
+function dueText(iso, db, orgId) {
+  const tz = orgTimezone(db, orgId)
+  const d = new Date(iso)
+  return `${new Intl.DateTimeFormat('en-GB', { timeZone: tz, day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d)} (${tz})`
+}
+/** Time during which a task's clock was paused because a transfer was waiting for an answer, between `sinceMs` and `atMs`. */
+function pausedMs(db, taskId, sinceMs, atMs) {
+  let total = 0
+  for (const x of db.prepare('SELECT status, created_at, decided_at FROM task_transfers WHERE task_id = ?').all(taskId)) {
+    const start = Math.max(Date.parse(x.created_at), sinceMs)
+    const end = Math.min(x.status === 'PENDING' || !x.decided_at ? atMs : Date.parse(x.decided_at), atMs)
+    if (end > start) total += end - start
+  }
+  return total
+}
 
 /** Event-driven alerts and notices. Registered as an event listener by the app. */
 export function handleEvent(db, e) {
@@ -50,6 +68,56 @@ export function handleEvent(db, e) {
       return
     case 'task.created_unassigned':
       return
+    // ---- Slack / acceptance workflow ----
+    case 'assignment.created': {
+      if (!task) return
+      const requester = db.prepare('SELECT sender_name FROM slack_intake_items WHERE task_id = ?').get(task.id)?.sender_name
+      const who = e.via === 'slack' ? `${requester || 'Someone'} tagged ${nameOf(db, e.assigneeId)} in Slack` : e.via === 'transfer' ? `${nameOf(db, e.actorId)} handed this over` : `${nameOf(db, e.actorId)} assigned ${nameOf(db, e.assigneeId)}`
+      const body = [`${who}.`, task.description ? task.description.slice(0, 280) : null, `Priority: ${task.priority.toLowerCase()}.`, task.due_at ? `Due ${dueText(task.due_at, db, task.org_id)}.` : 'No deadline set.', 'Accept, decline or transfer it in TeamPulse.'].filter(Boolean).join(' ')
+      raiseAlert(db, { orgId: e.orgId, rule: 'task_assignment', userIds: [e.assigneeId], taskId: task.id, title: `New task: ${task.title}`, body, link: taskLink(task.id), anchor: e.assignmentId })
+      return
+    }
+    case 'assignment.accepted':
+    case 'assignment.declined': {
+      if (!task) return
+      const accepted = e.type === 'assignment.accepted'
+      for (const m of managersForTask(db, task).filter((id) => id !== e.actorId)) {
+        notifyInApp(db, { orgId: e.orgId, userId: m, kind: accepted ? 'assignment_accepted' : 'assignment_declined', title: `${nameOf(db, e.actorId)} ${accepted ? 'accepted' : 'declined'}: ${task.title}`, body: accepted ? 'The task is now in their active work.' : `Reason: ${String(e.reason || '').slice(0, 300)}. It needs a new owner or more detail.`, link: taskLink(task.id), taskId: task.id, dedupeKey: `${e.type}:${task.id}:${task.status_changed_at}:${m}` })
+      }
+      return
+    }
+    case 'transfer.proposed': {
+      if (!task) return
+      notifyInApp(db, { orgId: e.orgId, userId: e.toUserId, kind: 'transfer_offered', title: `${nameOf(db, e.fromUserId)} offers you a task: ${task.title}`, body: 'Accept it to become its owner, or decline with a reason.', link: taskLink(task.id), taskId: task.id, dedupeKey: `transfer-offered:${e.transferId}` })
+      for (const m of managersForTask(db, task).filter((id) => id !== e.fromUserId && id !== e.toUserId)) notifyInApp(db, { orgId: e.orgId, userId: m, kind: 'transfer_pending', title: `Transfer proposed: ${task.title}`, body: `${nameOf(db, e.fromUserId)} → ${nameOf(db, e.toUserId)}. Ownership changes only if ${nameOf(db, e.toUserId)} accepts.`, link: taskLink(task.id), taskId: task.id, dedupeKey: `transfer-pending:${e.transferId}:${m}` })
+      return
+    }
+    case 'transfer.decided': {
+      if (!task) return
+      const verb = { ACCEPT: 'accepted', DECLINE: 'declined', CANCEL: 'cancelled' }[e.decision]
+      const why = e.note ? ` ${String(e.note).slice(0, 300)}` : ''
+      const notice = (userId, title, body) => notifyInApp(db, { orgId: e.orgId, userId, kind: `transfer_${verb}`, title, body, link: taskLink(task.id), taskId: task.id, dedupeKey: `transfer-${verb}:${e.transferId}:${userId}` })
+      if (e.decision === 'CANCEL') { if (e.actorId !== e.toUserId) notice(e.toUserId, `Transfer withdrawn: ${task.title}`, 'You no longer need to answer it.') } else if (e.fromUserId !== e.actorId) notice(e.fromUserId, `Transfer ${verb}: ${task.title}`, e.decision === 'ACCEPT' ? `${nameOf(db, e.toUserId)} is now the owner.` : `${nameOf(db, e.toUserId)} declined, so it stays with you.${why}`)
+      for (const m of managersForTask(db, task).filter((id) => id !== e.actorId && id !== e.fromUserId)) notice(m, `Transfer ${verb}: ${task.title}`, `${nameOf(db, e.fromUserId)} → ${nameOf(db, e.toUserId)}.${why}`)
+      // A transfer is a new assignment: the new owner hears about it (LOW), and the previous owner's history stays.
+      if (e.decision === 'ACCEPT' && e.assignmentId) raiseAlert(db, { orgId: e.orgId, rule: 'task_assignment', userIds: [e.toUserId], taskId: task.id, title: `Task handed to you: ${task.title}`, body: `${nameOf(db, e.fromUserId)} transferred it to you and you accepted. ${task.due_at ? `Due ${dueText(task.due_at, db, task.org_id)}.` : 'No deadline set.'}`, link: taskLink(task.id), anchor: e.assignmentId })
+      return
+    }
+    case 'deadline.explanation_submitted':
+    case 'deadline.explanation_context': {
+      if (!task) return
+      const x = db.prepare('SELECT * FROM deadline_explanations WHERE id = ?').get(e.explanationId)
+      if (!x) return
+      const latest = db.prepare('SELECT id FROM deadline_explanation_entries WHERE explanation_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(x.id)?.id || 'first'
+      for (const m of managersForTask(db, task).filter((id) => id !== e.actorId)) notifyInApp(db, { orgId: e.orgId, userId: m, kind: 'deadline_explanation', title: `${nameOf(db, x.user_id)} ${e.type.endsWith('context') ? 'added to' : 'explained'} a missed deadline: ${task.title}`, body: `Reason: ${REASONS[x.reason_category]}. Waiting for your review.`, link: taskLink(task.id), taskId: task.id, dedupeKey: `deadline-explanation:${x.id}:${latest}:${m}` })
+      return
+    }
+    case 'deadline.explanation_reviewed': {
+      if (!task) return
+      const last = db.prepare(`SELECT id, body FROM deadline_explanation_entries WHERE explanation_id = ? AND kind = 'REVIEW' ORDER BY created_at DESC, rowid DESC LIMIT 1`).get(e.explanationId)
+      notifyInApp(db, { orgId: e.orgId, userId: e.employeeId, kind: 'deadline_explanation_reviewed', title: `Your explanation was reviewed: ${task.title}`, body: `${String(e.status).replace(/_/g, ' ').toLowerCase()}${last?.body ? ` — ${last.body.slice(0, 300)}` : ''}`, link: taskLink(task.id), taskId: task.id, dedupeKey: `deadline-reviewed:${last?.id || e.explanationId}` })
+      return
+    }
     case 'blocker.reported': {
       if (!task) return
       const managers = managersForTask(db, task).filter((id) => id !== e.actorId)
@@ -103,22 +171,42 @@ export function scanAlerts(db, at = Date.now()) {
   const orgs = db.prepare('SELECT id FROM organizations').all()
   for (const { id: orgId } of orgs) {
     const th = orgSettings(db, orgId).alerts.thresholds
-    const tasks = db.prepare(`SELECT * FROM tasks WHERE org_id = ? AND status IN ('ASSIGNED','IN_PROGRESS','BLOCKED','SUBMITTED_FOR_REVIEW')`).all(orgId)
+    const tasks = db.prepare(`SELECT * FROM tasks WHERE org_id = ? AND status IN ('PENDING_ACCEPTANCE','ASSIGNED','IN_PROGRESS','BLOCKED','SUBMITTED_FOR_REVIEW')`).all(orgId)
     for (const t of tasks) {
       const d = deriveConditions(t, at)
       const due = t.due_at ? Date.parse(t.due_at) : null
       const managers = () => managersForTask(db, t)
+      const accepting = t.status === 'PENDING_ACCEPTANCE'
+      // While a transfer waits for an answer nobody is idle: the inactivity clocks stand still.
+      const paused = Boolean(db.prepare(`SELECT 1 FROM task_transfers WHERE task_id = ? AND status = 'PENDING'`).get(t.id))
       if (d.overdue) {
-        raised += raiseAlert(db, { orgId, rule: 'deadline_missed', userIds: [t.assignee_id, ...managers()], taskId: t.id, title: `Deadline missed: ${t.title}`, body: `It was due ${t.due_at.slice(0, 16).replace('T', ' ')} UTC.`, link: taskLink(t.id), anchor: t.due_at })
-      } else if (due && t.assignee_id && ['ASSIGNED', 'IN_PROGRESS', 'BLOCKED'].includes(t.status) && due - at <= th.deadlineApproachingHours * HOUR) {
-        raised += raiseAlert(db, { orgId, rule: 'deadline_approaching', userIds: [t.assignee_id], taskId: t.id, title: `Due soon: ${t.title}`, body: `Due in about ${Math.max(0, Math.round((due - at) / HOUR))}h. Progress ${t.progress}%.`, link: taskLink(t.id), anchor: t.due_at })
+        // The miss is written into the task history once per deadline, so it survives completion and a moved deadline.
+        markDeadlineMissed(db, t, new Date(at).toISOString())
+        raised += raiseAlert(db, { orgId, rule: 'deadline_missed', userIds: [t.assignee_id, ...managers()], taskId: t.id, title: `Deadline missed: ${t.title}`, body: `It was due ${dueText(t.due_at, db, orgId)}.${t.assignee_id ? ' The owner must say what got in the way.' : ''}`, link: taskLink(t.id), anchor: t.due_at })
+        if (t.assignee_id) raised += raiseAlert(db, { orgId, rule: 'deadline_explanation_required', userIds: [t.assignee_id], taskId: t.id, title: `Explain the missed deadline: ${t.title}`, body: 'Tell your manager why it was not done by the deadline, so the delay is understood.', link: taskLink(t.id), anchor: t.due_at })
+      } else if (due && t.assignee_id && ['PENDING_ACCEPTANCE', 'ASSIGNED', 'IN_PROGRESS', 'BLOCKED'].includes(t.status) && due - at <= th.deadlineApproachingHours * HOUR) {
+        const left = Math.max(0, due - at)
+        raised += raiseAlert(db, { orgId, rule: 'deadline_approaching', userIds: [t.assignee_id, ...managers()], taskId: t.id, title: `Due soon: ${t.title}`, body: `Owner ${nameOf(db, t.assignee_id)}. Due ${dueText(t.due_at, db, orgId)}, in ${left >= HOUR ? `about ${Math.round(left / HOUR)}h` : `${Math.round(left / 60000)} min`}. Progress ${t.progress}%.${accepting ? ' Not accepted yet.' : ''}`, link: taskLink(t.id), anchor: t.due_at })
       }
-      if (t.status === 'ASSIGNED' && t.assignee_id && t.assigned_at && at - Date.parse(t.assigned_at) > th.notStartedHours * HOUR) {
-        raised += raiseAlert(db, { orgId, rule: 'not_started', userIds: [t.assignee_id], taskId: t.id, title: `Not started yet: ${t.title}`, body: `Assigned over ${th.notStartedHours}h ago.`, link: taskLink(t.id), anchor: t.assigned_at })
-      }
-      const lastProgress = t.last_progress_at || t.started_at || t.status_changed_at
-      if (t.status === 'IN_PROGRESS' && at - Date.parse(lastProgress) > th.noProgressHours * HOUR) {
-        raised += raiseAlert(db, { orgId, rule: 'no_progress', userIds: [t.assignee_id, ...managers()], taskId: t.id, title: `No progress for ${th.noProgressHours}h: ${t.title}`, link: taskLink(t.id), anchor: lastProgress })
+      if (!accepting && !paused) {
+        // The clock of work that went through acceptance starts when the owner accepted, not when it was created.
+        const startedFrom = t.accepted_at || t.assigned_at
+        if (t.status === 'ASSIGNED' && t.assignee_id && startedFrom && at - Date.parse(startedFrom) > th.notStartedHours * HOUR) {
+          raised += raiseAlert(db, { orgId, rule: 'not_started', userIds: [t.assignee_id], taskId: t.id, title: `Not started yet: ${t.title}`, body: `Assigned over ${th.notStartedHours}h ago.`, link: taskLink(t.id), anchor: startedFrom })
+        }
+        const lastProgress = t.last_progress_at || t.started_at || t.status_changed_at
+        if (t.status === 'IN_PROGRESS' && at - Date.parse(lastProgress) > th.noProgressHours * HOUR) {
+          raised += raiseAlert(db, { orgId, rule: 'no_progress', userIds: [t.assignee_id, ...managers()], taskId: t.id, title: `No progress for ${th.noProgressHours}h: ${t.title}`, link: taskLink(t.id), anchor: lastProgress })
+        }
+        // MEDIUM: no meaningful movement since the owner accepted (accepting alone, views and sync never count). One alert per idle stretch.
+        if (t.accepted_at && t.assignee_id && ['ASSIGNED', 'IN_PROGRESS'].includes(t.status)) {
+          const base = Math.max(Date.parse(t.accepted_at), t.last_meaningful_at ? Date.parse(t.last_meaningful_at) : 0)
+          const idle = at - base - pausedMs(db, t.id, base, at)
+          if (idle > th.noMovementHours * HOUR) {
+            raised += raiseAlert(db, { orgId, rule: 'no_movement', userIds: managers(), taskId: t.id, title: `No movement for ${Math.floor(idle / HOUR)}h: ${t.title}`,
+              body: `Owner ${nameOf(db, t.assignee_id)}. Assigned ${dueText(t.assigned_at, db, orgId)}. Last meaningful activity: ${t.last_meaningful_at && Date.parse(t.last_meaningful_at) >= Date.parse(t.accepted_at) ? dueText(t.last_meaningful_at, db, orgId) : 'none since they accepted'}. Idle for ${Math.floor(idle / HOUR)}h.`, link: taskLink(t.id), anchor: new Date(base).toISOString() })
+          }
+        }
       }
       if (!t.assignee_id && at - Date.parse(t.created_at) > th.unassignedHours * HOUR) {
         raised += raiseAlert(db, { orgId, rule: 'unassigned', userIds: managers(), taskId: t.id, title: `Unassigned for ${th.unassignedHours}h+: ${t.title}`, link: taskLink(t.id), anchor: t.created_at })
@@ -135,7 +223,9 @@ export function scanAlerts(db, at = Date.now()) {
 }
 
 /** How hard M91 chases each alert (it decides re-rings and phone calls, so CRITICAL is never used automatically). */
-export const RULE_SEVERITY = { deadline_missed: 'HIGH', critical_blocked: 'HIGH', blocker_unresolved: 'MEDIUM', deadline_approaching: 'MEDIUM', no_progress: 'MEDIUM', unassigned: 'MEDIUM', not_started: 'LOW', task_assigned: 'LOW', submitted_for_review: 'LOW', evidence_attribution_review: 'MEDIUM', assessment_disputed: 'MEDIUM', evidence_attribution_note: 'LOW', impact_verification_needed: 'LOW' }
+export const RULE_SEVERITY = { deadline_missed: 'CRITICAL', deadline_approaching: 'HIGH', no_movement: 'MEDIUM', task_assignment: 'LOW', deadline_explanation_required: 'LOW', critical_blocked: 'HIGH', blocker_unresolved: 'MEDIUM', no_progress: 'MEDIUM', unassigned: 'MEDIUM', not_started: 'LOW', task_assigned: 'LOW', submitted_for_review: 'LOW', evidence_attribution_review: 'MEDIUM', assessment_disputed: 'MEDIUM', evidence_attribution_note: 'LOW', impact_verification_needed: 'LOW' }
+/** The escalation ladder: which rule is each M91 severity for the assignment workflow. */
+export const LADDER = { LOW: 'task_assignment', MEDIUM: 'no_movement', HIGH: 'deadline_approaching', CRITICAL: 'deadline_missed' }
 
 /** The M91 customId for a delivery: stable per condition and person, at most 200 characters. */
 export const m91CustomId = (dedupeKey) => `tp-${createHash('sha256').update(String(dedupeKey)).digest('hex').slice(0, 40)}`
@@ -191,6 +281,12 @@ export async function closeResolvedAlerts(db, transport, event) {
   else if (event.type === 'task.reviewed' && event.decision === 'APPROVED') rules = 'all'
   else if (event.type === 'task.status_changed' && ['COMPLETED', 'CANCELLED'].includes(event.to)) rules = 'all'
   else if (event.type === 'task.assigned') rules = ['unassigned']
+  // The condition behind each of these is over: real movement ends an idle stretch, a moved deadline ends the old deadline's
+  // alerts (the new deadline is scanned afresh), an answered assignment is no longer news, a new owner starts a new clock.
+  else if (event.type === 'task.meaningful_activity') rules = ['no_movement']
+  else if (event.type === 'task.deadline_changed') rules = ['deadline_approaching', 'deadline_missed']
+  else if (event.type === 'assignment.accepted' || event.type === 'assignment.declined') rules = ['task_assignment']
+  else if (event.type === 'transfer.decided' && event.decision === 'ACCEPT') rules = ['no_movement', 'task_assignment']
   if (!rules) return 0
   const open = db.prepare(`SELECT * FROM alert_deliveries WHERE task_id = ? AND closed_at IS NULL AND status IN ('SENT','DELIVERED') AND provider_message_id IS NOT NULL`).all(event.taskId)
     .filter((d) => rules === 'all' || rules.includes(d.rule))
@@ -307,7 +403,7 @@ export function alertHistory(db, ctx, { limit = 100 } = {}) {
   const rows = ctx.role === 'admin'
     ? db.prepare(`SELECT d.*, u.name FROM alert_deliveries d LEFT JOIN users u ON u.id = d.user_id WHERE d.org_id = ? ORDER BY d.created_at DESC LIMIT ?`).all(ctx.orgId, limit)
     : db.prepare(`SELECT d.*, u.name FROM alert_deliveries d LEFT JOIN users u ON u.id = d.user_id WHERE d.org_id = ? AND d.user_id = ? ORDER BY d.created_at DESC LIMIT ?`).all(ctx.orgId, ctx.user.id, limit)
-  return rows.map((d) => ({ id: d.id, rule: d.rule, ruleLabel: ALERT_RULES[d.rule]?.label || d.rule, recipientName: d.name, status: d.status, attempts: d.attempts, lastError: d.last_error,
+  return rows.map((d) => ({ id: d.id, rule: d.rule, severity: RULE_SEVERITY[d.rule] || 'MEDIUM', ruleLabel: ALERT_RULES[d.rule]?.label || d.rule, recipientName: d.name, status: d.status, attempts: d.attempts, lastError: d.last_error,
     response: d.response_label ? { label: d.response_label, note: d.response_note, at: d.responded_at } : null, closedAt: d.closed_at, taskId: d.task_id, createdAt: d.created_at, updatedAt: d.updated_at }))
 }
 

@@ -15,7 +15,7 @@ import { RATED, rubricFor } from './rubric.js'
 
 // Bump PROMPT_VERSION whenever the system prompt, the user message or the output schema changes; guardrail changes
 // bump GUARDRAIL_VERSION (guardrails.js). Both are part of the dedupe hash and stored with every run and assessment.
-export const PROMPT_VERSION = 'work-eval-2026-11-v3'
+export const PROMPT_VERSION = 'work-eval-2026-11-v4'
 const MAX_ATTEMPTS = 3
 const inflight = new Set()
 
@@ -43,6 +43,8 @@ export function systemPrompt(rubric) {
     '- External evidence (GitHub, Slack, Gmail, Calendar, Sheets) is context about this task. Its author field says whose work it is: "teammate" or "external_person" items are other people\'s work — never credit them to the employee. Counts of commits, messages, emails or meetings mean nothing.',
     '- List in observed_facts only what the evidence records, with refs; put interpretation in the reasons. A merged PR is a fact; "the feature works for customers" is not, unless the evidence says so.',
     '- Items of kind "candidate" are not linked to this task: never cite them. In evidence_matches say for each whether it seems to belong to this task.',
+    '- "deadline" (when present) lists missed deadlines with their circumstances. A missed deadline is an operational signal, never a measure of the person or the work: do not lower any rating because of it alone. Weigh blockers outside the employee\'s control, changed deadlines, scope changes, and the employee\'s own explanation (a claim) with the manager\'s review of it.',
+    '- "ownership" (when present) says how the task reached the employee. A Slack tag only proposed an owner; "employeeAcceptedOwnership" is acknowledged responsibility. Declining, asking for clarification or handing a task to a teammate is not a mark against the employee. Supporting contributors, reviewers and the requester did not own the task: credit them only with what the evidence shows they did.',
     '- Write plainly for a busy manager. No praise or criticism that the evidence does not support.'
   ].join('\n')
 }

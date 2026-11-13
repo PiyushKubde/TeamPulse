@@ -60,6 +60,8 @@ try {
   step = 'create + assign task'
   await m.click('#new-task')
   await m.fill('#t-title', 'E2E: add rate limiting to login')
+  // Outcome, priority and assignee live under "More options" since the progressive-disclosure form (08c439a).
+  await m.evaluate(() => document.getElementById('task-more')?.setAttribute('open', ''))
   await m.fill('#t-out', 'Brute force attempts blocked')
   await m.selectOption('#t-prio', 'HIGH')
   await m.selectOption('#t-assignee', { label: 'Dev Patel' })

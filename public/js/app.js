@@ -15,6 +15,7 @@ import { renderEvidence } from './views/evidence.js'
 import { renderAssistant, renderCopilot } from './views/assistant.js'
 import { renderContributions, renderJourney } from './views/journeys.js'
 import { renderReviews } from './views/reviews.js'
+import { renderSlackIntake } from './views/assignments.js'
 
 const LOGO = raw(`<svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--logo-bg)"/><path d="M6 17h5l3-7 4 13 3-6h5" fill="none" stroke="var(--logo-fg)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`)
 
@@ -34,6 +35,7 @@ const NAV = {
     { key: 'dashboard', label: 'Overview', href: '#/dashboard', icon: 'home', tab: 'Overview' },
     { key: 'intelligence', label: 'Team Intelligence', href: '#/contribution', icon: 'intelligence', tab: 'Team' },
     { key: 'team-tasks', label: 'Tasks', href: '#/team-tasks', icon: 'tasks', tab: 'Tasks' },
+    { key: 'slack-intake', label: 'Slack Intake', href: '#/slack-intake', icon: 'hash' },
     { key: 'reviews', label: 'Contribution Reviews', href: '#/reviews', icon: 'reviews', count: 'reviews', tab: 'Reviews' },
     { key: 'copilot', label: 'Manager Copilot', href: '#/copilot', icon: 'copilot' },
     { key: 'contributions', label: 'Contribution Journeys', href: '#/contributions', icon: 'journeys' },
@@ -192,6 +194,7 @@ const ROUTES = [
   [/^#\/my-tasks$/, 'my-tasks', () => (main, q) => renderTaskList(main, { view: 'mine', q })],
   [/^#\/team-tasks$/, 'team-tasks', () => (main, q) => renderTaskList(main, { view: 'team', q })],
   [/^#\/tasks\/([0-9a-f-]{36})$/, 'my-tasks', (m) => (main) => renderTaskDetail(main, m[1])],
+  [/^#\/slack-intake$/, 'slack-intake', () => renderSlackIntake],
   [/^#\/requests$/, 'requests', () => renderRequests],
   [/^#\/impact$/, 'impact', () => renderImpact],
   [/^#\/impact\/([0-9a-f-]{36})$/, 'impact', (m) => (main) => renderImpactDetail(main, m[1])],
@@ -252,9 +255,9 @@ async function route() {
   main.innerHTML = loading().toString()
   if (!hit) { main.innerHTML = html`<div class="empty"><h3>Page not found</h3><p><a href="#/dashboard">Go to the dashboard</a></p></div>`.toString(); return }
   // Manager-only screens: a clear message instead of an error (the server refuses the data anyway).
-  if (['team-tasks', 'reports', 'copilot'].includes(key) && !app.isManager && !path.startsWith('#/tasks/')) {
-    main.innerHTML = html`<div class="card" style="max-width:640px;margin-top:24px"><h1>${key === 'reports' ? 'Reports are for managers' : key === 'copilot' ? 'Manager Copilot is for managers' : 'Team Tasks is for managers'}</h1>
-      <p class="muted">${key === 'reports' ? 'Reports cover a whole team, so only managers and admins can open them.' : key === 'copilot' ? 'The Copilot answers questions about a whole team. Ask about your own work in Analyse My Day.' : 'Team Tasks shows a whole team’s work, so only managers and admins can open it.'} Your own work is always in My Tasks and on your dashboard.</p>
+  if (['team-tasks', 'reports', 'copilot', 'slack-intake'].includes(key) && !app.isManager && !path.startsWith('#/tasks/')) {
+    main.innerHTML = html`<div class="card" style="max-width:640px;margin-top:24px"><h1>${key === 'reports' ? 'Reports are for managers' : key === 'copilot' ? 'Manager Copilot is for managers' : key === 'slack-intake' ? 'Slack Intake is for managers' : 'Team Tasks is for managers'}</h1>
+      <p class="muted">${key === 'reports' ? 'Reports cover a whole team, so only managers and admins can open them.' : key === 'copilot' ? 'The Copilot answers questions about a whole team. Ask about your own work in Analyse My Day.' : key === 'slack-intake' ? 'Slack Intake shows how a team’s tasks arrive and who owns them, so only managers and admins can open it. Tasks assigned to you are on your dashboard.' : 'Team Tasks shows a whole team’s work, so only managers and admins can open it.'} Your own work is always in My Tasks and on your dashboard.</p>
       <div class="row"><a class="btn" href="#/my-tasks">Go to My Tasks</a><a class="btn ghost" href="#/dashboard">Dashboard</a></div></div>`.toString()
     return
   }

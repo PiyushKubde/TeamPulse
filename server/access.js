@@ -77,17 +77,20 @@ export function isActiveMember(db, orgId, userId) {
 /** SQL (alias t) restricting tasks to what this context may see. */
 export function taskScopeSql(ctx, alias = 't') {
   if (isAdmin(ctx)) return { sql: `${alias}.org_id = ?`, params: [ctx.orgId] }
+  // Whoever proposed or was proposed a transfer of a task can see that task (so the proposed owner can decide).
+  const transfer = ` OR EXISTS (SELECT 1 FROM task_transfers x WHERE x.task_id = ${alias}.id AND x.org_id = ? AND (x.to_user_id = ? OR x.from_user_id = ?))`
+  const transferParams = [ctx.orgId, ctx.user.id, ctx.user.id]
   if (ctx.role === 'manager') {
     const ph = ctx.managedTeamIds.map(() => '?').join(',')
     const teamClause = ctx.managedTeamIds.length
       ? ` OR ${alias}.team_id IN (${ph}) OR ${alias}.assignee_id IN (SELECT user_id FROM memberships WHERE org_id = ? AND team_id IN (${ph}))`
       : ''
     return {
-      sql: `${alias}.org_id = ? AND (${alias}.created_by = ? OR ${alias}.assignee_id = ?${teamClause})`,
-      params: [ctx.orgId, ctx.user.id, ctx.user.id, ...(ctx.managedTeamIds.length ? [...ctx.managedTeamIds, ctx.orgId, ...ctx.managedTeamIds] : [])]
+      sql: `${alias}.org_id = ? AND (${alias}.created_by = ? OR ${alias}.assignee_id = ?${teamClause}${transfer})`,
+      params: [ctx.orgId, ctx.user.id, ctx.user.id, ...(ctx.managedTeamIds.length ? [...ctx.managedTeamIds, ctx.orgId, ...ctx.managedTeamIds] : []), ...transferParams]
     }
   }
-  return { sql: `${alias}.org_id = ? AND (${alias}.assignee_id = ? OR ${alias}.created_by = ?)`, params: [ctx.orgId, ctx.user.id, ctx.user.id] }
+  return { sql: `${alias}.org_id = ? AND (${alias}.assignee_id = ? OR ${alias}.created_by = ?${transfer})`, params: [ctx.orgId, ctx.user.id, ctx.user.id, ...transferParams] }
 }
 
 /** The task if this context may see it; another org's task or one out of scope answers 404 (existence not revealed). */

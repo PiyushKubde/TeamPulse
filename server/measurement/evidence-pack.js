@@ -10,6 +10,7 @@
 import { createHash } from 'node:crypto'
 import { json } from '../db.js'
 import { usableLinks } from '../evidence/matching.js'
+import { deadlineContext } from '../services/deadline-explanations.js'
 
 const APP_LABEL = { github: 'GitHub', slack: 'Slack', gmail: 'Gmail', 'google-calendar': 'Google Calendar', 'google-sheets': 'Google Sheets' }
 const MAX_CANDIDATES = 8
@@ -154,6 +155,21 @@ export function buildEvidencePack(db, task, subjectId) {
     progressUpdates: signals.progressUpdates
   }
 
+  // How ownership came about (a Slack tag only proposes an owner; accepting acknowledges it) and what is known about a missed
+  // deadline. Both are context for the model, never inputs to a score.
+  const assignments = db.prepare('SELECT user_id, source, state, responded_at FROM task_assignments WHERE task_id = ? ORDER BY assigned_at, rowid').all(task.id)
+  const mine = assignments.filter((a) => a.user_id === subjectId)
+  const people = db.prepare('SELECT role, user_id FROM task_participants WHERE task_id = ?').all(task.id)
+  const ownership = assignments.length ? {
+    proposedBy: assignments[0].source === 'SLACK_MENTION' ? 'a tag in a Slack message' : assignments[0].source === 'TRANSFER' ? 'a transfer' : 'a manager',
+    employeeWasTheInitialTag: assignments[0].source === 'SLACK_MENTION' && assignments[0].user_id === subjectId,
+    employeeAcceptedOwnership: mine.some((a) => ['ACCEPTED', 'TRANSFERRED_OUT'].includes(a.state)), employeeAcceptedAt: mine.find((a) => a.responded_at && a.state !== 'DECLINED')?.responded_at ?? null,
+    employeeDeclined: mine.some((a) => a.state === 'DECLINED'), receivedByTransfer: mine.some((a) => a.source === 'TRANSFER'), handedToATeammate: mine.some((a) => a.state === 'TRANSFERRED_OUT'),
+    othersInvolved: { supportingContributors: people.filter((p) => p.role === 'SUPPORT' && p.user_id !== subjectId).length, reviewers: people.filter((p) => p.role === 'REVIEWER' && p.user_id !== subjectId).length, requesterWasSomeoneElse: people.some((p) => p.role === 'REQUESTER' && p.user_id !== subjectId) },
+    note: 'A tag only proposes an owner; accepting is what acknowledges responsibility. Declining, asking for clarification or handing the task to a teammate is not a mark against the employee. Supporting contributors, reviewers and the requester did not own the task.'
+  } : undefined
+  const deadline = deadlineContext(db, task.id) || undefined
+
   const regression = signals.reopened > 0 || signals.qualityConcerns.some((q) => !lastApproval || items.find((i) => i.ref === q.ref)?.at > lastApproval)
   const substantiveWords = words(task.description) + words(task.expected_outcome) + items.filter((i) => ['update', 'comment', 'submission', 'review', 'context', 'impact', 'help', 'external'].includes(i.kind))
     .reduce((n, i) => n + words(i.text) + words(i.workSummary) + words(i.outcomeClaimed) + words(i.result) + words(i.workPerformed), 0)
@@ -165,6 +181,8 @@ export function buildEvidencePack(db, task, subjectId) {
       status: task.status, dueAt: task.due_at, createdAt: task.created_at, createdBy: roleOf(task.created_by), assignedTo: task.assignee_id === subjectId ? 'employee' : 'someone else',
       note: 'Title and priority are labels set by people; they are not evidence of complexity.'
     },
+    ownership,
+    deadline,
     items,
     signals: {
       reviewApproved: signals.approved, changesRequested: signals.changesRequested, reopenedAfterCompletion: signals.reopened,

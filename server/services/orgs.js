@@ -8,6 +8,7 @@ import * as v from '../validate.js'
 import { audit } from './audit.js'
 import { notifyInApp } from './notify.js'
 import { DEFAULT_ALERT_SETTINGS } from './alert-rules.js'
+import { orgTimezone, validTimezone } from '../time.js'
 
 const ROLES = ['admin', 'manager', 'employee']
 const joinCode = () => randomBytes(5).toString('hex').toUpperCase()
@@ -45,7 +46,8 @@ export function getOrganization(db, ctx) {
     id: o.id, name: o.name, createdAt: o.created_at,
     // The join code lets people ask to join; it never grants access by itself (approval is required).
     joinCode: isManager(ctx) ? o.join_code : null,
-    intakeConfigured: Boolean(o.intake_token_hash)
+    intakeConfigured: Boolean(o.intake_token_hash),
+    timezone: orgTimezone(db, ctx.orgId)
   }
 }
 
@@ -53,8 +55,14 @@ export function updateOrganization(db, ctx, body) {
   requireAdmin(ctx)
   const before = getOrganization(db, ctx)
   const name = v.text(body?.name, 'Organization name', { required: true, min: 2, max: 120 })
-  db.prepare('UPDATE organizations SET name = ?, updated_at = ? WHERE id = ?').run(name, now(), ctx.orgId)
-  audit(db, { orgId: ctx.orgId, actorId: ctx.user.id, action: 'organization.updated', entityType: 'organization', entityId: ctx.orgId, before: { name: before.name }, after: { name } })
+  let timezone = before.timezone
+  if (body?.timezone !== undefined) {
+    if (!validTimezone(body.timezone)) throw invalid('Choose a valid timezone, for example Asia/Kolkata or America/New_York.', { field: 'timezone' })
+    timezone = body.timezone
+  }
+  const settings = json(db.prepare('SELECT settings FROM organizations WHERE id = ?').get(ctx.orgId)?.settings, {})
+  db.prepare('UPDATE organizations SET name = ?, settings = ?, updated_at = ? WHERE id = ?').run(name, JSON.stringify({ ...settings, timezone }), now(), ctx.orgId)
+  audit(db, { orgId: ctx.orgId, actorId: ctx.user.id, action: 'organization.updated', entityType: 'organization', entityId: ctx.orgId, before: { name: before.name, timezone: before.timezone }, after: { name, timezone } })
   return getOrganization(db, ctx)
 }
 

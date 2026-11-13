@@ -13,6 +13,7 @@ import { requireActiveConnection, pickOptions, MARKER } from '../integrations/ac
 import { requireViasocket, viasocketError } from '../integrations/errors.js'
 import { startLog, finishLog } from './engine.js'
 import * as v from '../validate.js'
+import { extractMentions, processSlackTask } from './slack-tasks.js'
 
 // Keys, versions and trigger ids from the trigger pages, confirmed with user.listActions() on 2026-11-09.
 export const TRIGGERS = {
@@ -37,7 +38,9 @@ function inputFor(app, target) {
 }
 
 function present(db, r) {
+  const outcomes = r.app === 'slack' ? Object.fromEntries(db.prepare('SELECT outcome, COUNT(*) AS n FROM slack_intake_items WHERE subscription_id = ? GROUP BY outcome').all(r.id).map((o) => [o.outcome, o.n])) : {}
   return {
+    assignFromMentions: Boolean(r.assign_from_mentions), tasksCreated: outcomes.TASK_CREATED || 0, needManager: outcomes.NEEDS_MANAGER || 0, ignored: outcomes.IGNORED || 0,
     id: r.id, app: r.app, target: r.target_label, status: r.status, teamId: r.team_id,
     teamName: r.team_id ? db.prepare('SELECT name FROM teams WHERE id = ?').get(r.team_id)?.name ?? null : null,
     ownerName: db.prepare('SELECT name FROM users WHERE id = ?').get(r.owner_id)?.name, mine: undefined,
@@ -95,6 +98,8 @@ export async function createIntake(db, vs, ctx, body, { appUrl }) {
   const dup = db.prepare(`SELECT 1 FROM intake_subscriptions WHERE org_id = ? AND owner_id = ? AND app = ? AND status IN ('ACTIVE','PAUSED') AND input_data = ?`).get(ctx.orgId, ctx.user.id, app, JSON.stringify(inputData))
   if (dup) throw conflict('You already have an intake on that label or channel.', 'intake_exists')
 
+  // Only a Slack channel can assign from @mentions; it is opt-in so existing intakes keep creating requests.
+  const assignFromMentions = app === 'slack' && body?.assignFromMentions === true ? 1 : 0
   const id = uuid()
   const token = `tpe_${randomBytes(24).toString('base64url')}`
   const url = `${appUrl}/api/viasocket/events/${id}`
@@ -109,11 +114,22 @@ return res.data`
   }
   console.log(`[viasocket] subscribed ${t.slug} ${t.key} ${t.version} for user ${ctx.user.id} (intake ${id})`)
   const ts = now()
-  db.prepare(`INSERT INTO intake_subscriptions (id, org_id, owner_id, team_id, app, connection_id, trigger_key, version, script_id, input_data, target_label, token_hash, status, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`)
-    .run(id, ctx.orgId, ctx.user.id, teamId, app, conn.id, t.key, t.version, sub.scriptId, JSON.stringify(inputData), hit.label, sha(token), ts, ts)
-  audit(db, { orgId: ctx.orgId, actorId: ctx.user.id, action: 'intake.created', entityType: 'intake_subscription', entityId: id, after: { app, target: hit.label, teamId } })
+  db.prepare(`INSERT INTO intake_subscriptions (id, org_id, owner_id, team_id, app, connection_id, trigger_key, version, script_id, input_data, target_label, token_hash, status, assign_from_mentions, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)`)
+    .run(id, ctx.orgId, ctx.user.id, teamId, app, conn.id, t.key, t.version, sub.scriptId, JSON.stringify(inputData), hit.label, sha(token), assignFromMentions, ts, ts)
+  audit(db, { orgId: ctx.orgId, actorId: ctx.user.id, action: 'intake.created', entityType: 'intake_subscription', entityId: id, after: { app, target: hit.label, teamId, assignFromMentions: Boolean(assignFromMentions) } })
   return { ...present(db, db.prepare('SELECT * FROM intake_subscriptions WHERE id = ?').get(id)), mine: true }
+}
+
+/** Switch a Slack intake between "pending requests" and "tasks for the tagged person". Only its owner (or an admin). */
+export function setIntakeMode(db, ctx, id, body) {
+  requireManager(ctx)
+  const r = requireOwnIntake(db, ctx, id)
+  if (r.app !== 'slack') throw invalid('Only a Slack intake can assign from mentions.')
+  const on = v.bool(body?.assignFromMentions, 'Assign from mentions')
+  db.prepare('UPDATE intake_subscriptions SET assign_from_mentions = ?, updated_at = ? WHERE id = ?').run(on ? 1 : 0, now(), r.id)
+  audit(db, { orgId: ctx.orgId, actorId: ctx.user.id, action: 'intake.mode_changed', entityType: 'intake_subscription', entityId: r.id, before: { assignFromMentions: Boolean(r.assign_from_mentions) }, after: { assignFromMentions: on } })
+  return { assignFromMentions: on }
 }
 
 function requireOwnIntake(db, ctx, id) {
@@ -171,7 +187,7 @@ const header = (headers, name) => (Array.isArray(headers) ? headers.find((h) => 
 const unwrapEvent = (e) => (e && typeof e === 'object' && e.event && typeof e.event === 'object' && !e.subject && !e.text ? e.event : e)
 
 /** Maps a Gmail or Slack event to a request: { title, description, requester, externalRef, ignore? }. */
-export function parseEvent(app, raw) {
+export function parseEvent(app, raw, { threads = false } = {}) {
   const e = unwrapEvent(Array.isArray(raw) ? raw[0] : raw) || {}
   if (app === 'gmail') {
     const h = e.payload?.headers
@@ -187,10 +203,18 @@ export function parseEvent(app, raw) {
   const ts = first(e.ts, e.event_ts, e.message?.ts)
   const channel = first(e.channel, e.channel_id, e.message?.channel)
   const ownMessage = (text || '').includes(MARKER)
+  const senderId = first(e.user, e.user_id, e.message?.user)
+  const teamId = first(e.team, e.team_id, e.user_team, e.message?.team)
+  const permalink = first(e.permalink, e.message?.permalink)
+  const threadTs = first(e.thread_ts, e.message?.thread_ts)
   return {
     title: text ? text.split('\n')[0].replace(/[*_`]/g, '').slice(0, 120) : null, description: text ? text.slice(0, 4000) : null,
     requester: first(e.user_name, e.username, e.user_profile?.real_name, e.user), externalRef: ts ? `slack:${channel || ''}:${ts}` : null,
-    ignore: ownMessage ? 'sent by TeamPulse' : bot ? 'posted by a bot' : e.thread_ts && e.thread_ts !== e.ts ? 'a thread reply' : null
+    // Task-from-mention intakes also read thread replies (a reply can carry the real request); requests ignore them as before.
+    ignore: ownMessage ? 'sent by TeamPulse' : bot ? 'posted by a bot' : !threads && e.thread_ts && e.thread_ts !== e.ts ? 'a thread reply' : null,
+    text, mentions: extractMentions(text), senderId: senderId && /^[UW][A-Z0-9]{6,20}$/.test(senderId) ? senderId : null, ts, threadTs, channel,
+    teamId: teamId && /^[A-Z0-9]{6,20}$/.test(teamId) ? teamId : null,
+    permalink: permalink && /^https:\/\/([a-z0-9-]+\.)*slack\.com\//i.test(permalink) ? permalink : null
   }
 }
 
@@ -200,11 +224,23 @@ export function receiveIntakeEvent(db, id, bearer, body) {
   const given = Buffer.from(sha(String(bearer || '')))
   if (!r || !bearer || !timingSafeEqual(given, Buffer.from(r.token_hash))) throw new AppError(401, 'unauthorized', 'Unauthorized')
   if (r.status !== 'ACTIVE') return { status: 'ignored', reason: 'intake paused' }
-  const parsed = parseEvent(r.app, body?.event ?? body)
+  const assigning = r.app === 'slack' && r.assign_from_mentions === 1
+  const parsed = parseEvent(r.app, body?.event ?? body, { threads: assigning })
   console.log(`[intake] ${r.app} event for intake ${r.id}: keys ${keyPaths(body?.event ?? body).slice(0, 40).join(', ')}; ${parsed.ignore ? `ignored (${parsed.ignore})` : parsed.title ? 'mapped' : 'no title'}`)
   const logId = startLog(db, { orgId: r.org_id, key: 'gmail_slack_intake', trigger: r.app, subjectType: 'intake', subjectId: r.id })
   const ts = now()
   db.prepare('UPDATE intake_subscriptions SET events_received = events_received + 1, last_event_at = ?, updated_at = ? WHERE id = ?').run(ts, ts, r.id)
+  if (assigning) {
+    try {
+      const out = processSlackTask(db, r, parsed)
+      finishLog(db, logId, null, { status: out.status === 'created' || out.status === 'needs_manager' ? 'SUCCEEDED' : 'SKIPPED', summary: { created: 'Task created for the tagged person.', needs_manager: `Needs a manager: ${out.reason}`, duplicate: 'Already received.', ignored: `Ignored: ${out.reason}` }[out.status] })
+      return out
+    } catch (error) {
+      db.prepare('UPDATE intake_subscriptions SET last_error = ? WHERE id = ?').run(String(error.message).slice(0, 300), r.id)
+      finishLog(db, logId, null, { status: 'FAILED', error: String(error.message).slice(0, 300) })
+      return { status: 'failed', error: error.message }
+    }
+  }
   if (parsed.ignore || !parsed.title) {
     finishLog(db, logId, null, { status: 'SKIPPED', summary: `Ignored: ${parsed.ignore || 'no subject or text'}` })
     return { status: 'ignored', reason: parsed.ignore || 'empty' }

@@ -231,6 +231,7 @@ export function addIdentity(db, ctx, body) {
 export function removeIdentity(db, ctx, id) {
   const r = db.prepare('SELECT * FROM external_identities WHERE id = ? AND org_id = ? AND user_id = ?').get(String(id), ctx.orgId, ctx.user.id)
   if (!r) throw notFound('Identity')
+  if (r.mapped_by) throw forbidden('A manager confirmed this mapping. Ask your manager to remove it.')
   db.prepare('DELETE FROM external_identities WHERE id = ?').run(r.id)
   // Evidence attributed through it becomes unknown again (never silently kept as theirs).
   db.prepare(`UPDATE external_evidence SET actor_user_id = NULL, attribution = 'unknown', updated_at = ? WHERE org_id = ? AND app = ? AND lower(actor_identity) = ? AND attribution IN ('self','member') AND actor_user_id = ?`).run(now(), ctx.orgId, r.app, r.identity.toLowerCase(), ctx.user.id)

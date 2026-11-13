@@ -212,8 +212,11 @@ async function renderIntakes(box, conns, configured) {
     let list = []
     try { list = await api('/api/intakes') } catch (e) { box.innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString(); return }
     box.innerHTML = html`${list.length ? html`<ul class="list">${list.map((i) => html`<li><div class="grow"><b>${i.app === 'gmail' ? 'Gmail label' : 'Slack'} “${i.target}”</b> → ${i.teamName || 'admins'}
-        <div class="small muted">${i.mine ? '' : `${i.ownerName} · `}${i.eventsReceived} message(s) received${i.lastEventAt ? `, last ${ago(i.lastEventAt)}` : ''}</div>${i.lastError ? html`<div class="small" style="color:var(--bad)">${i.lastError}</div>` : ''}</div>
+        <div class="small muted">${i.mine ? '' : `${i.ownerName} · `}${i.eventsReceived} message(s) received${i.lastEventAt ? `, last ${ago(i.lastEventAt)}` : ''}</div>
+        ${i.app === 'slack' ? html`<div class="small" style="margin-top:2px"><span class="badge ${i.assignFromMentions ? 'brand' : 'outline'}">${i.assignFromMentions ? 'Creates tasks for tagged people' : 'Creates pending requests'}</span>${i.assignFromMentions ? html` <span class="muted">${i.tasksCreated} task(s) created · ${i.needManager} need a manager · <a href="#/slack-intake">Slack Intake</a></span>` : ''}</div>` : ''}
+        ${i.lastError ? html`<div class="small" style="color:var(--bad)">${i.lastError}</div>` : ''}</div>
         <span class="badge ${STATUS_BADGE[i.status] || 'outline'}">${i.status.toLowerCase()}</span>
+        ${i.app === 'slack' && i.mine ? html`<button class="btn small ghost" data-mode="${i.id}" data-on="${i.assignFromMentions ? '0' : '1'}">${i.assignFromMentions ? 'Switch to requests' : 'Create tasks for tagged people'}</button>` : ''}
         ${i.status === 'ACTIVE' ? html`<button class="btn small ghost" data-i="${i.id}" data-to="PAUSED">Pause</button>` : i.mine ? html`<button class="btn small ghost" data-i="${i.id}" data-to="ACTIVE">Resume</button>` : ''}
         ${i.mine ? html`<button class="btn small ghost" data-i="${i.id}" data-to="DELETED">Remove</button>` : ''}</li>`)}</ul>`
       : html`<p class="small muted">No intakes yet.</p>`}
@@ -221,6 +224,11 @@ async function renderIntakes(box, conns, configured) {
     box.querySelectorAll('[data-i]').forEach((b) => b.addEventListener('click', async () => {
       if (b.dataset.to === 'DELETED') { const r = await confirmDialog({ title: 'Remove this intake?', body: 'New messages stop becoming requests. Requests already created stay.', confirm: 'Remove', danger: true }); if (!r?.ok) return }
       try { await api(`/api/intakes/${b.dataset.i}/status`, { method: 'POST', body: { status: b.dataset.to } }); draw() } catch (e) { toast(errorText(e), { error: true }) }
+    }))
+    box.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', async () => {
+      const on = b.dataset.on === '1'
+      if (on) { const r = await confirmDialog({ title: 'Create tasks for tagged people?', body: 'A task message that tags one mapped person becomes a task waiting for that person to accept. Messages that cannot be assigned safely still go to you as pending requests. Map people to their Slack ids in Slack Intake first.', confirm: 'Create tasks' }); if (!r?.ok) return }
+      try { await api(`/api/intakes/${b.dataset.mode}/mode`, { method: 'POST', body: { assignFromMentions: on } }); toast(on ? 'New task messages now create tasks for the people tagged.' : 'New messages become pending requests again.'); draw() } catch (e) { toast(errorText(e), { error: true }) }
     }))
     box.querySelector('#add-intake')?.addEventListener('click', () => addIntake(conns, draw))
   }
@@ -232,12 +240,14 @@ async function addIntake(conns, done) {
   const s = conns.connections.filter((c) => c.app === 'slack' && c.status !== 'missing')
   if (!g.length && !s.length) return modal(html`<h2 id="modal-title">Connect Gmail or Slack first</h2><p>Intake listens on your own Gmail or Slack account.</p><div class="row end"><button class="btn ghost" data-close>Close</button><a class="btn" href="#/automations?tab=apps">Connect an app</a></div>`.toString(), (el, close) => el.querySelector('a').addEventListener('click', () => close()))
   const teams = (await api('/api/teams')).filter((t) => app.isAdmin || t.managedByMe)
-  modal(html`<h2 id="modal-title">Gmail / Slack intake</h2><p class="small muted">Each new email with the label, or each new message in the channel, becomes a <b>pending</b> task request for your team. Nothing is assigned or approved automatically. Use a dedicated label or channel.</p>
+  modal(html`<h2 id="modal-title">Gmail / Slack intake</h2><p class="small muted">Each new email with the label, or each new message in the channel, becomes a <b>pending</b> task request for your team, nothing is approved automatically. For Slack you can instead create tasks for the people tagged: they still have to accept. Use a dedicated label or channel.</p>
     <form id="f"><div class="form-error"></div>
     <div class="field"><label for="i-app">Listen on</label><select id="i-app" name="app">${g.length ? html`<option value="gmail">Gmail (a label)</option>` : ''}${s.length ? html`<option value="slack">Slack (a channel)</option>` : ''}</select></div>
     <div class="field"><label for="i-conn">Your account</label><select id="i-conn" name="connectionId"></select></div>
     <div class="field"><label for="i-target" id="i-target-label">Label</label><select id="i-target" name="target"><option value="">Loading…</option></select><div class="hint" id="i-hint"></div></div>
     <div class="field"><label for="i-team">Requests go to</label><select id="i-team" name="teamId">${teams.map((t) => html`<option value="${t.id}">${t.name}</option>`)}</select></div>
+    <div id="i-assign-wrap" hidden><label class="check"><input type="checkbox" id="i-assign" checked> Create tasks for tagged people</label>
+      <div class="hint">A message that asks someone to do something and tags one mapped person becomes a task waiting for that person to accept. Chat is ignored. If nobody, several people or an unmapped person is tagged, it becomes a pending request for you instead.</div></div>
     <div id="i-preview"></div>
     <div class="row end"><button class="btn ghost" type="button" id="i-sample">Preview a real message</button><button class="btn ghost" data-close>Cancel</button><button class="btn" type="submit">Switch on</button></div></form>`.toString(), (el, close) => {
     const $ = (q) => el.querySelector(q)
@@ -245,6 +255,7 @@ async function addIntake(conns, done) {
       const isG = $('#i-app').value === 'gmail'
       $('#i-conn').innerHTML = (isG ? g : s).map((c) => `<option value="${esc(c.id)}">${esc(c.label || $('#i-app').value)}</option>`).join('')
       $('#i-target-label').textContent = isG ? 'Gmail label' : 'Slack channel'
+      $('#i-assign-wrap').hidden = isG
       $('#i-hint').textContent = isG ? 'Create a label such as “TeamPulse” in Gmail and apply it to emails that should become requests.' : 'Use a channel only for requests — not one TeamPulse posts notifications or reports to.'
       await fillTargets()
     }
@@ -257,7 +268,7 @@ async function addIntake(conns, done) {
       } catch (e) { $('#i-target').innerHTML = '<option value="">Could not load</option>'; $('.form-error').innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString() }
     }
     $('#i-app').addEventListener('change', fill); $('#i-conn').addEventListener('change', fillTargets); fill()
-    const read = () => ({ app: $('#i-app').value, connectionId: $('#i-conn').value, target: $('#i-target').value, teamId: $('#i-team').value || undefined })
+    const read = () => ({ app: $('#i-app').value, connectionId: $('#i-conn').value, target: $('#i-target').value, teamId: $('#i-team').value || undefined, assignFromMentions: $('#i-app').value === 'slack' && $('#i-assign').checked })
     $('#i-sample').addEventListener('click', async () => {
       $('#i-preview').innerHTML = loading('Reading a recent message…').toString()
       try {
@@ -267,7 +278,7 @@ async function addIntake(conns, done) {
           : html`<div class="notice warn small">No recent message found there yet. Send one, then preview again.</div>`.toString()
       } catch (e) { $('#i-preview').innerHTML = html`<div class="notice err small">${errorText(e)}</div>`.toString() }
     })
-    bindForm($('#f'), () => api('/api/intakes', { method: 'POST', body: read() }), { onSuccess: () => { close(); toast('Intake is on. New messages become pending requests.'); done() } })
+    bindForm($('#f'), () => api('/api/intakes', { method: 'POST', body: read() }), { onSuccess: (out) => { close(); toast(out?.assignFromMentions ? 'Intake is on. A task message that tags one mapped person becomes a task for them.' : 'Intake is on. New messages become pending requests.'); done() } })
   })
 }
 

@@ -217,12 +217,12 @@ export function setThemePref(pref) {
 }
 
 // ---------- domain components ----------
-export const STATUS_LABEL = { SUGGESTED: 'Suggested', ASSIGNED: 'Assigned', IN_PROGRESS: 'In progress', BLOCKED: 'Blocked', SUBMITTED_FOR_REVIEW: 'In review', COMPLETED: 'Completed', CANCELLED: 'Cancelled' }
+export const STATUS_LABEL = { SUGGESTED: 'Suggested', PENDING_ACCEPTANCE: 'Awaiting acceptance', ASSIGNED: 'Assigned', IN_PROGRESS: 'In progress', BLOCKED: 'Blocked', SUBMITTED_FOR_REVIEW: 'In review', COMPLETED: 'Completed', CANCELLED: 'Cancelled', DECLINED: 'Declined' }
 export const statusBadge = (s) => html`<span class="badge status s-${s}">${STATUS_LABEL[s] || s}</span>`
 const PRIO_LABEL = { CRITICAL: 'Critical', HIGH: 'High', MEDIUM: 'Medium', LOW: 'Low' }
 export const prioBadge = (p) => html`<span class="prio prio-${p}" title="Priority">${icon('flag', 'xs')}${PRIO_LABEL[p] || p}</span>`
 export function conditionBadges(t) {
-  return html`${t.overdue ? html`<span class="badge bad">Overdue ${t.hoursOverdue}h</span>` : ''}${t.atRisk ? html`<span class="badge warn">At risk</span>` : ''}${t.unassigned ? html`<span class="badge warn">Unassigned</span>` : ''}`
+  return html`${t.overdue ? html`<span class="badge bad">Overdue ${t.hoursOverdue}h</span>` : ''}${t.atRisk ? html`<span class="badge warn">At risk</span>` : ''}${t.unassigned ? html`<span class="badge warn">Unassigned</span>` : ''}${t.pendingTransfer ? html`<span class="badge info" title="Offered to ${t.pendingTransfer.toName}">Transfer pending</span>` : ''}${t.fromSlack ? html`<span class="badge outline">${icon('hash', 'xs')}From Slack</span>` : ''}`
 }
 /** "Due tomorrow", "Overdue by 2 days" — relative when close, a date when far. */
 export function dueText(iso) {

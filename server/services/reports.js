@@ -47,7 +47,8 @@ export function buildReport(db, ctx, type, q = {}) {
       const all = tasksIn().filter((t) => t.created_at <= to && (t.updated_at >= from))
       const by = {}
       for (const t of all) by[t.status] = (by[t.status] || 0) + 1
-      const rows = ['ASSIGNED', 'IN_PROGRESS', 'BLOCKED', 'SUBMITTED_FOR_REVIEW', 'COMPLETED', 'CANCELLED'].map((s) => ({ status: s, tasks: by[s] || 0 }))
+      // The acceptance states are listed only when something is in them, so reports of organizations that never use them stay as they were.
+      const rows = ['PENDING_ACCEPTANCE', 'ASSIGNED', 'IN_PROGRESS', 'BLOCKED', 'SUBMITTED_FOR_REVIEW', 'COMPLETED', 'CANCELLED', 'DECLINED'].filter((s) => by[s] || !['PENDING_ACCEPTANCE', 'DECLINED'].includes(s)).map((s) => ({ status: s, tasks: by[s] || 0 }))
       return { title: 'Task status distribution (tasks active in the period)', columns: ['status', 'tasks'], rows, from, to }
     }
     case 'overdue': {

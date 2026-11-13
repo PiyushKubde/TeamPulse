@@ -362,7 +362,7 @@ test('scenario 10 / engine — dedupe, auto-analysis, failures, not configured, 
     const again = await t.call(`/api/tasks/${id}/assessment/analyse`, { method: 'POST', as: s.employee })
     assert.equal(again.body.status, 'unchanged'); assert.equal(ai.calls, before, 'identical input → no second model call')
     const run = t.db.prepare(`SELECT * FROM ai_evaluation_runs WHERE status = 'SUCCEEDED' AND provider = 'scripted' ORDER BY created_at DESC`).get()
-    assert.equal(run.model, 'scripted-v1'); assert.equal(run.prompt_version, 'work-eval-2026-11-v3'); assert.equal(JSON.parse(run.guardrails_json).version, 'guardrails-2026-11-v5'); assert.equal(run.rubric_version, 'default-2026-11-v2')
+    assert.equal(run.model, 'scripted-v1'); assert.equal(run.prompt_version, 'work-eval-2026-11-v4'); assert.equal(JSON.parse(run.guardrails_json).version, 'guardrails-2026-11-v5'); assert.equal(run.rubric_version, 'default-2026-11-v2')
     assert.ok(JSON.parse(run.input_json).pack.items.length, 'the exact model input is kept for audit')
     assert.equal(JSON.parse(run.usage_json).input_tokens, 100)
     assert.ok(t.db.prepare(`SELECT 1 FROM notifications WHERE user_id = ? AND kind = 'assessment_ready'`).get(s.employee.id))

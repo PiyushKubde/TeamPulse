@@ -4,6 +4,7 @@ import { eventText } from './dashboard.js'
 import { openContextBuilder } from './automations.js'
 import { renderAssessmentCard } from './contribution.js'
 import { renderTaskExternalEvidence } from './evidence.js'
+import { renderInbox, workflowBanners, workflowActions, sourceCard, ownershipCard, deadlineCard } from './assignments.js'
 
 let assignableCache = null
 async function assignable() {
@@ -37,19 +38,23 @@ export async function renderTaskList(main, { view, q }) {
   const base = isTeam ? '#/team-tasks' : '#/my-tasks'
   const sel = (name, opts, label) => html`<label class="sr" style="position:absolute;left:-999px" for="f-${name}">${label}</label><select id="f-${name}" name="${name}"><option value="">${label}</option>${opts.map(([v, l]) => html`<option value="${v}" ${q.get(name) === v ? raw('selected') : ''}>${l}</option>`)}</select>`
   const hasFilter = [...q.keys()].length > 0
-  const TABS = [['', 'Open'], ['IN_PROGRESS', 'In progress'], ['BLOCKED', 'Blocked'], ['SUBMITTED_FOR_REVIEW', 'In review'], ['COMPLETED', 'Completed']]
+  const TABS = [['', 'Open'], ['PENDING_ACCEPTANCE', 'Awaiting acceptance'], ['IN_PROGRESS', 'In progress'], ['BLOCKED', 'Blocked'], ['SUBMITTED_FOR_REVIEW', 'In review'], ['COMPLETED', 'Completed']]
   const tabHref = (v) => `${base}${v ? `?status=${v}` : ''}`
   const open = tasks.filter((t) => !['COMPLETED', 'CANCELLED'].includes(t.status))
+  const triage = (t) => !['PENDING_ACCEPTANCE', 'DECLINED'].includes(t.status)
   const groups = !isTeam && !q.get('status') && !q.get('q') ? [
-    ['Needs attention', 'alert', 'warn', tasks.filter((t) => t.overdue || t.status === 'BLOCKED' || t.atRisk)],
+    ['Awaiting your acceptance', 'inbox', 'warn', tasks.filter((t) => t.status === 'PENDING_ACCEPTANCE')],
+    ['Needs attention', 'alert', 'warn', tasks.filter((t) => triage(t) && (t.overdue || t.status === 'BLOCKED' || t.atRisk))],
     ['In progress', 'trending', '', tasks.filter((t) => t.status === 'IN_PROGRESS' && !(t.overdue || t.atRisk))],
     ['Up next', 'clock', '', tasks.filter((t) => t.status === 'ASSIGNED' && !(t.overdue || t.atRisk))],
     ['Waiting for review', 'reviews', 'brand', tasks.filter((t) => t.status === 'SUBMITTED_FOR_REVIEW' && !(t.overdue || t.atRisk))],
+    ['Declined — with your manager', 'x', '', tasks.filter((t) => t.status === 'DECLINED')],
     ['Completed', 'checkCircle', 'ok', tasks.filter((t) => t.status === 'COMPLETED')]
   ].filter(([, , , l]) => l.length) : null
   main.innerHTML = html`
     <div class="page-head"><div><div class="eyebrow">${icon(isTeam ? 'team' : 'tasks', 'xs')}${isTeam ? 'Team' : 'My work'}</div><h1>${isTeam ? 'Team tasks' : 'My tasks'}</h1><p>${isTeam ? 'Everything your teams are working on. Overdue and at-risk are calculated from deadlines and progress.' : 'What is assigned to you, most urgent first — and why it matters.'}</p></div>
       <div class="row">${app.session.integrations?.viasocket && (!isTeam || app.isManager) ? html`<button class="btn ghost" id="automate" title="${isTeam ? 'When a task in my team is completed…' : 'When a task is assigned to me…'}">${icon('apps')}Automate</button>` : ''}<button class="btn" id="new-task">${icon('plus')}${app.session.membership.creationMode === 'direct' ? 'New task' : 'Suggest a task'}</button></div></div>
+    ${isTeam ? '' : html`<div id="inbox-slot"></div>`}
     <nav class="tabs" aria-label="Task status">${TABS.map(([v, l]) => html`<a href="${tabHref(v)}" ${(q.get('status') || '') === v && !q.get('condition') ? raw('aria-current="page"') : ''}>${l}</a>`)}</nav>
     <form class="filters toolbar" id="filters" role="search">
       <div class="search-box">${icon('search', 'sm')}<input type="search" name="q" value="${q.get('q') || ''}" placeholder="Search title or description" aria-label="Search tasks"></div>
@@ -75,6 +80,7 @@ export async function renderTaskList(main, { view, q }) {
     : html`<div class="task-cards">${tasks.map(taskCard)}</div>`}
     ${tasks.length && !isTeam && !open.length && !hasFilter ? '' : ''}`
   document.getElementById('new-task').addEventListener('click', () => openTaskForm())
+  if (!isTeam) renderInbox(document.getElementById('inbox-slot'))
   document.getElementById('automate')?.addEventListener('click', () => openContextBuilder(isTeam ? 'task_completed_in_my_team' : 'task_assigned_to_me'))
   document.getElementById('filters').addEventListener('submit', (e) => {
     e.preventDefault()
@@ -163,11 +169,14 @@ export async function openTaskForm(existing = null, { defaultTeamId = null, defa
 // ---------- detail ----------
 export async function renderTaskDetail(main, id) {
   assignableCache = null
-  const d = await api(`/api/tasks/${id}`)
+  const [d, wf] = await Promise.all([api(`/api/tasks/${id}`), api(`/api/tasks/${id}/workflow`)])
   const t = d.task
   const a = d.allowed
   const openBlockers = d.blockers.filter((b) => b.status === 'OPEN')
   const primary = [
+    a.accept && html`<button class="btn" data-act="accept">${icon('check')}Accept</button>`,
+    a.decline && html`<button class="btn ghost" data-act="decline">Decline</button>`,
+    a.transfer && html`<button class="btn ghost" data-act="transfer">${icon('team')}Transfer task</button>`,
     a.start && html`<button class="btn" data-act="start">${icon('arrowRight')}Start work</button>`,
     a.submit && html`<button class="btn" data-act="submit">${icon('send')}Submit for review</button>`,
     a.review && html`<button class="btn" data-act="review">${icon('reviews')}Review submission</button>`,
@@ -190,6 +199,7 @@ export async function renderTaskDetail(main, id) {
     <header class="task-head"><div class="grow"><h1>${t.title}</h1>
       <div class="row" style="margin-top:10px">${statusBadge(t.status)} ${prioBadge(t.priority)} ${due(t)} ${conditionBadges(t)} ${t.teamName ? html`<span class="badge outline">${t.teamName}</span>` : ''}</div></div>
       <div class="task-actions">${primary}${more.length ? html`<details class="more-menu"><summary class="btn ghost" aria-label="More actions">${icon('more')}</summary><div class="menu inline">${more}</div></details>` : ''}</div></header>
+    ${workflowBanners(wf, t, a)}
     ${openBlockers.length ? html`<div class="banner bad" role="status"><span class="lead-icon bad">${icon('blocked')}</span><div><b>Blocked for ${t.blockedHours}h</b><div>${openBlockers.map((b) => b.description).join(' · ')}</div><div class="small muted">A blocked task is never counted against the person doing it.</div></div></div>` : ''}
     ${changesAsked ? html`<div class="banner warn" role="status"><span class="lead-icon warn">${icon('alert')}</span><div><b>${lastReview.reviewer} asked for changes</b><div>${lastReview.comment || 'See the review below.'}</div></div></div>` : ''}
     ${t.status === 'SUBMITTED_FOR_REVIEW' ? html`<div class="banner brand" role="status"><span class="lead-icon brand">${icon('reviews')}</span><div><b>Waiting for review</b><div>Submitted ${ago(t.submittedAt)}. It is not complete until a manager approves it.</div></div></div>` : ''}
@@ -201,6 +211,7 @@ export async function renderTaskDetail(main, id) {
           ${t.links.length ? html`<div class="chips" style="margin-top:12px">${t.links.map((l) => html`<a class="chip" href="${l.url}" target="_blank" rel="noopener noreferrer">${icon('evidence', 'xs')} ${l.label || l.url}</a>`)}</div>` : ''}
           ${t.sourceRequestId ? html`<p class="small muted" style="margin:12px 0 0">Created from <a href="#/requests">an approved suggestion</a>.</p>` : ''}
         </section>
+        ${sourceCard(wf)}
         <section class="card facts" aria-labelledby="facts-h"><h2 id="facts-h" class="sr">Details</h2>
           <dl class="fact-grid">
             <div><dt>Owner</dt><dd>${person(t.assigneeName, 'Unassigned')}</dd></div>
@@ -218,6 +229,7 @@ export async function renderTaskDetail(main, id) {
           </div>`)}
           ${t.status === 'COMPLETED' ? html`<div class="card-foot"><span class="muted">Completion is not the same as impact.</span>${t.isMine ? html`<a class="btn small ghost" href="#/impact?new=1&taskId=${t.id}">${icon('award')}Record the outcome</a>` : ''}</div>` : ''}
         </section>` : ''}
+        ${deadlineCard(wf, t)}
         ${t.assigneeId ? html`<section class="card" id="ai-card" aria-live="polite">${raw('<div class="loading">Loading the contribution analysis…</div>')}</section>` : ''}
         <section class="card" aria-labelledby="act-h"><div class="card-head"><h2 id="act-h"><span class="card-icon">${icon('message')}</span>Activity and comments</h2>${prov('fact', 'Recorded history')}</div>
           <form id="comment" class="comment-form"><label for="c-body" class="sr">Comment</label><textarea id="c-body" name="body" rows="2" required maxlength="4000" placeholder="Write a comment…"></textarea><button class="btn" type="submit">Comment</button></form>
@@ -225,6 +237,7 @@ export async function renderTaskDetail(main, id) {
         </section>
       </div>
       <div class="stack">
+        ${ownershipCard(wf)}
         <section class="card" aria-labelledby="blk-h"><div class="card-head"><h2 id="blk-h"><span class="card-icon ${openBlockers.length ? 'bad' : ''}">${icon('blocked')}</span>Blockers</h2>${a.block ? html`<button class="btn small ghost" data-act="block">Report</button>` : ''}</div>
           ${d.blockers.length ? html`<ul class="list">${d.blockers.map((b) => html`<li><div class="grow">
             <div class="row"><span class="badge ${b.status === 'OPEN' ? 'bad' : 'ok'}">${b.status === 'OPEN' ? `Open ${b.hoursOpen}h` : 'Resolved'}</span>${b.escalatedAt ? html`<span class="badge warn">Escalated</span>` : ''}${b.isExternal ? html`<span class="badge info">Outside their control</span>` : ''}</div>
@@ -333,9 +346,10 @@ export async function renderTaskDetail(main, id) {
         <div class="row end"><button class="btn ghost" data-close>Cancel</button><button class="btn" type="submit">Add</button></div></form>`.toString(), (el, close) => {
       bindForm(el.querySelector('#f'), (b) => api(`/api/evidence/task/${id}/links`, { method: 'POST', body: b }), { onSuccess: () => { close(); reload() } })
     }),
-    share: () => shareToSlack(t)
+    share: () => shareToSlack(t),
+    ...workflowActions({ id, wf, run })
   }
-  main.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => { b.closest('details')?.removeAttribute('open'); ACTIONS[b.dataset.act]?.() }))
+  main.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => { b.closest('details')?.removeAttribute('open'); ACTIONS[b.dataset.act]?.(b) }))
   const moreMenu = main.querySelector('.more-menu')
   if (moreMenu) {
     const away = (e) => { if (!moreMenu.isConnected) return document.removeEventListener('click', away); if (!moreMenu.contains(e.target)) moreMenu.removeAttribute('open') }

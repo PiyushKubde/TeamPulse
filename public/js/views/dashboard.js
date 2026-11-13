@@ -2,6 +2,7 @@ import { api, html, raw, avatar, ago, dt, statusBadge, prioBadge, conditionBadge
 import { app } from '../app.js'
 import { openTaskForm, taskCard } from './tasks.js'
 import { renderSignals } from './assistant.js'
+import { renderInbox } from './assignments.js'
 
 const stat = (label, value, { tone = '', href = null } = {}) => href
   ? html`<a class="stat ${value ? tone : ''}" href="${href}"><div class="label">${label}</div><div class="value">${value}</div></a>`
@@ -28,7 +29,17 @@ export const EVENT_TEXT = {
   review_decision: (d) => (d.decision === 'APPROVED' ? `approved the work${d.comment ? ` — ${d.comment}` : ''}` : `requested changes — ${d.comment}`),
   evidence_added: (d) => `added evidence: ${d.label}`,
   shared: (d) => `shared it to ${d.to}`,
-  alert_response: (d) => `answered an alert: ${d.response}`
+  alert_response: (d) => `answered an alert: ${d.response}`,
+  assignment_accepted: () => 'accepted the task',
+  assignment_declined: (d) => `declined the task${d.reason ? ` — ${d.reason}` : ''}`,
+  transfer_proposed: (d) => `offered the task to ${d.toName || 'a teammate'}${d.reason ? ` — ${d.reason}` : ''}`,
+  transfer_accepted: (d) => `accepted the transfer from ${d.fromName || 'a teammate'}`,
+  transfer_declined: (d) => `declined the transfer${d.reason ? ` — ${d.reason}` : ''}`,
+  transfer_cancelled: (d) => `cancelled the transfer${d.note ? ` — ${d.note}` : ''}`,
+  deadline_missed: (d) => `— the deadline of ${dt(d.dueAt)} passed without the task being done`,
+  deadline_explained: (d) => `explained the missed deadline: ${d.reason || ''}`,
+  deadline_context_added: () => 'added context to a missed-deadline explanation',
+  deadline_explanation_reviewed: (d) => `reviewed a missed-deadline explanation: ${String(d.status || '').replace(/_/g, ' ').toLowerCase()}`
 }
 export const eventText = (e) => (EVENT_TEXT[e.type] ? EVENT_TEXT[e.type](e.data || {}) : e.type)
 
@@ -57,10 +68,12 @@ export async function renderDashboard(main) {
     </div>
     ${managerSection(m)}
     <div class="section-title"><div><h2>My own work</h2><p class="small muted" style="margin:2px 0 0">What is assigned to you as a person.</p></div><a class="btn small ghost" href="#/assistant?run=1">${icon('sparkles')}Analyse my day</a></div>
+    <div id="inbox-slot"></div>
     ${quietPersonal(p) ? html`<section class="card"><div class="row between"><span class="muted">Nothing is assigned to you personally right now.</span><span class="row"><a class="btn small ghost" href="#/my-tasks">${icon('tasks')}My tasks</a><a class="btn small ghost" href="#/evidence">${icon('evidence')}My Work Evidence</a></span></div></section>` : personalSection(p, false)}
   `
   renderSignals(document.getElementById('dash-signals'), { scope: 'team', limit: 5, title: 'Where to intervene', subtitle: 'Recommended next steps, detected from records by fixed rules. Help to act — never a penalty.' })
   document.getElementById('new-task').addEventListener('click', () => openTaskForm())
+  renderInbox(document.getElementById('inbox-slot'))
   const cd = document.getElementById('contrib-dash')
   if (cd) {
     api(`/api/contribution/team?from=${encodeURIComponent(new Date(Date.now() - 30 * 86400000).toISOString())}`).then((t) => {
@@ -273,6 +286,7 @@ async function renderEmployeeOverview(main, p) {
   ])
   const openTasks = failed(tasks) ? [] : tasks.value
   main.innerHTML = html`${hero(p, openTasks, p.awaitingMe.length + p.clarifications.length)}
+    <div id="inbox-slot"></div>
     <div class="overview">
       <div class="col">${o(1, focusCard(digest))}${o(3, inProgressCard(tasks))}${o(6, contributionsCard(p, digest))}${o(8, completedCard(p))}</div>
       <div class="col">${o(2, attentionCard(p))}${o(4, evidenceCard(evidence))}${o(5, blockersCard(p))}${o(7, nextStepsCard(digest))}</div>
@@ -280,6 +294,7 @@ async function renderEmployeeOverview(main, p) {
     <div style="margin-top:16px">${reflectionCard(p)}</div>
     <p class="principle" style="margin-top:24px">${icon('heart')}<span>TeamPulse shows what your work achieved, not how busy you were. There are no scores, rankings or activity counts — and you can correct anything that is wrong.</span></p>`.toString()
   document.getElementById('new-task').addEventListener('click', () => openTaskForm())
+  renderInbox(document.getElementById('inbox-slot'))
   renderSignals(document.getElementById('my-signals'), { scope: 'mine', limit: 4 })
   bindReflection(p)
   main.querySelectorAll('[data-ev-act]').forEach((b) => b.addEventListener('click', async () => {

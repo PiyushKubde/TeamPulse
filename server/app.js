@@ -4,7 +4,7 @@ import { createReadStream } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AppError, forbidden } from './errors.js'
-import { assignableUserIds, loadContext, isAdmin, isManager } from './access.js'
+import { assignableUserIds, loadContext, isAdmin, isManager, requireVisibleTask } from './access.js'
 import { COOKIE, cookieHeader, createSession, destroySession, readCookie, sessionUser } from './auth/sessions.js'
 import { finishGoogleLogin, googleTransport, startGoogleLogin, upsertGoogleUser } from './auth/google.js'
 import * as accounts from './auth/accounts.js'
@@ -13,6 +13,11 @@ import { createMailer } from './auth/mailer.js'
 import * as orgs from './services/orgs.js'
 import * as perms from './services/permissions.js'
 import * as tasks from './services/tasks.js'
+import * as assignments from './services/assignments.js'
+import * as deadlines from './services/deadline-explanations.js'
+import * as slackIdentities from './services/slack-identities.js'
+import { intakeOverview } from './services/intake-overview.js'
+import { purgeIgnoredText } from './automations/slack-tasks.js'
 import * as requests from './services/requests.js'
 import * as impact from './services/impact.js'
 import * as evidence from './services/evidence.js'
@@ -319,6 +324,26 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   app.post('/api/tasks/:id/blockers', h((req) => tasks.reportBlocker(db, member(req), req.params.id, req.body)))
   app.post('/api/tasks/:id/submit', h((req) => tasks.submitForReview(db, member(req), req.params.id, req.body)))
   app.post('/api/tasks/:id/review', h((req) => tasks.reviewSubmission(db, member(req), req.params.id, req.body)))
+  // ---------- acceptance workflow: accept / decline / transfer, missed-deadline explanations, Slack identities ----------
+  app.get('/api/assignments/inbox', h((req) => assignments.myInbox(db, member(req))))
+  app.get('/api/tasks/:id/workflow', h((req) => {
+    const ctx = member(req)
+    const task = requireVisibleTask(db, ctx, req.params.id)
+    return { ...assignments.taskWorkflow(db, ctx, task.id), deadline: deadlines.deadlineView(db, ctx, task) }
+  }))
+  app.post('/api/tasks/:id/accept', h((req) => assignments.acceptAssignment(db, member(req), req.params.id)))
+  app.post('/api/tasks/:id/decline', h((req) => assignments.declineAssignment(db, member(req), req.params.id, req.body)))
+  app.post('/api/tasks/:id/transfer', h((req, res) => { const out = assignments.proposeTransfer(db, member(req), req.params.id, req.body); res.status(201); return out }))
+  app.post('/api/transfers/:id/decision', h((req) => assignments.decideTransfer(db, member(req), req.params.id, req.body)))
+  app.post('/api/transfers/:id/cancel', h((req) => assignments.cancelTransfer(db, member(req), req.params.id, req.body)))
+  app.post('/api/tasks/:id/deadline-explanation', h((req, res) => { const out = deadlines.submitExplanation(db, member(req), req.params.id, req.body); res.status(201); return out }))
+  app.get('/api/deadline-explanations', h((req) => deadlines.listExplanations(db, member(req), { status: req.query.status })))
+  app.post('/api/deadline-explanations/:id/context', h((req) => deadlines.addContext(db, member(req), req.params.id, req.body)))
+  app.post('/api/deadline-explanations/:id/review', h((req) => deadlines.reviewExplanation(db, member(req), req.params.id, req.body)))
+  app.get('/api/slack-intake/overview', h((req) => intakeOverview(db, member(req), req.query)))
+  app.get('/api/slack-identities', h((req) => slackIdentities.listSlackIdentities(db, member(req))))
+  app.post('/api/slack-identities', h((req, res) => { const out = slackIdentities.mapSlackIdentity(db, member(req), req.body); res.status(201); return out }))
+  app.delete('/api/slack-identities/:id', h((req) => slackIdentities.removeSlackIdentity(db, member(req), req.params.id)))
   app.get('/api/blockers', h((req) => tasks.listBlockers(db, member(req), { status: req.query.status })))
   app.post('/api/blockers/:id/resolve', h((req) => tasks.resolveBlocker(db, member(req), req.params.id, req.body)))
   app.post('/api/blockers/:id/escalate', h((req) => tasks.escalateBlocker(db, member(req), req.params.id)))
@@ -451,6 +476,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   app.post('/api/intakes/sample', h((req) => intake.sampleIntake(db, vs, member(req), req.body)))
   app.post('/api/intakes', h((req, res) => { res.status(201); return intake.createIntake(db, vs, member(req), req.body, { appUrl: cfg.appUrl }) }))
   app.post('/api/intakes/:id/status', h((req) => intake.setIntakeStatus(db, vs, member(req), req.params.id, req.body)))
+  app.post('/api/intakes/:id/mode', h((req) => intake.setIntakeMode(db, member(req), req.params.id, req.body)))
   // Called by the subscription's handler on viaSocket, with that subscription's own bearer token.
   app.post('/api/viasocket/events/:id', h((req) => {
     const auth = req.get('authorization') || ''
@@ -578,6 +604,7 @@ export async function runAlertJob({ db, vs, m91, cfg, ai = null }) {
     const retried = await auto.retryFailedRuns(db, vs, { appUrl: cfg.appUrl })
     const analyses = ai ? recoverRuns(db, ai) : 0
     const evidence = retryInbox(db)
+    purgeIgnoredText(db)
     const sig = signals.detectAll(db)
     const health = await evidenceSources.checkSourceHealth(db, vs).catch((e) => ({ checked: 0, error: e.message }))
     db.prepare(`INSERT INTO app_state (key, value, updated_at) VALUES ('alert_job_last', ?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(now(), now())

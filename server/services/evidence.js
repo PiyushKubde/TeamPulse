@@ -6,7 +6,8 @@ import { now, uuid } from '../db.js'
 import { forbidden, invalid, notFound } from '../errors.js'
 import { canManageTask, requireVisibleTask } from '../access.js'
 import * as v from '../validate.js'
-import { recordEvent } from './tasks.js'
+import { recordEvent, touchMeaningful } from './tasks.js'
+import { emit } from './events.js'
 
 // Content types accepted for upload, checked against the file's own leading bytes where possible.
 const ALLOWED = {
@@ -70,7 +71,15 @@ export function addLink(db, ctx, ownerType, ownerId, body) {
   db.prepare(`INSERT INTO evidence (id, org_id, owner_type, owner_id, task_id, kind, url, label, created_by, created_at) VALUES (?, ?, ?, ?, ?, 'link', ?, ?, ?, ?)`)
     .run(id, ctx.orgId, ownerType, ownerId, owner.taskId ?? null, url, label, ctx.user.id, now())
   if (owner.task) recordEvent(db, owner.task, ctx.user.id, 'evidence_added', { kind: 'link', label: label || url })
+  workEvidenceAdded(db, ctx, owner.task)
   return { id }
+}
+
+/** Evidence added by the task's owner on an active task is meaningful movement (anyone else's does not move the owner's clock). */
+function workEvidenceAdded(db, ctx, task) {
+  if (!task || task.assignee_id !== ctx.user.id || !['ASSIGNED', 'IN_PROGRESS', 'BLOCKED'].includes(task.status)) return
+  touchMeaningful(db, task.id)
+  emit({ type: 'task.meaningful_activity', orgId: ctx.orgId, taskId: task.id, actorId: ctx.user.id })
 }
 
 export function addFile(db, ctx, ownerType, ownerId, { buffer, fileName, mimeType, dataDir, maxBytes }) {
@@ -90,6 +99,7 @@ export function addFile(db, ctx, ownerType, ownerId, { buffer, fileName, mimeTyp
   db.prepare(`INSERT INTO evidence (id, org_id, owner_type, owner_id, task_id, kind, file_name, mime_type, size_bytes, storage_key, created_by, created_at) VALUES (?, ?, ?, ?, ?, 'file', ?, ?, ?, ?, ?, ?)`)
     .run(id, ctx.orgId, ownerType, ownerId, owner.taskId ?? null, name, type, buffer.length, key, ctx.user.id, now())
   if (owner.task) recordEvent(db, owner.task, ctx.user.id, 'evidence_added', { kind: 'file', label: name })
+  workEvidenceAdded(db, ctx, owner.task)
   return { id, fileName: name }
 }
 

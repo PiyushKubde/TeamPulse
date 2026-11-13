@@ -67,8 +67,11 @@ function renderSignInMethods(box) {
 
 async function organization(sb, reload) {
   const org = await api('/api/organization')
+  const zones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : []
   sb.innerHTML = html`<section class="card" style="max-width:640px">
-    <form id="of"><div class="form-error"></div><div class="field"><label for="on">Organization name</label><input id="on" name="name" type="text" value="${org.name}" ${app.isAdmin ? '' : raw('disabled')} required minlength="2" maxlength="120"></div>${app.isAdmin ? html`<button class="btn" type="submit">Save</button>` : ''}</form>
+    <form id="of"><div class="form-error"></div><div class="field"><label for="on">Organization name</label><input id="on" name="name" type="text" value="${org.name}" ${app.isAdmin ? '' : raw('disabled')} required minlength="2" maxlength="120"></div>
+      <div class="field"><label for="otz">Timezone</label><input id="otz" name="timezone" type="text" list="tz-list" value="${org.timezone}" ${app.isAdmin ? '' : raw('disabled')} maxlength="64" placeholder="e.g. Asia/Kolkata" autocomplete="off"><datalist id="tz-list">${['UTC', ...zones.filter((z) => z !== 'UTC')].map((z) => html`<option value="${z}"></option>`)}</datalist>
+        <div class="hint">A deadline without a time (“by Friday”) ends at 23:59 in this timezone, and alert times are shown in it.</div></div>${app.isAdmin ? html`<button class="btn" type="submit">Save</button>` : ''}</form>
     <h3 style="margin:18px 0 6px">Join code</h3><p class="small muted">People who sign in can ask to join with this code. Every request needs approval — the code alone grants nothing.</p>
     <div class="row"><input type="text" readonly value="${org.joinCode}" class="mono" style="max-width:220px" onclick="this.select()">${app.isAdmin ? html`<button class="btn small ghost" id="rot">Rotate code</button>` : ''}</div></section>`
   if (app.isAdmin) bindForm(sb.querySelector('#of'), (d) => api('/api/organization', { method: 'PATCH', body: d }), { onSuccess: () => { toast('Saved.'); reloadSession() } })
@@ -149,15 +152,17 @@ async function permissions(sb, reload) {
 
 async function alerts(sb, reload) {
   const s = await api('/api/alerts/settings')
-  const TH = { unassignedHours: 'Unassigned task', notStartedHours: 'Assigned but not started', noProgressHours: 'No meaningful progress', deadlineApproachingHours: 'Deadline approaching (hours before)', blockerUnresolvedHours: 'Blocker unresolved' }
+  const TH = { unassignedHours: 'Unassigned task', notStartedHours: 'Assigned but not started', noProgressHours: 'No meaningful progress', noMovementHours: 'No meaningful movement since the owner accepted', deadlineApproachingHours: 'Deadline approaching (hours before)', blockerUnresolvedHours: 'Blocker unresolved' }
+  // The M91 severity each rung of the escalation ladder is sent with.
+  const LADDER = { task_assignment: 'Low', no_movement: 'Medium', deadline_approaching: 'High', deadline_missed: 'Critical' }
   sb.innerHTML = html`<div class="notice ${s.m91.state === 'ready' ? 'ok' : 'warn'}"><b>M91 status:</b> ${s.m91.message}</div>
     <form id="af" class="stack" style="max-width:820px"><div class="form-error"></div>
     <section class="card"><h2 style="margin-bottom:8px">M91 alerts</h2><label class="check"><input type="checkbox" name="m91Enabled" ${s.m91Enabled ? raw('checked') : ''}> Send important alerts through M91 (in addition to in-app notifications)</label>
       <p class="small muted">Use M91 for important human attention only. In-app notifications are always sent and are the fallback when M91 is off or fails.</p>
       <div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Alert</th><th>Recipients</th><th>Also via M91</th></tr></thead><tbody>
-        ${s.rules.map((r) => html`<tr><td>${r.label}</td><td class="small">${r.recipients.join(' + ')}</td><td><input type="checkbox" data-rule="${r.key}" aria-label="M91 for ${r.label}" ${r.m91 ? raw('checked') : ''}></td></tr>`)}</tbody></table></div></section>
+        ${s.rules.map((r) => html`<tr><td>${r.label}${LADDER[r.key] ? html` <span class="sev ${LADDER[r.key].toUpperCase()}" title="M91 severity">${LADDER[r.key]}</span>` : ''}</td><td class="small">${r.recipients.join(' + ')}</td><td><input type="checkbox" data-rule="${r.key}" aria-label="M91 for ${r.label}" ${r.m91 ? raw('checked') : ''}></td></tr>`)}</tbody></table></div></section>
     <section class="card"><h2 style="margin-bottom:8px">Thresholds (hours)</h2><div class="fields">${Object.entries(TH).map(([k, l]) => html`<div class="field"><label for="th-${k}">${l}</label><input id="th-${k}" type="number" min="${s.limits[k][0]}" max="${s.limits[k][1]}" step="0.5" data-th="${k}" value="${s.thresholds[k]}"></div>`)}</div>
-      <p class="small muted">Deadline missed alerts fire as soon as the deadline passes. Checks run every 15 minutes.</p></section>
+      <p class="small muted">Deadline missed alerts fire as soon as the deadline passes, and the owner is asked to explain it. A task due sooner than the “deadline approaching” window is alerted at the first check. While a transfer waits for an answer, or after a decline, the inactivity clocks stand still. Checks run every 15 minutes.</p></section>
     <div><button class="btn" type="submit">Save alert settings</button></div></form>`
   sb.querySelector('#af').addEventListener('submit', async (e) => {
     e.preventDefault()

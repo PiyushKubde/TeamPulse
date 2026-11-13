@@ -9,10 +9,11 @@ import { emit } from './events.js'
 import { creationMode } from './permissions.js'
 import { createRequestRecord } from './requests.js'
 import { listEvidence } from './evidence.js'
+import { orgTimezone } from '../time.js'
 
 const HOUR = 3600000
 const ACTIVE = ['ASSIGNED', 'IN_PROGRESS', 'BLOCKED']
-const OPEN = ['ASSIGNED', 'IN_PROGRESS', 'BLOCKED', 'SUBMITTED_FOR_REVIEW']
+const OPEN = ['PENDING_ACCEPTANCE', 'ASSIGNED', 'IN_PROGRESS', 'BLOCKED', 'SUBMITTED_FOR_REVIEW']
 export const PRIORITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 }
 
 /**
@@ -24,7 +25,7 @@ export const PRIORITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 }
 export function deriveConditions(task, at = Date.now()) {
   const due = task.due_at ? Date.parse(task.due_at) : null
   const submittedInTime = task.status === 'SUBMITTED_FOR_REVIEW' && task.submitted_at && due && Date.parse(task.submitted_at) <= due
-  const overdue = Boolean(due && due < at && !['COMPLETED', 'CANCELLED'].includes(task.status) && !submittedInTime)
+  const overdue = Boolean(due && due < at && !['COMPLETED', 'CANCELLED', 'DECLINED'].includes(task.status) && !submittedInTime)
   let atRisk = false
   if (!overdue && due && ACTIVE.includes(task.status)) {
     const left = due - at
@@ -44,10 +45,34 @@ export function deriveConditions(task, at = Date.now()) {
 
 const userName = (db, id) => (id ? db.prepare('SELECT name FROM users WHERE id = ?').get(id)?.name ?? null : null)
 
+/** The open (pending) transfer of a task, if any. */
+export function pendingTransfer(db, taskId) {
+  const r = db.prepare(`SELECT x.*, f.name AS from_name, o.name AS to_name FROM task_transfers x JOIN users f ON f.id = x.from_user_id JOIN users o ON o.id = x.to_user_id WHERE x.task_id = ? AND x.status = 'PENDING'`).get(taskId)
+  return r ? { id: r.id, fromUserId: r.from_user_id, fromName: r.from_name, toUserId: r.to_user_id, toName: r.to_name, reason: r.reason, createdAt: r.created_at } : null
+}
+
+/** Records that real work moved (started, substantive progress, a blocker, evidence, a submission). Acceptance and views never call this. */
+export function touchMeaningful(db, taskId, ts = now()) {
+  db.prepare('UPDATE tasks SET last_meaningful_at = ? WHERE id = ?').run(ts, taskId)
+}
+
+/** Writes the "deadline_missed" history event once per deadline; it stays even after the task is completed or the deadline moves. */
+export function markDeadlineMissed(db, task, at = now()) {
+  if (!task.due_at) return false
+  const seen = db.prepare(`SELECT 1 FROM task_events WHERE task_id = ? AND type = 'deadline_missed' AND json_extract(data, '$.dueAt') = ?`).get(task.id, task.due_at)
+  if (seen) return false
+  db.prepare('INSERT INTO task_events (id, org_id, task_id, actor_id, type, data, created_at) VALUES (?, ?, ?, NULL, ?, ?, ?)')
+    .run(uuid(), task.org_id, task.id, 'deadline_missed', JSON.stringify({ dueAt: task.due_at, status: task.status, ownerId: task.assignee_id }), at)
+  return true
+}
+
 export function presentTask(db, ctx, t) {
   const d = deriveConditions(t)
   const blocker = t.status === 'BLOCKED' ? db.prepare(`SELECT reported_at FROM blockers WHERE task_id = ? AND status = 'OPEN' ORDER BY reported_at LIMIT 1`).get(t.id) : null
+  const transfer = OPEN.includes(t.status) ? pendingTransfer(db, t.id) : null
   return {
+    acceptanceState: t.acceptance_state, acceptedAt: t.accepted_at, declinedReason: t.declined_reason, slackMessageRef: t.slack_message_ref,
+    fromSlack: Boolean(t.slack_message_ref), lastMeaningfulAt: t.last_meaningful_at, pendingTransfer: transfer,
     id: t.id, title: t.title, description: t.description, expectedOutcome: t.expected_outcome, priority: t.priority, status: t.status,
     progress: t.progress, startDate: t.start_date, dueAt: t.due_at, links: json(t.links, []),
     teamId: t.team_id, teamName: t.team_id ? db.prepare('SELECT name FROM teams WHERE id = ?').get(t.team_id)?.name ?? null : null,
@@ -131,7 +156,13 @@ function allowedActions(db, ctx, t) {
   const manage = canManageTask(db, ctx, t)
   const assignee = t.assignee_id === ctx.user.id
   const s = t.status
+  const transfer = OPEN.includes(s) ? pendingTransfer(db, t.id) : null
   return {
+    accept: assignee && s === 'PENDING_ACCEPTANCE',
+    decline: assignee && s === 'PENDING_ACCEPTANCE',
+    transfer: assignee && ['PENDING_ACCEPTANCE', 'ASSIGNED', 'IN_PROGRESS', 'BLOCKED'].includes(s) && !transfer,
+    decideTransfer: Boolean(transfer && transfer.toUserId === ctx.user.id),
+    cancelTransfer: Boolean(transfer && (transfer.fromUserId === ctx.user.id || manage)),
     edit: manage,
     assign: manage,
     delete: manage,
@@ -156,7 +187,7 @@ function readTaskFields(db, ctx, body, { partial = false } = {}) {
   if (!partial || has('expectedOutcome')) out.expected_outcome = v.text(body?.expectedOutcome, 'Expected outcome', { max: 2000 })
   if (!partial || has('priority')) out.priority = v.oneOf(body?.priority, 'Priority', v.PRIORITIES, { fallback: 'MEDIUM' })
   if (!partial || has('startDate')) out.start_date = v.dateOnly(body?.startDate, 'Start date')
-  if (!partial || has('dueAt')) out.due_at = v.dateTime(body?.dueAt, 'Due date')
+  if (!partial || has('dueAt')) out.due_at = v.dateTime(body?.dueAt, 'Due date', { tz: orgTimezone(db, ctx.orgId) })
   if (!partial || has('links')) out.links = JSON.stringify(v.links(body?.links))
   if (!partial || has('teamId')) {
     const teamId = v.id(body?.teamId, 'Team')
@@ -222,6 +253,7 @@ export function updateTask(db, ctx, id, body) {
   requireManageTask(db, ctx, t)
   if (['COMPLETED', 'CANCELLED'].includes(t.status)) throw conflict('Reopen or restore the task before editing it.', 'task_closed')
   const f = readTaskFields(db, ctx, body, { partial: true })
+  const deadlineMoved = f.due_at !== undefined && f.due_at !== t.due_at
   if (!Object.keys(f).length) throw invalid('Nothing to change.')
   const start = f.start_date !== undefined ? f.start_date : t.start_date
   const due = f.due_at !== undefined ? f.due_at : t.due_at
@@ -234,6 +266,8 @@ export function updateTask(db, ctx, id, body) {
     const other = Object.keys(f).filter((k) => !['due_at', 'priority'].includes(k) && f[k] !== t[k])
     if (other.length) recordEvent(db, t, ctx.user.id, 'edited', { fields: other })
   })
+  // The old deadline's alerts are closed; the new deadline is scanned afresh (alert keys carry the deadline).
+  if (deadlineMoved) emit({ type: 'task.deadline_changed', orgId: ctx.orgId, taskId: t.id, actorId: ctx.user.id })
   return presentTask(db, ctx, getTaskRow(db, t.id))
 }
 
@@ -245,17 +279,34 @@ export function assignTask(db, ctx, id, body) {
   if (!canManageTask(db, ctx, t) && !(selfAssign && ctx.permissions.can_self_assign)) throw forbidden('Only the task’s manager can assign or reassign it.')
   if (['COMPLETED', 'CANCELLED'].includes(t.status)) throw conflict('A completed or cancelled task cannot be reassigned.', 'task_closed')
   checkAssignee(db, ctx, assigneeId)
-  if (assigneeId === t.assignee_id) return presentTask(db, ctx, t)
+  if (assigneeId === t.assignee_id && t.status !== 'DECLINED') return presentTask(db, ctx, t)
   const ts = now()
+  // Work that came through the acceptance workflow (pending, declined, or a Slack task being handed to someone new)
+  // must be accepted by its new owner; every other task keeps the old immediate assignment.
+  const needsAcceptance = Boolean(assigneeId && (['PENDING_ACCEPTANCE', 'DECLINED'].includes(t.status) || (t.slack_message_ref && ['ASSIGNED', 'IN_PROGRESS'].includes(t.status))))
+  const reason = v.text(body?.reason, 'Reason', { max: 500 })
+  let assignmentId = null
   transaction(db, () => {
     // A reassigned task goes back to ASSIGNED for its new owner (unless it is blocked or in review).
-    const status = ['IN_PROGRESS'].includes(t.status) ? 'ASSIGNED' : t.status
-    db.prepare(`UPDATE tasks SET assignee_id = ?, assigned_at = ?, status = ?, status_changed_at = ?, updated_at = ? WHERE id = ?`)
-      .run(assigneeId, assigneeId ? ts : null, status, status !== t.status ? ts : t.status_changed_at, ts, t.id)
-    recordEvent(db, t, ctx.user.id, t.assignee_id ? 'reassigned' : 'assigned', { from: t.assignee_id, fromName: userName(db, t.assignee_id), to: assigneeId, toName: userName(db, assigneeId), reason: v.text(body?.reason, 'Reason', { max: 500 }) })
+    const status = needsAcceptance ? 'PENDING_ACCEPTANCE' : ['IN_PROGRESS'].includes(t.status) ? 'ASSIGNED' : t.status
+    const accState = needsAcceptance ? 'pending' : t.acceptance_state
+    const accAt = needsAcceptance ? null : (t.accepted_at ? ts : t.accepted_at)
+    db.prepare(`UPDATE tasks SET assignee_id = ?, assigned_at = ?, status = ?, status_changed_at = ?, acceptance_state = ?, accepted_at = ?, declined_reason = CASE WHEN ? THEN NULL ELSE declined_reason END, updated_at = ? WHERE id = ?`)
+      .run(assigneeId, assigneeId ? ts : null, status, status !== t.status ? ts : t.status_changed_at, accState, accAt, needsAcceptance ? 1 : 0, ts, t.id)
+    recordEvent(db, t, ctx.user.id, t.assignee_id ? 'reassigned' : 'assigned', { from: t.assignee_id, fromName: userName(db, t.assignee_id), to: assigneeId, toName: userName(db, assigneeId), reason })
     if (status !== t.status) recordEvent(db, t, ctx.user.id, 'status_changed', { from: t.status, to: status, reason: 'reassigned' })
+    // A manager's reassignment settles any open transfer (the owner is chosen by the manager) and closes the open assignment.
+    db.prepare(`UPDATE task_transfers SET status = 'CANCELLED', decided_by = ?, decided_at = ?, decision_note = 'The task was reassigned by a manager.' WHERE task_id = ? AND status = 'PENDING'`).run(ctx.user.id, ts, t.id)
+    const hasHistory = db.prepare('SELECT 1 FROM task_assignments WHERE task_id = ?').get(t.id)
+    if (hasHistory) db.prepare(`UPDATE task_assignments SET state = CASE WHEN state IN ('PENDING','ACCEPTED') THEN 'SUPERSEDED' ELSE state END, ended_at = ? WHERE task_id = ? AND ended_at IS NULL`).run(ts, t.id)
+    if (assigneeId && (hasHistory || needsAcceptance)) {
+      assignmentId = uuid()
+      db.prepare(`INSERT INTO task_assignments (id, org_id, task_id, user_id, source, state, assigned_by, reason, assigned_at, responded_at) VALUES (?, ?, ?, ?, 'MANAGER', ?, ?, ?, ?, ?)`)
+        .run(assignmentId, t.org_id, t.id, assigneeId, needsAcceptance ? 'PENDING' : 'ACCEPTED', ctx.user.id, reason, ts, needsAcceptance ? null : ts)
+    }
   })
-  if (assigneeId) emit({ type: 'task.assigned', orgId: ctx.orgId, taskId: t.id, assigneeId, actorId: ctx.user.id })
+  if (needsAcceptance) emit({ type: 'assignment.created', orgId: ctx.orgId, taskId: t.id, assigneeId, assignmentId, actorId: ctx.user.id, via: 'manager' })
+  else if (assigneeId) emit({ type: 'task.assigned', orgId: ctx.orgId, taskId: t.id, assigneeId, actorId: ctx.user.id })
   return presentTask(db, ctx, getTaskRow(db, t.id))
 }
 
@@ -270,7 +321,10 @@ const TRANSITIONS = {
   'BLOCKED>CANCELLED': ['manager'],
   'SUBMITTED_FOR_REVIEW>CANCELLED': ['manager'],
   'COMPLETED>IN_PROGRESS': ['manager'], // reopen, recorded as an event
-  'CANCELLED>ASSIGNED': ['manager'] // restore
+  'CANCELLED>ASSIGNED': ['manager'], // restore
+  // Accepting and declining go through /accept and /decline; a manager may cancel work that was never accepted.
+  'PENDING_ACCEPTANCE>CANCELLED': ['manager'],
+  'DECLINED>CANCELLED': ['manager']
 }
 
 export function changeStatus(db, ctx, id, body) {
@@ -298,8 +352,12 @@ export function changeStatus(db, ctx, id, body) {
       .run(to, ts, ts, to === 'IN_PROGRESS' ? ts : null, to, to, ts, t.id)
     const type = key === 'COMPLETED>IN_PROGRESS' ? 'reopened' : key === 'CANCELLED>ASSIGNED' ? 'restored' : 'status_changed'
     recordEvent(db, t, ctx.user.id, type, { from: t.status, to, reason })
+    if (to === 'IN_PROGRESS') touchMeaningful(db, t.id, ts)
+    // Closing a task settles an open transfer: nobody can accept ownership of finished work.
+    if (to === 'CANCELLED') db.prepare(`UPDATE task_transfers SET status = 'CANCELLED', decided_by = ?, decided_at = ?, decision_note = 'The task was cancelled.' WHERE task_id = ? AND status = 'PENDING'`).run(ctx.user.id, ts, t.id)
   })
   emit({ type: 'task.status_changed', orgId: ctx.orgId, taskId: t.id, from: t.status, to, actorId: ctx.user.id })
+  if (to === 'IN_PROGRESS') emit({ type: 'task.meaningful_activity', orgId: ctx.orgId, taskId: t.id, actorId: ctx.user.id })
   return presentTask(db, ctx, getTaskRow(db, t.id))
 }
 
@@ -310,6 +368,8 @@ export function updateProgress(db, ctx, id, body) {
   const progress = v.int(body?.progress, 'Progress', { min: 0, max: 100, required: true })
   const note = v.text(body?.note, 'Note', { max: 2000 })
   const ts = now()
+  // Re-saving the same percentage with no real note is not movement.
+  const substantive = t.status === 'ASSIGNED' || progress !== t.progress || (note || '').length >= 15
   transaction(db, () => {
     // Updating progress on an ASSIGNED task starts it.
     const status = t.status === 'ASSIGNED' ? 'IN_PROGRESS' : t.status
@@ -317,7 +377,9 @@ export function updateProgress(db, ctx, id, body) {
       .run(progress, status, status !== t.status ? ts : t.status_changed_at, ts, ts, ts, t.id)
     if (status !== t.status) recordEvent(db, t, ctx.user.id, 'status_changed', { from: t.status, to: status })
     recordEvent(db, t, ctx.user.id, 'progress', { from: t.progress, to: progress, note })
+    if (substantive) touchMeaningful(db, t.id, ts)
   })
+  if (substantive) emit({ type: 'task.meaningful_activity', orgId: ctx.orgId, taskId: t.id, actorId: ctx.user.id })
   return presentTask(db, ctx, getTaskRow(db, t.id))
 }
 
@@ -373,8 +435,10 @@ export function reportBlocker(db, ctx, taskId, body) {
       recordEvent(db, t, ctx.user.id, 'status_changed', { from: t.status, to: 'BLOCKED' })
     }
     recordEvent(db, t, ctx.user.id, 'blocker_reported', { blockerId: id, description, dependencyOwner: userName(db, ownerId), dependency: note, external: isExternal })
+    if (t.assignee_id === ctx.user.id) touchMeaningful(db, t.id, ts)
   })
   emit({ type: 'blocker.reported', orgId: ctx.orgId, taskId: t.id, blockerId: id, actorId: ctx.user.id, priority: t.priority })
+  if (t.assignee_id === ctx.user.id) emit({ type: 'task.meaningful_activity', orgId: ctx.orgId, taskId: t.id, actorId: ctx.user.id })
   return { id }
 }
 
@@ -404,7 +468,9 @@ export function resolveBlocker(db, ctx, blockerId, body) {
       resumed = true
     }
   })
+  if (t.assignee_id === ctx.user.id) touchMeaningful(db, t.id, ts)
   emit({ type: 'blocker.resolved', orgId: ctx.orgId, taskId: t.id, blockerId: b.id, actorId: ctx.user.id })
+  if (t.assignee_id === ctx.user.id) emit({ type: 'task.meaningful_activity', orgId: ctx.orgId, taskId: t.id, actorId: ctx.user.id })
   return { resolved: true, taskResumed: resumed }
 }
 
@@ -447,8 +513,13 @@ export function submitForReview(db, ctx, taskId, body) {
     }
     db.prepare(`UPDATE tasks SET status = 'SUBMITTED_FOR_REVIEW', progress = 100, submitted_at = ?, status_changed_at = ?, last_progress_at = ?, updated_at = ? WHERE id = ?`).run(ts, ts, ts, ts, t.id)
     recordEvent(db, t, ctx.user.id, 'submitted_for_review', { submissionId: id, summary: summary.slice(0, 200) })
+    touchMeaningful(db, t.id, ts)
+    // Delivered after the deadline: the miss is recorded now, so it survives completion even if no scan saw it overdue.
+    if (t.due_at && Date.parse(ts) > Date.parse(t.due_at)) markDeadlineMissed(db, t, ts)
+    db.prepare(`UPDATE task_transfers SET status = 'CANCELLED', decided_by = ?, decided_at = ?, decision_note = 'The work was submitted for review.' WHERE task_id = ? AND status = 'PENDING'`).run(ctx.user.id, ts, t.id)
   })
   emit({ type: 'task.submitted', orgId: ctx.orgId, taskId: t.id, submissionId: id, actorId: ctx.user.id })
+  emit({ type: 'task.meaningful_activity', orgId: ctx.orgId, taskId: t.id, actorId: ctx.user.id })
   return { submissionId: id }
 }
 

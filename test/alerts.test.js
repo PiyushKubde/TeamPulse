@@ -75,7 +75,8 @@ test('scheduled scan: thresholds, recipients, and each alert only once', async (
     assert.equal(scanAlerts(t.db), 0, 'a second run raises nothing new')
     // A changed deadline is a new condition.
     t.db.prepare('UPDATE tasks SET due_at = ? WHERE id = ?').run(iso(Date.now() - 2 * H), late.body.task.id)
-    assert.equal(scanAlerts(t.db), 2)
+    // employee + manager hear about the missed deadline, and the employee is asked to explain it
+    assert.equal(scanAlerts(t.db), 3)
   } finally { await t.close() }
 })
 

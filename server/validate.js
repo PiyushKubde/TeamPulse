@@ -1,8 +1,9 @@
 // Small, explicit validators. Every value from the browser goes through one of these.
 import { invalid } from './errors.js'
+import { endOfDayIso } from './time.js'
 
 export const PRIORITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']
-export const TASK_STATUSES = ['SUGGESTED', 'ASSIGNED', 'IN_PROGRESS', 'BLOCKED', 'SUBMITTED_FOR_REVIEW', 'COMPLETED', 'CANCELLED']
+export const TASK_STATUSES = ['SUGGESTED', 'PENDING_ACCEPTANCE', 'ASSIGNED', 'IN_PROGRESS', 'BLOCKED', 'SUBMITTED_FOR_REVIEW', 'COMPLETED', 'CANCELLED', 'DECLINED']
 export const IMPACT_CATEGORIES = ['REVENUE_GROWTH', 'CUSTOMER_EXPERIENCE', 'TIME_SAVED', 'RELIABILITY', 'COST_REDUCTION', 'OPERATIONAL_EFFICIENCY', 'KNOWLEDGE_INNOVATION']
 export const OUTCOME_TYPES = ['DELIVERED', 'PREVENTION', 'RESEARCH', 'LEARNING']
 export const VALUE_TYPES = ['MEASURED', 'ESTIMATED', 'NONE']
@@ -40,13 +41,14 @@ export function id(value, field, { required = false } = {}) {
 }
 
 /** An ISO date (YYYY-MM-DD) or date-time; returned as an ISO string in UTC. */
-export function dateTime(value, field, { required = false } = {}) {
+export function dateTime(value, field, { required = false, tz = 'UTC' } = {}) {
   if (value === undefined || value === null || value === '') {
     if (required) throw invalid(`${field} is required.`, { field })
     return null
   }
   if (typeof value !== 'string') throw invalid(`${field} must be a date.`, { field })
-  const v = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T23:59:00.000Z` : value
+  // A date without a time is the end of that day in the organization's timezone.
+  const v = /^\d{4}-\d{2}-\d{2}$/.test(value) ? (Number.isFinite(Date.parse(value)) ? endOfDayIso(value, tz) : value) : value
   const t = Date.parse(v)
   if (!Number.isFinite(t)) throw invalid(`${field} is not a valid date.`, { field })
   const year = new Date(t).getUTCFullYear()
