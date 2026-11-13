@@ -1,5 +1,5 @@
 // The AI Work Assistant (employees, and managers for their own work), the Manager Copilot panel, and the signal list
-// used on dashboards and reviews. Answers come from TeamPulse records and say so; the AI only writes an optional
+// used on dashboards and reviews. Answers come from KONVO records and say so; the AI only writes an optional
 // summary, when the server allows it.
 import { api, html, raw, toast, errorText, empty, loading, confirmDialog, icon, prov, appTile, avatar, ago } from '../ui.js'
 import { app } from '../app.js'
@@ -34,7 +34,7 @@ function answerBlock(a, question) {
     ${inviteSection}
     ${a.suggestions?.length ? html`<div class="chips">${a.suggestions.map((s) => html`<button class="chip" data-intent="${s.intent}">${s.label}</button>`)}</div>` : ''}
     ${a.journeyHref ? html`<p class="small" style="margin:10px 0 0"><a href="${a.journeyHref}">See the whole contribution journey ${icon('arrowRight', 'xs')}</a></p>` : ''}
-    <div class="answer-foot">${prov('fact', 'From records')}<span class="small muted">${a.note || 'Answered from your TeamPulse records and linked evidence — not generated text.'}</span></div></div></div>`
+    <div class="answer-foot">${prov('fact', 'From records')}<span class="small muted">${a.note || 'Answered from your KONVO records and linked evidence — not generated text.'}</span></div></div></div>`
 }
 
 /** A question box bound to /api/assistant/ask. team=true → Manager Copilot. Answers stack up as a conversation. */
@@ -141,8 +141,10 @@ const STATE = { OPEN: ['Open', 'outline'], DISMISSED: ['Dismissed', 'outline'], 
  * supporting context, state and history). Restrained: only "important" ones carry a colour label.
  */
 export async function renderSignals(box, { scope = 'mine', limit = 8, title = null, subtitle = null, status = 'OPEN', detail = false } = {}) {
+  if (!box?.isConnected) return // the page this belonged to is gone
   let rows
-  try { rows = await api(`/api/signals?scope=${scope}${status !== 'OPEN' ? `&status=${status}` : ''}`) } catch (e) { box.innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString(); return }
+  try { rows = await api(`/api/signals?scope=${scope}${status !== 'OPEN' ? `&status=${status}` : ''}`) } catch (e) { if (!box.isConnected) return; box.innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString(); return }
+  if (!box.isConnected) return // the page was replaced while the signals loaded
   const shown = rows.slice(0, limit)
   const again = () => renderSignals(box, { scope, limit, title, subtitle, status, detail })
   box.innerHTML = html`${title ? html`<div class="card-head"><div><h2><span class="card-icon warn">${icon('target')}</span>${title}</h2><p>${subtitle || 'Detected from your records by fixed rules — to help you act, never as a penalty.'}</p></div>${rows.length > limit ? html`<a class="btn small subtle" href="${scope === 'team' ? '#/reviews?tab=signals' : '#/assistant'}">All ${rows.length}${icon('arrowRight', 'sm')}</a>` : ''}</div>` : ''}
@@ -173,7 +175,7 @@ const COPILOT_QUESTIONS = [
 export async function renderCopilot(main) {
   main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('copilot', 'xs')}Manager Copilot</div><h1>Ask about your team</h1><p>Answers come from your team’s tasks, reviews, signals and linked evidence — each item links to its record. The Copilot never ranks or scores people.</p></div></div>
     <div class="assistant-layout copilot-layout"><section class="card"><div id="copilot"></div></section>
-      <aside class="stack"><div class="principle">${icon('shield')}<span>Grounded in TeamPulse records only. If something is not recorded, the Copilot says so instead of guessing.</span></div>
+      <aside class="stack"><div class="principle">${icon('shield')}<span>Grounded in KONVO records only. If something is not recorded, the Copilot says so instead of guessing.</span></div>
         <section class="card"><div class="card-head"><h2><span class="card-icon brand">${icon('sparkles')}</span>Try asking</h2></div><div class="q-cards" id="q-cards">${COPILOT_QUESTIONS.map(([k, l, ic]) => html`<button type="button" class="q-card" data-intent="${k}"><span class="lead-icon">${icon(ic)}</span><span>${l}</span></button>`)}</div></section></aside></div>`.toString()
   const box = main.querySelector('#copilot')
   questionBox(box, { team: true, suggestions: [] })

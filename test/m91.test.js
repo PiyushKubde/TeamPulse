@@ -1,5 +1,5 @@
 // The M91 transport against the documented contract (https://m91-api.msg91.com/api/public/api.md), with fetch
-// stubbed. These check the exact requests TeamPulse makes; they are not a live call to M91.
+// stubbed. These check the exact requests KONVO makes; they are not a live call to M91.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createM91Transport, m91Phone } from '../server/integrations/m91.js'
@@ -53,7 +53,7 @@ test('send errors: 429/5xx/network retryable; 4xx not; not_a_recipient invites; 
   const { f, calls } = stubFetch([{ status: 404, body: { success: false, error: { code: 'NOT_FOUND', message: 'not_a_recipient' } } }, { status: 201, body: { success: true, data: { phone: '919876543210', state: 'pending', reachable: false } } }])
   await assert.rejects(createM91Transport({ apiKey: KEY }, f).send({ title: 'Title here', recipient: { name: 'Eve', phone: '919876543210' } }), (e) => /must accept/.test(e.message) && !e.retryable)
   assert.equal(calls[1].url, 'https://m91-api.msg91.com/api/v1/recipients')
-  assert.deepEqual(calls[1].body, { phone: '919876543210', label: 'TeamPulse alerts' })
+  assert.deepEqual(calls[1].body, { phone: '919876543210', label: 'KONVO alerts' })
   const { f: f2 } = stubFetch([{ status: 409, body: { success: false, error: { code: 'CHANNEL_EMPTY', message: 'x' } } }])
   await assert.rejects(createM91Transport({ apiKey: KEY }, f2).send({ title: 'Title here', recipient: { name: 'Eve', phone: '919876543210' } }), (e) => e.code === 'CHANNEL_EMPTY' && !e.retryable)
   await assert.rejects(createM91Transport({ apiKey: KEY }, stubFetch([]).f).send({ title: 'Title here', recipient: { name: 'Eve' } }), (e) => e.code === 'NO_PHONE')

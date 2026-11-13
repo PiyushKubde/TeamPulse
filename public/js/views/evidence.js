@@ -1,4 +1,4 @@
-// "My work evidence": what TeamPulse collects from the person's own connected apps, how it is linked to their tasks,
+// "My work evidence": what KONVO collects from the person's own connected apps, how it is linked to their tasks,
 // and the "Analyse my work" action. Plus the managers' evidence review (attribution and shared ownership).
 // Plain language first; the viaSocket details stay behind "Advanced".
 import { api, html, raw, modal, bindForm, toast, errorText, ago, dt, empty, loading, confirmDialog, icon, appTile, prov } from '../ui.js'
@@ -47,7 +47,7 @@ function bindEvidenceActions(root, reload, myTasks) {
     if (r?.ok) { try { await api(`/api/work-evidence/${b.dataset.evDispute}/dispute`, { method: 'POST', body: { reason: r.reason } }); toast('Sent to your manager.'); reload() } catch (e) { toast(errorText(e), { error: true }) } }
   }))
   root.querySelectorAll('[data-ev-remove]').forEach((b) => b.addEventListener('click', async () => {
-    const r = await confirmDialog({ title: 'Remove this evidence?', body: 'Its content is deleted from TeamPulse and it is no longer used anywhere. The original in the app is not touched.', confirm: 'Remove', danger: true })
+    const r = await confirmDialog({ title: 'Remove this evidence?', body: 'Its content is deleted from KONVO and it is no longer used anywhere. The original in the app is not touched.', confirm: 'Remove', danger: true })
     if (r?.ok) { try { await api(`/api/work-evidence/${b.dataset.evRemove}`, { method: 'DELETE' }); toast('Removed.'); reload() } catch (e) { toast(errorText(e), { error: true }) } }
   }))
 }
@@ -63,11 +63,11 @@ export async function renderEvidence(main, q) {
   const pending = items.filter((e) => e.links.some((l) => l.status === 'suggested')).length
   const errors = sources.reduce((n, s) => n + s.collectionErrors, 0)
   const active = sources.filter((s) => s.status === 'ACTIVE').length
-  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('evidence', 'xs')}Evidence</div><h1>My work evidence</h1><p>What TeamPulse notices in the apps you connected — only the repositories, channels, labels, calendars or sheets you chose — and which of your tasks it belongs to. Activity is never counted; it only explains your work.</p></div>
+  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('evidence', 'xs')}Evidence</div><h1>My work evidence</h1><p>What KONVO notices in the apps you connected — only the repositories, channels, labels, calendars or sheets you chose — and which of your tasks it belongs to. Activity is never counted; it only explains your work.</p></div>
       <button class="btn" id="analyse-mine">${icon('sparkles')}Analyse my work</button></div>
     <div id="analyse-out"></div>
     <ol class="trust-steps" aria-label="How evidence becomes part of your work">
-      <li>${prov('fact', 'Observed')}<span>TeamPulse notices activity in the sources you chose.</span></li>
+      <li>${prov('fact', 'Observed')}<span>KONVO notices activity in the sources you chose.</span></li>
       <li>${prov('suggested', 'Suggested')}<span>It proposes which of your tasks it belongs to. Nothing counts yet.</span></li>
       <li>${prov('self', 'Confirmed by you')}<span>You decide. Only then is it used when your work is analysed.</span></li></ol>
     <section aria-labelledby="src-h" style="margin-top:20px"><div class="section-title" style="margin-top:0"><div><h2 id="src-h">Connected sources</h2><p class="small muted" style="margin:2px 0 0">${sources.length ? `${active} collecting${errors ? ` · ${errors} event(s) could not be read` : ''}` : 'Nothing is collected yet.'}</p></div>
@@ -128,7 +128,7 @@ function openAddSource(catalog, conns, reload) {
     <div class="field"><label for="ss">What to collect from</label><select id="ss" name="scope" disabled><option value="">Choose an account first</option></select></div>
     <div class="field" id="sheet-field" hidden><label for="sh">Sheet</label><select id="sh" name="sheet"></select></div>
     <fieldset class="field" style="border:0;padding:0"><legend class="small">Events</legend><div id="kinds"></div></fieldset>
-    <p class="small muted">TeamPulse only reads. Nothing is posted, sent or changed in the app.</p>
+    <p class="small muted">KONVO only reads. Nothing is posted, sent or changed in the app.</p>
     <div class="row end"><button class="btn ghost" data-close>Cancel</button><button class="btn" type="submit">Start collecting</button></div></form>`.toString(), (el, close) => {
     const $ = (s) => el.querySelector(s)
     const loadScopes = async () => {

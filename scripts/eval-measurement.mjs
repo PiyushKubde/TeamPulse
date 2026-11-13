@@ -1,6 +1,6 @@
 // Evaluation runner for the AI Work Measurement Engine.
 //
-// Replays every case of eval/dataset.json into a fresh IN-MEMORY TeamPulse (never a real database), builds the
+// Replays every case of eval/dataset.json into a fresh IN-MEMORY KONVO (never a real database), builds the
 // evidence pack with the production code, asks the provider, then scores the raw model output AND the output after
 // the deterministic guardrails against the case's draft expectations.
 //
@@ -56,7 +56,7 @@ if (!dry) {
   if (!provider.configured) { console.error(`Provider not configured: ${provider.reason}`); process.exit(2) }
 }
 
-// ---------- an isolated in-memory TeamPulse ----------
+// ---------- an isolated in-memory KONVO ----------
 const db = openDatabase(':memory:')
 const cfg = loadConfig({ dataDir: mkdtempSync(join(tmpdir(), 'tp-eval-')), devLogin: false, appUrl: 'https://teampulse.eval', ai: { mode: 'off' } })
 const app = createApp({ db, cfg, vs: { configured: false }, m91: createM91Transport({}), listen: false, ai: { configured: false, name: null, model: null, reason: 'eval harness' } })

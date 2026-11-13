@@ -298,7 +298,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     const out = orgs.updateProfile(db, signedIn(req), req.body)
     if (!out.phone || !m91.ready) return { ...out, m91: m91.ready ? null : 'not_configured' }
     try {
-      const inv = await m91.invite(out.phone, `TeamPulse — ${req.user.name}`.slice(0, 80))
+      const inv = await m91.invite(out.phone, `KONVO — ${req.user.name}`.slice(0, 80))
       return { ...out, m91: inv.state === 'channel' ? 'channel' : inv.reachable ? 'reachable' : 'invited' }
     } catch (error) {
       return { ...out, m91: 'invite_failed', m91Error: String(error.message).slice(0, 200) }
@@ -362,7 +362,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     const channelId = v.text(req.body?.slackChannelId, 'Slack channel', { required: true, max: 40 })
     const text = [`${t.title} — ${t.status.replace(/_/g, ' ').toLowerCase()}${t.assigneeName ? `, owner ${t.assigneeName}` : ''}`, t.expectedOutcome ? `Expected outcome: ${t.expectedOutcome}` : null,
       t.dueAt ? `Due ${t.dueAt.slice(0, 16).replace('T', ' ')} UTC` : null, cfg.appUrl ? `${cfg.appUrl}/#/tasks/${t.id}` : null, v.text(req.body?.note, 'Note', { max: 500 })].filter(Boolean).join('\n')
-    const out = await sendThrough(db, vs, ctx, { channel: 'slack', connectionId: req.body?.connectionId, slackChannelId: channelId }, { subject: 'TeamPulse task', text })
+    const out = await sendThrough(db, vs, ctx, { channel: 'slack', connectionId: req.body?.connectionId, slackChannelId: channelId }, { subject: 'KONVO task', text })
     if (out.status === 'SUCCEEDED') tasks.recordEvent(db, db.prepare('SELECT * FROM tasks WHERE id = ?').get(t.id), ctx.user.id, 'shared', { to: 'Slack' })
     return out
   }))
@@ -412,7 +412,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     const report = reports.buildReport(db, ctx, type, req.query)
     if (!csv) return report
     res.setHeader('Content-Type', 'text/csv; charset=utf-8')
-    res.setHeader('Content-Disposition', `attachment; filename="teampulse-${type}-${now().slice(0, 10)}.csv"`)
+    res.setHeader('Content-Disposition', `attachment; filename="konvo-${type}-${now().slice(0, 10)}.csv"`)
     res.send(reports.toCsv(report))
   }))
 
@@ -483,7 +483,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
     return intake.receiveIntakeEvent(db, req.params.id, auth.startsWith('Bearer ') ? auth.slice(7).trim() : null, req.body)
   }))
 
-  // D: the restricted builder for one TeamPulse context.
+  // D: the restricted builder for one KONVO context.
   app.get('/api/viasocket/contexts', h((req) => contextFlows.listContexts(member(req), typeof req.query.app === 'string' ? req.query.app : undefined)))
   app.get('/api/viasocket/context/:key', h((req) => contextFlows.contextEmbed(vs, member(req), req.params.key, { app: typeof req.query.app === 'string' ? req.query.app : undefined })))
   app.delete('/api/viasocket/connections/:id', h((req) => conns.disconnect(db, vs, member(req), req.params.id)))

@@ -229,7 +229,7 @@ function evidenceCard(evidence) {
   if (failed(evidence)) return html`<section class="card"><div class="notice err">${errorText(evidence.reason)}</div></section>`
   const pending = evidence.value.flatMap((e) => e.links.filter((l) => l.status === 'suggested').map((l) => ({ e, l }))).slice(0, 4)
   const none = !evidence.value.length
-  return html`<section class="card" aria-labelledby="ev-h" id="ev-confirm"><div class="card-head"><div><h2 id="ev-h"><span class="card-icon teal">${icon('evidence')}</span>Evidence to confirm</h2><p>TeamPulse noticed these in your connected apps. Nothing counts until you confirm it.</p></div></div>
+  return html`<section class="card" aria-labelledby="ev-h" id="ev-confirm"><div class="card-head"><div><h2 id="ev-h"><span class="card-icon teal">${icon('evidence')}</span>Evidence to confirm</h2><p>KONVO noticed these in your connected apps. Nothing counts until you confirm it.</p></div></div>
     ${pending.length ? html`<ul class="mini-list">${pending.map(({ e, l }) => html`<li data-ev-link="${l.id}"><span class="lead-icon teal">${icon('evidence')}</span><div class="grow">
         <div class="ttl">${e.title}</div>
         <div class="meta"><span>${e.appLabel}</span><span class="sep"></span><span>${ago(e.occurredAt)}</span></div>
@@ -292,7 +292,7 @@ async function renderEmployeeOverview(main, p) {
       <div class="col">${o(2, attentionCard(p))}${o(4, evidenceCard(evidence))}${o(5, blockersCard(p))}${o(7, nextStepsCard(digest))}</div>
     </div>
     <div style="margin-top:16px">${reflectionCard(p)}</div>
-    <p class="principle" style="margin-top:24px">${icon('heart')}<span>TeamPulse shows what your work achieved, not how busy you were. There are no scores, rankings or activity counts — and you can correct anything that is wrong.</span></p>`.toString()
+    <p class="principle" style="margin-top:24px">${icon('heart')}<span>KONVO shows what your work achieved, not how busy you were. There are no scores, rankings or activity counts — and you can correct anything that is wrong.</span></p>`.toString()
   document.getElementById('new-task').addEventListener('click', () => openTaskForm())
   renderInbox(document.getElementById('inbox-slot'))
   renderSignals(document.getElementById('my-signals'), { scope: 'mine', limit: 4 })

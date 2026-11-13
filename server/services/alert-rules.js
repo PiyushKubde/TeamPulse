@@ -1,4 +1,4 @@
-// The alert rules TeamPulse evaluates, with configurable thresholds. M91 is used for important human attention only;
+// The alert rules KONVO evaluates, with configurable thresholds. M91 is used for important human attention only;
 // every alert is also an in-app notification (the fallback when M91 is off or fails).
 //
 // Escalation ladder for the Slack/acceptance workflow, one M91 severity per rung (RULE_SEVERITY in alerts.js):
@@ -9,8 +9,8 @@
 
 export const ALERT_RULES = {
   task_assigned: { label: 'New task assigned', recipients: ['assignee'], m91Default: false, threshold: null },
-  task_assignment: { label: 'Task assigned for acceptance (LOW)', recipients: ['assignee'], m91Default: true, threshold: null },
-  no_movement: { label: 'No meaningful movement since acceptance (MEDIUM)', recipients: ['manager'], m91Default: true, threshold: 'noMovementHours' },
+  task_assignment: { label: 'Task assigned for acceptance', recipients: ['assignee'], m91Default: true, threshold: null },
+  no_movement: { label: 'No meaningful movement since acceptance', recipients: ['manager'], m91Default: true, threshold: 'noMovementHours' },
   deadline_approaching: { label: 'Deadline approaching', recipients: ['assignee', 'manager'], m91Default: true, threshold: 'deadlineApproachingHours' },
   deadline_missed: { label: 'Deadline missed', recipients: ['assignee', 'manager'], m91Default: true, threshold: null },
   deadline_explanation_required: { label: 'Explain a missed deadline', recipients: ['assignee'], m91Default: false, threshold: null },

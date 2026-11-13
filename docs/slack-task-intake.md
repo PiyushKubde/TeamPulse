@@ -1,6 +1,6 @@
 # Slack task intake, acceptance and escalation
 
-Work that matters, made visible: a Slack message tags a person, TeamPulse turns it into a task for them, they accept, decline or
+Work that matters, made visible: a Slack message tags a person, KONVO turns it into a task for them, they accept, decline or
 transfer it, and M91 escalates if it stalls or its deadline slips. Migration `010_slack_task_intake.sql` (additive; existing
 rows are copied unchanged).
 
@@ -9,8 +9,8 @@ rows are copied unchanged).
 1. A manager switches a Slack intake channel to **Create tasks for tagged people** (`assign_from_mentions`). Existing intakes keep
    creating pending requests. Only channels the manager chose are read; never every channel, DMs or private chats.
 2. Each message is interpreted by deterministic rules (`server/automations/slack-tasks.js`). Conversation, greetings, questions,
-   status updates, completions, blockers, bot messages and TeamPulse's own messages are ignored.
-3. The person tagged to do the work becomes the **initial assignee** only when their Slack user id is mapped to a TeamPulse person
+   status updates, completions, blockers, bot messages and KONVO's own messages are ignored.
+3. The person tagged to do the work becomes the **initial assignee** only when their Slack user id is mapped to a KONVO person
    **by a manager** (Slack identities). A display name is never matched. Anything else becomes a normal pending request for a
    manager (no tag, several primary tags, unmapped or unconfirmed id, person outside the intake owner's teams) with the reason.
 4. The task starts as `PENDING_ACCEPTANCE`. The requester is recorded on the task source and as a participant, never as owner.
@@ -90,7 +90,7 @@ server-side; out-of-scope records answer 404.
 Task messages keep their full text as the task's source evidence for as long as the task exists. For **messages that did not
 become a task**, `slack_intake_items` keeps only a 500-character excerpt and the sender's name for **24 hours**
 (`IGNORED_TEXT_RETENTION_DAYS = 1`), erased by the scheduled job (`purgeIgnoredText`, every 15 minutes on Embarko, so an excerpt
-is gone between 24 h and 24 h 15 min after it arrived); bot and TeamPulse messages keep no text at all. Thread context therefore
+is gone between 24 h and 24 h 15 min after it arrived); bot and KONVO messages keep no text at all. Thread context therefore
 works for a reply posted within about a day of its parent. This applies only to channels a manager switched to "create tasks
 for tagged people".
 

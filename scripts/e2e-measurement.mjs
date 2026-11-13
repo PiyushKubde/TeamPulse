@@ -69,7 +69,7 @@ try {
   step = 'analysis appears automatically (simulated)'
   await e.waitForSelector('#ai-card table.dims', { timeout: 20000 })
   ok(await e.isVisible('#ai-card >> text=Simulated — development only, not AI'), 'simulated badge shown')
-  ok(await e.isVisible('#ai-card >> text=What TeamPulse understood'), 'understanding shown')
+  ok(await e.isVisible('#ai-card >> text=What KONVO understood'), 'understanding shown')
   for (const t of ['Complexity', 'Impact', 'Quality', 'Ownership', 'Problem-solving', 'Collaboration']) ok(await e.isVisible(`#ai-card table.dims >> text=${t}`), `dimension ${t}`)
   for (const t of ['Claimed', 'AI-estimated', 'Evidence-supported', 'Manager-verified']) ok(await e.isVisible(`#ai-card .impact-grid >> text=${t}`), `impact column ${t}`)
   ok(await e.isVisible('#ai-card >> text=L4 · Highly complex'), 'complexity L4 with corroborating evidence')

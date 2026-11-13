@@ -1,4 +1,4 @@
-// Restore a TeamPulse backup into an EMPTY data folder (never over a live one).
+// Restore a KONVO backup into an EMPTY data folder (never over a live one).
 //   node scripts/restore-backup.js <backup file: .tpbackup (local) or the encrypted off-host copy> <target DATA_DIR>
 // The encrypted off-host copy (teampulse-backup-*.gz from Embarko storage) needs BACKUP_ENCRYPTION_KEY. Checksums are verified first.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'

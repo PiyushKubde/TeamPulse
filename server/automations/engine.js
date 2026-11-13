@@ -1,4 +1,4 @@
-// Ready-made TeamPulse automations. They act only through TeamPulse's own rules: notifications send messages,
+// Ready-made KONVO automations. They act only through KONVO's own rules: notifications send messages,
 // intake creates task REQUESTS (never official tasks), and reports read the owner's own scope.
 // Every automation belongs to one person and runs only on that person's own connection.
 import { createHash, randomBytes } from 'node:crypto'
@@ -17,8 +17,8 @@ export const USE_CASES = [
   { key: 'new_task_notification', name: 'Team task notifications', description: 'When a task in your team is assigned: post it to a team Slack channel, message you in Slack, email you, or email the assignee — from your own Slack or Gmail. (Employees turn on their own notifications in Settings → Profile.)', channels: ['slack', 'gmail'], available: true },
   { key: 'weekly_team_report', name: 'Weekly team report', description: 'Every Monday, your team’s report for the week that ended — verified outcomes, contributions, blockers, missed commitments with reasons — delivered to Slack or Gmail. Managers get their own team; admins get the whole organization.', channels: ['slack', 'gmail'], available: true },
   { key: 'gmail_slack_intake', name: 'Gmail / Slack intake → task requests', description: 'Emails with a chosen Gmail label, or messages in a chosen Slack channel, become pending task requests for your team. Nothing is ever assigned or approved automatically.', channels: ['gmail', 'slack'], available: true },
-  { key: 'context_flows', name: 'Flows built in context', description: 'Flows people build from a TeamPulse screen (My Tasks, Reports, Team Tasks) receive their own TeamPulse events.', channels: [], available: true, hidden: true },
-  { key: 'external_request_intake', name: 'Any other source → task requests (web address)', description: 'Any other system or ViaSocket flow can post a request to a TeamPulse web address with a token. It becomes a pending task request — never assigned automatically.', channels: ['webhook'], available: true }
+  { key: 'context_flows', name: 'Flows built in context', description: 'Flows people build from a KONVO screen (My Tasks, Reports, Team Tasks) receive their own KONVO events.', channels: [], available: true, hidden: true },
+  { key: 'external_request_intake', name: 'Any other source → task requests (web address)', description: 'Any other system or ViaSocket flow can post a request to a KONVO web address with a token. It becomes a pending task request — never assigned automatically.', channels: ['webhook'], available: true }
 ]
 
 export function seedUseCases(db) {
@@ -133,10 +133,10 @@ export async function configureAutomation(db, ctx, vs, key, body) {
   return presentWorkflow(db, workflowRow(db, ctx.orgId, key, ctx.user.id))
 }
 
-/** A Slack channel used for outgoing TeamPulse posts must never be an intake channel (and vice versa): no loops. */
+/** A Slack channel used for outgoing KONVO posts must never be an intake channel (and vice versa): no loops. */
 export function assertNoIntakeLoop(db, orgId, channelId) {
   const intake = db.prepare(`SELECT 1 FROM intake_subscriptions WHERE org_id = ? AND app = 'slack' AND status IN ('ACTIVE','PAUSED') AND input_data LIKE ?`).get(orgId, `%"${channelId}"%`)
-  if (intake) throw conflict('That Slack channel is an intake channel: posting TeamPulse messages there would turn them into new requests. Choose another channel.', 'intake_loop')
+  if (intake) throw conflict('That Slack channel is an intake channel: posting KONVO messages there would turn them into new requests. Choose another channel.', 'intake_loop')
 }
 
 export function setAutomationStatus(db, ctx, vs, key, body) {
@@ -261,7 +261,7 @@ export async function runWeeklyReports(db, vs, { at = new Date(), appUrl = '' } 
       if (!logId) { results.push({ org: org.id, owner: ownerId, delivered: false, reason: 'already sent' }); continue }
       const cfg = json(w.config, {})
       const text = weeklyText(summary, `${org.name}${scope === 'team' ? ` — ${ctx.user.name}’s teams` : ''}`) + (appUrl ? `\n\nFull report: ${appUrl}/#/reports?type=weekly&weekStart=${prev}` : '')
-      const out = await sendThrough(db, vs, ctx, cfg, { subject: `TeamPulse weekly summary — week of ${prev}`, text, to: cfg.target === 'recipients' ? (cfg.emailTo || ctx.user.email) : ctx.user.email })
+      const out = await sendThrough(db, vs, ctx, cfg, { subject: `KONVO weekly summary — week of ${prev}`, text, to: cfg.target === 'recipients' ? (cfg.emailTo || ctx.user.email) : ctx.user.email })
       finishLog(db, logId, w, out)
       results.push({ org: org.id, owner: ownerId, delivered: out.status === 'SUCCEEDED', status: out.status })
     }
@@ -271,7 +271,7 @@ export async function runWeeklyReports(db, vs, { at = new Date(), appUrl = '' } 
 
 const weeklyPayload = (s) => ({ verifiedOutcomes: s.verifiedOutcomes.length, contributions: s.significantContributions.length, unresolvedBlockers: s.unresolvedBlockers.length, missedCommitments: s.missedCommitments.length, completedTasks: s.completedTasks })
 
-// D: flows a user built from a TeamPulse context receive that user's own events. Imported lazily to avoid a cycle.
+// D: flows a user built from a KONVO context receive that user's own events. Imported lazily to avoid a cycle.
 async function dispatchContextFlows(db, vs, args) {
   const { dispatchContext } = await import('./context-flows.js')
   return dispatchContext(db, vs, args)
@@ -328,7 +328,7 @@ export async function saveNotificationPrefs(db, ctx, vs, body) {
 export async function sendTestToSelf(db, ctx, vs, body) {
   const cfg = await readDelivery(db, vs, ctx, { ...body, target: body?.channel?.toLowerCase?.() === 'gmail' ? 'ME' : body?.target || 'ME' }, { targets: { slack: ['CHANNEL', 'ME'], gmail: ['ME'] } })
   const logId = startLog(db, { orgId: ctx.orgId, key: 'new_task_notification', trigger: 'test', subjectType: 'user', subjectId: ctx.user.id, input: { variant: 'test' } })
-  const out = await sendThrough(db, vs, ctx, cfg, { subject: 'TeamPulse test message', text: `This is a test from TeamPulse, sent because ${ctx.user.name} pressed “Send a test”. No action is needed.`, to: ctx.user.email })
+  const out = await sendThrough(db, vs, ctx, cfg, { subject: 'KONVO test message', text: `This is a test from KONVO, sent because ${ctx.user.name} pressed “Send a test”. No action is needed.`, to: ctx.user.email })
   finishLog(db, logId, null, out)
   return out
 }

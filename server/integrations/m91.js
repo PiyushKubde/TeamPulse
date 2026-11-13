@@ -13,7 +13,7 @@
 //   GET  <link>            connection test (no title → raises nothing): { ok, channel: { name } }
 //   GET  <link>/alerts/:id read back       POST <link>/close { customId | alertId }
 // One condition rings the channel once: the customId is per condition (not per person), and M91 absorbs repeats of an
-// open customId. People join the channel in the M91 app; TeamPulse invites nobody in this mode.
+// open customId. People join the channel in the M91 app; KONVO invites nobody in this mode.
 //
 // Every response is { success, data } or { success: false, error: { code, message } }. Phones are digits with the
 // country code and no "+". The callback signature cannot be verified yet (the secret is not exposed), so a callback is
@@ -72,13 +72,13 @@ export function createM91Transport({ apiKey = '', callbackUrl = '', sendLink = '
     ready,
     status() {
       if (sendLink && !channel) return { state: 'invalid_link', message: 'M91_SEND_LINK does not look like an M91 send link (https://m91-api.msg91.com/s/…).' }
-      if (channel) return { state: 'ready', message: `M91 channel mode: alerts go to the team's M91 channel.${callbackUrl ? ' Answers come back to TeamPulse.' : ' Set APP_URL (https) and M91_CALLBACK_TOKEN to receive answers.'}` }
+      if (channel) return { state: 'ready', message: `M91 channel mode: alerts go to the team's M91 channel.${callbackUrl ? ' Answers come back to KONVO.' : ' Set APP_URL (https) and M91_CALLBACK_TOKEN to receive answers.'}` }
       if (!apiKey) return { state: 'not_configured', message: 'Set M91_SEND_LINK (a channel send link from the M91 app) or M91_API_KEY (m91sk_…) to send alerts through M91. Alerts are in-app until then.' }
       if (!ready) return { state: 'invalid_key', message: 'M91_API_KEY does not look like an M91 API key (m91sk_…).' }
-      return { state: 'ready', message: `M91 is configured.${callbackUrl ? ' Answers come back to TeamPulse.' : ' Set APP_URL (https) and M91_CALLBACK_TOKEN to receive answers.'}` }
+      return { state: 'ready', message: `M91 is configured.${callbackUrl ? ' Answers come back to KONVO.' : ' Set APP_URL (https) and M91_CALLBACK_TOKEN to receive answers.'}` }
     },
     /** Invites a person so they can be alerted; they must accept in the M91 app. */
-    async invite(phone, label = 'TeamPulse alerts') {
+    async invite(phone, label = 'KONVO alerts') {
       if (channel) return { phone: m91Phone(phone), state: 'channel', reachable: null }
       if (!ready) throw new M91Error('M91 is not configured.', { notConfigured: true })
       const p = m91Phone(phone)
@@ -94,8 +94,8 @@ export function createM91Transport({ apiKey = '', callbackUrl = '', sendLink = '
       if (!ready) throw new M91Error(this.status().message, { notConfigured: true })
       if (channel) {
         // The whole channel is alerted, so the title names the person it is about.
-        let t = `${recipient?.name ? `${recipient.name}: ` : ''}${String(title || 'TeamPulse alert')}`.slice(0, 2000)
-        if (t.length < 5) t = `TeamPulse: ${t}`
+        let t = `${recipient?.name ? `${recipient.name}: ` : ''}${String(title || 'KONVO alert')}`.slice(0, 2000)
+        if (t.length < 5) t = `KONVO: ${t}`
         const description = [body, link].filter(Boolean).join('\n').slice(0, 2000) || undefined
         try {
           const out = await call('POST', '', { title: t, ...(description ? { description } : {}), severity, responseOptions: [{ label: "I'm on it", effect: 'SHARED' }, { label: 'Seen', effect: 'PERSONAL' }], other: true, isAutoClose: true, customId: idempotencyKey, ...(callbackUrl ? { callbackUrl } : {}) })
@@ -106,9 +106,9 @@ export function createM91Transport({ apiKey = '', callbackUrl = '', sendLink = '
         }
       }
       const phone = m91Phone(recipient?.phone)
-      if (!phone) throw new M91Error(`${recipient?.name || 'This person'} has no phone number in TeamPulse (Settings → Profile).`, { code: 'NO_PHONE' })
-      let t = String(title || 'TeamPulse alert').slice(0, 2000)
-      if (t.length < 5) t = `TeamPulse: ${t}`
+      if (!phone) throw new M91Error(`${recipient?.name || 'This person'} has no phone number in KONVO (Settings → Profile).`, { code: 'NO_PHONE' })
+      let t = String(title || 'KONVO alert').slice(0, 2000)
+      if (t.length < 5) t = `KONVO: ${t}`
       const description = [body, link].filter(Boolean).join('\n').slice(0, 2000) || undefined
       const payload = {
         phone, title: t, ...(description ? { description } : {}), severity,

@@ -1,12 +1,12 @@
 # AI Work Measurement Engine — phase 1
 
-> You do your work. TeamPulse understands it, measures it, and makes your contribution visible.
+> You do your work. KONVO understands it, measures it, and makes your contribution visible.
 > **Work volume is not work value.**
 
 ## What it does
 
 When work is submitted for review (and again when it is approved), or when someone presses **Analyse my work**,
-TeamPulse reads everything it already knows about the task and produces a structured, per-task assessment:
+KONVO reads everything it already knows about the task and produces a structured, per-task assessment:
 
 | Part | What it is |
 | --- | --- |
@@ -36,7 +36,7 @@ public/js/views/contribution.js  task card, person profile, team overview
 
 ### Evidence pack
 
-Built only from TeamPulse data: task description and expected outcome, progress notes, comments, reopen/reassign and
+Built only from KONVO data: task description and expected outcome, progress notes, comments, reopen/reassign and
 deadline/priority changes, blockers (with "outside the employee's control" when external or waiting on someone
 else), completion submissions (marked **self-reported**), review decisions, attached evidence (labels and hosts —
 **files and links are not opened** in this phase), impact records about the task (verification status, value type,
@@ -55,14 +55,14 @@ Version `guardrails-2026-11-v4` (stored with every run and assessment, part of t
 1. Citations must exist in the pack; invented references are removed. A rating left without a valid citation, or citing only the task description (which describes the request, not the work), becomes "not enough evidence".
 2. Complexity L3+ needs corroboration beyond the employee's own account — an artefact (link/file), a blocker, a verified or evidenced outcome record, a review *with a comment*, a recorded event, or someone else's words — else it is capped at L2. A title, a priority, or the employee describing the work as "extremely complex" is not enough.
 3. Problem-solving and collaboration above 3 need the same kind of corroboration (ownership is exempt: the employee's own updates and blocker reports are evidence of ownership).
-4. Quality: structured signals first — a reopening after completion, "changes requested" review decisions. Text is a narrow secondary signal (failing tests, CI red, regression, rollback) that ignores negations and fixes ("no regressions", "fixed the failing tests", "added a regression test"). An unresolved problem (after the last approval, or a reopening) → at most 2, set by rules even if the model ignored it; rework before approval → at most 4; above 3 needs an approved review or validation evidence. TeamPulse has no structured test results yet.
+4. Quality: structured signals first — a reopening after completion, "changes requested" review decisions. Text is a narrow secondary signal (failing tests, CI red, regression, rollback) that ignores negations and fixes ("no regressions", "fixed the failing tests", "added a regression test"). An unresolved problem (after the last approval, or a reopening) → at most 2, set by rules even if the model ignored it; rework before approval → at most 4; above 3 needs an approved review or validation evidence. KONVO has no structured test results yet.
 5. Confidence is reported by the model and not calibrated; it is capped at 0.6 where only the employee's own account supports a rating, and at 0.5 where a rule changed the level.
 6. Work not delivered because of a blocker outside the person's control: impact and quality are **not applicable**, with "not counted against them".
 7. Impact above 3 needs a manager-verified outcome; the impact basis (verified / evidence-supported / claimed / none) is decided from records and shown. Shared outcomes are labelled as shared and counted once at team level.
 8. Estimated outcomes containing numbers that do not appear in the human-written text of the evidence (ids and timestamps excluded) are dropped.
 9. Too little evidence at all (no description, a one-line note such as "Done.", no evidence, no outcome record): **no model call**; every dimension is "not enough evidence", with what is missing.
 
-Every adjustment is listed under "Rules TeamPulse applied" on the card.
+Every adjustment is listed under "Rules KONVO applied" on the card.
 
 ### Provider
 
@@ -71,7 +71,7 @@ Every adjustment is listed under "Rules TeamPulse applied" on the card.
 | `AI_PROVIDER` | `viasocket` (recommended): viaSocket's built-in AI via the existing `VIASOCKET_*` keys, with Anthropic as the backup when `ANTHROPIC_API_KEY` is also set. `anthropic`: Anthropic only. `mock` = simulated keyword analyser for local development and demos — refused in production and labelled "Simulated — development only, not AI" everywhere |
 | `AI_VIASOCKET_POLICY_CONFIRMED` | `false` until viaSocket answers the open data-policy questions ([viasocket-ai-data-policy.md](viasocket-ai-data-policy.md)). While false, nothing is sent to viaSocket AI and Anthropic is **not** used in its place |
 | `AI_VIASOCKET_SERVICE`, `AI_VIASOCKET_MODEL` | Model viaSocket runs; default `anthropic` / `claude-sonnet-5-5` (viaSocket's docs say `claude-opus-5-5` ignores `json_schema` there) |
-| `ANTHROPIC_API_KEY` | Server-side key (never sent to the browser). With `AI_PROVIDER=viasocket` it is the backup, used once in the same run **only** when viaSocket did not deliver a usable answer: timeout, network failure, 5xx, 429, viaSocket credentials rejected, prose/truncated/tool-call answer, or an answer that fails structured-output validation. Never for a refusal or rejected request (400/422), an error in TeamPulse's own request, an unexpected exception, or any TeamPulse authorization, permission or business rule (those are checked before any provider is called), and the card says "viaSocket AI failed — answered by the anthropic backup" |
+| `ANTHROPIC_API_KEY` | Server-side key (never sent to the browser). With `AI_PROVIDER=viasocket` it is the backup, used once in the same run **only** when viaSocket did not deliver a usable answer: timeout, network failure, 5xx, 429, viaSocket credentials rejected, prose/truncated/tool-call answer, or an answer that fails structured-output validation. Never for a refusal or rejected request (400/422), an error in KONVO's own request, an unexpected exception, or any KONVO authorization, permission or business rule (those are checked before any provider is called), and the card says "viaSocket AI failed — answered by the anthropic backup" |
 | `AI_MODEL` | Default `claude-opus-5-5` |
 | `AI_EFFORT` | `low` · `medium` (default) · `high` |
 | `AI_TIMEOUT_MS` | Default 120000 |

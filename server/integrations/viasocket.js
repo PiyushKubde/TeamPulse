@@ -1,5 +1,5 @@
 // The one viaSocket client, server only: viasocket-apps 0.19 (https://viasocket.com/docs/skill.md?format=sdk).
-// Apps are named by slug, actions and triggers by key with a pinned version. Everything TeamPulse asks of viaSocket
+// Apps are named by slug, actions and triggers by key with a pinned version. Everything KONVO asks of viaSocket
 // goes through this one object, so tests can pass a stand-in (never counted as a live test).
 import { ViaSocket } from 'viasocket-apps'
 

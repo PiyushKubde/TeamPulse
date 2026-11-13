@@ -1,8 +1,10 @@
-# TeamPulse
+# KONVO
+
+**AI Work Intelligence Platform** — From conversations to contribution.
 
 Team task management and impact tracking. **More tasks do not mean more productivity — value matters more than task count.**
 
-TeamPulse helps managers see what each person is working on, what is pending, blocked, overdue or waiting for review, where people need help — and which meaningful, *verified* outcomes they delivered. Task counts are shown only as operational information; there is no productivity score.
+KONVO helps managers see what each person is working on, what is pending, blocked, overdue or waiting for review, where people need help — and which meaningful, *verified* outcomes they delivered. Task counts are shown only as operational information; there is no productivity score.
 
 ## What is in the MVP
 

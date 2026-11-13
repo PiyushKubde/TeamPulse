@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>KONVO</title>
+  <style>
+    .tile { fill: #111111; }
+    .k { fill: #FFFFFF; }
+    @media (prefers-color-scheme: dark) { .tile { fill: #FFFFFF; } .k { fill: #111111; } }
+  </style>
+  <rect class="tile" width="32" height="32" rx="5"/>
+  <path class="k" transform="translate(16 16) scale(1.18) translate(-16 -16)" d="M9.07 7.5H12.87V12.2L17.57 7.5H22.94L14.44 16L22.94 24.5H17.57L12.87 19.8V24.5H9.07Z"/>
+</svg>

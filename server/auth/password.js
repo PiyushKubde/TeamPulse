@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto'
 import { invalid } from '../errors.js'
 
 const PARAMS = { parallelism: 1, iterations: 2, memorySize: 19456, hashLength: 32, outputType: 'encoded' }
-const COMMON = new Set(['password', 'password1', 'password123', '123456789012', 'qwertyuiop12', 'letmein12345', 'iloveyou1234', 'welcome12345', 'teampulse123', 'admin1234567', 'changeme1234'])
+const COMMON = new Set(['password', 'password1', 'password123', '123456789012', 'qwertyuiop12', 'letmein12345', 'iloveyou1234', 'welcome12345', 'teampulse123', 'konvo1234567', 'admin1234567', 'changeme1234'])
 
 export const hashPassword = (password) => argon2id({ password, salt: randomBytes(16), ...PARAMS })
 

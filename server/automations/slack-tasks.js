@@ -1,6 +1,6 @@
 // Slack message → task. Deterministic, rule-based extraction: nothing is sent to an AI provider (so no privacy approval is
 // needed) and every result is labelled extraction "deterministic". The tagged person owns the task only when their Slack id
-// is mapped to a TeamPulse person by a manager; the extractor never invents an owner, deadline, priority or outcome.
+// is mapped to a KONVO person by a manager; the extractor never invents an owner, deadline, priority or outcome.
 import { now, transaction, uuid } from '../db.js'
 import { loadContext, assignableUserIds, isManager } from '../access.js'
 import { createExternalRequest } from '../services/requests.js'
@@ -188,7 +188,7 @@ export function purgeIgnoredText(db, days = IGNORED_TEXT_RETENTION_DAYS) {
 
 // ---------- the intake ----------
 const WHY = {
-  unmapped: 'is not mapped to a TeamPulse person yet',
+  unmapped: 'is not mapped to a KONVO person yet',
   unconfirmed: 'only has an unconfirmed claim on that Slack identity',
   workspace_mismatch: 'is mapped to a Slack user in a different workspace',
   inactive: 'is no longer an active member'
@@ -210,7 +210,7 @@ export function processSlackTask(db, sub, p, { nowMs = Date.now() } = {}) {
   const senderName = (senderUserId && db.prepare('SELECT name FROM users WHERE id = ?').get(senderUserId)?.name) || p.requester || null
   const save = (outcome, reason, extra = {}) => {
     // Task messages keep their text as the task's source. Other messages keep a short excerpt (so a later thread reply can use
-    // its parent as context) that the scheduled job erases after IGNORED_TEXT_RETENTION_DAYS; bot and TeamPulse messages keep nothing.
+    // its parent as context) that the scheduled job erases after IGNORED_TEXT_RETENTION_DAYS; bot and KONVO messages keep nothing.
     const keepText = !p.ignore
     const excerpt = outcome === 'IGNORED' ? 500 : 4000
     db.prepare(`INSERT INTO slack_intake_items (id, org_id, subscription_id, external_ref, channel_id, message_ts, thread_ts, workspace_id, sender_slack_id, sender_user_id, sender_name, mentions, permalink, text, outcome, reason, extraction, extracted, task_id, request_id, created_at)

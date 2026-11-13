@@ -3,7 +3,7 @@
 // outcome" — instead of many separate events.
 //
 // Facts and interpretation stay apart: every step is a recorded fact (an event, a commit, a review, an outcome
-// record) with its source and original author; the STAGE a step is placed in is TeamPulse's rule-based reading,
+// record) with its source and original author; the STAGE a step is placed in is KONVO's rule-based reading,
 // marked as such. Missing stages are listed as missing — never filled in. Nothing here scores anything; the
 // assessment shown is the Phase 1 engine's, unchanged.
 import { json } from '../db.js'
@@ -148,7 +148,7 @@ export function taskJourney(db, ctx, taskId) {
     related,
     assessment: a ? { id: a.id, complexity: c?.state === 'assessed' ? `L${c.level}` : null, evidenceState: a.evidence_state, managerStatus: a.manager_status, employeeStatus: a.employee_status, provider: a.provider, simulated: Boolean(json(a.context_json, {}).simulated) } : null,
     outcome: impacts.some((r) => r.verification_status === 'VERIFIED') ? 'verified' : impacts.length ? 'claimed' : 'none',
-    note: 'Each step is a recorded fact with its source and author. The stage it sits in is TeamPulse’s rule-based reading. Missing steps are listed, never filled in.'
+    note: 'Each step is a recorded fact with its source and author. The stage it sits in is KONVO’s rule-based reading. Missing steps are listed, never filled in.'
   }
 }
 

@@ -1,5 +1,7 @@
 # TeamPulse — Product Requirements & Implementation Audit
 
+> The product has since been renamed **KONVO**. This audit is a dated record of the system as it was on 2026-11-09, so it keeps the name, URLs and identifiers of that time.
+
 Audit date: 2026-11-09 · Branch `claude/teampulse-mvp` @ `bdee339` · Production https://teampulse.embarko.app (running `b601638`, same application code as `bdee339`; `bdee339` only changed docs) · `main` @ `8b10bf8` (older).
 Method: code inspection, local automated tests, local browser crawl of every screen, production smoke tests, production logs and schedule history, live viaSocket calls with the product's own keys. **No application code was changed for this audit.** No real Slack messages or emails were sent.
 

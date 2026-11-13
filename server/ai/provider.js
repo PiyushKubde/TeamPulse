@@ -17,7 +17,7 @@ export class ProviderError extends Error {
 
 // The only failures that may go to the backup provider: the primary provider did not deliver a usable answer.
 // Never: refusals or rejected requests (400/422), our own client-side errors, unexpected exceptions — and never
-// TeamPulse authorization/permission/business-rule errors, which are raised before any provider is called.
+// KONVO authorization/permission/business-rule errors, which are raised before any provider is called.
 export const BACKUP_ON = new Set(['timeout', 'network', 'provider_error', 'rate_limited', 'auth', 'invalid_output', 'truncated'])
 
 export function createAiProvider(cfg, { vs = null } = {}) {
@@ -98,7 +98,7 @@ function mapViasocketError(error) {
   if (status === 429) return new ProviderError('rate_limited', 'viaSocket AI is rate limiting requests.', true)
   if (status && status >= 500) return new ProviderError('provider_error', `viaSocket AI failed (${status}).`, true)
   // The SDK uses status null both for network failures and for its own input checks ("ai.send: …", our bug).
-  if (status === null && /^ai\.send:/.test(String(error?.message))) return new ProviderError('client_error', `TeamPulse built an invalid viaSocket AI request: ${String(error.message).slice(0, 160)}`, false)
+  if (status === null && /^ai\.send:/.test(String(error?.message))) return new ProviderError('client_error', `KONVO built an invalid viaSocket AI request: ${String(error.message).slice(0, 160)}`, false)
   if (status === null) return new ProviderError('network', 'Could not reach viaSocket AI.', true)
   return new ProviderError('provider_error', `viaSocket AI returned ${status}.`, false)
 }

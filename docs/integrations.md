@@ -15,11 +15,11 @@ Flow: `/auth/google` stores state, nonce and a PKCE verifier server-side (10 min
 
 ## ViaSocket
 
-TeamPulse uses `viasocket-apps` **0.19.0** (apps by slug, actions and triggers by key with a pinned version). The plan,
+KONVO uses `viasocket-apps` **0.19.0** (apps by slug, actions and triggers by key with a pinned version). The plan,
 every value and who supplies it: [`viasocket-plan.md`](../viasocket-plan.md). Keys: `VIASOCKET_ORG_ID`,
 `VIASOCKET_PROJECT_ID`, `VIASOCKET_EMBED_SECRET` (server only).
 
-| | What | Whose account | Where in TeamPulse |
+| | What | Whose account | Where in KONVO |
 | --- | --- | --- | --- |
 | A1 | Task assigned to me → Slack DM / channel or Gmail | the person's own | Settings → Profile → My notifications |
 | A2 | Task assigned in my team → team channel / DM me / email assignee / email me | the manager's own | Automation Center → Ready-made |
@@ -27,7 +27,7 @@ every value and who supplies it: [`viasocket-plan.md`](../viasocket-plan.md). Ke
 | C | Gmail label / Slack channel → **pending** task requests | the manager's own | Automation Center → Ready-made → Gmail / Slack intake |
 | D | Full builder; restricted builders from My Tasks, Team Tasks, Reports | the person's own | Automation Center → Advanced builder; "Automate" buttons |
 
-Isolation: every connection, enabled flow (`script_id`), subscription and flow belongs to one TeamPulse user id; the
+Isolation: every connection, enabled flow (`script_id`), subscription and flow belongs to one KONVO user id; the
 server checks ownership before every run; only the per-user embed token reaches the browser.
 Loops and duplicates: every outgoing message carries "Sent by TeamPulse" and the intake ignores it; Slack bot posts and
 thread replies are ignored; an intake channel can never also be an outgoing channel; each email/message creates at most
@@ -38,7 +38,7 @@ one request (`externalRef` = message id); intake never assigns or approves.
 M91 rings a person's phone (through silent mode) until they answer, and returns the answer to the software.
 Implemented against the official contract, https://m91-api.msg91.com/api/public/api.md (Platform API, read 2026-11-09):
 
-| Step | Call | TeamPulse |
+| Step | Call | KONVO |
 | --- | --- | --- |
 | Invite a person | `POST /api/v1/recipients {phone, label}` | when someone saves a phone in *Settings → Profile*; they must accept in the M91 app |
 | Raise an alert | `POST /api/v1/alerts {phone, title, description, severity, responseOptions, other, isAutoClose, customId, callbackUrl}` | queued per alert rule with M91 switched on; `customId` = stable hash per condition and person, so repeats never ring twice |
@@ -51,9 +51,9 @@ Failure handling: 429, 5xx and network errors retry with backoff (1, 2, 4, 8 min
 
 ### Channel mode (send link) — configured for "New test"
 
-Contract: https://m91-api.msg91.com/llms.txt (read 2026-11-09). With `M91_SEND_LINK` set, TeamPulse alerts **one M91 channel** instead of individual phones:
+Contract: https://m91-api.msg91.com/llms.txt (read 2026-11-09). With `M91_SEND_LINK` set, KONVO alerts **one M91 channel** instead of individual phones:
 
-| Step | Call | TeamPulse |
+| Step | Call | KONVO |
 | --- | --- | --- |
 | Connection test | `GET <link>` (no `title` → raises nothing) | used once to confirm the channel: **"New test"** (public), confirmed by the owner on 2026-11-09 |
 | Raise an alert | `POST <link> {title, description, severity, responseOptions, other, isAutoClose, customId, callbackUrl}` | same queue, retries and per-rule M91 switch; the title names the person it is about; `customId` is per **condition** (not per person), so one condition rings the channel once |

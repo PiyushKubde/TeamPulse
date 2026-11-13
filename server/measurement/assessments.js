@@ -147,7 +147,7 @@ export function analyseTask(db, ctx, provider, taskId, { trigger = 'manual', mod
 }
 
 /**
- * Exactly what would be sent to the AI for this task — built from existing TeamPulse data only, nothing fetched,
+ * Exactly what would be sent to the AI for this task — built from existing KONVO data only, nothing fetched,
  * nothing written, no model call. For checking a task before a supervised test.
  */
 export function previewAnalysis(db, ctx, provider, taskId, mode = { mode: 'on', tasks: new Map() }) {

@@ -11,7 +11,7 @@ With a real provider configured, `AI_MODE` defaults to **supervised**:
 | Explicitly selected task | Only task ids listed in `AI_SUPERVISED_TASKS` can be analysed; every other task gets "not selected. Nothing was sent." |
 | Correct organization and owner | Each entry is `taskId:owner-email`. The task must be visible to the admin in their own organization, and its owner's email must match, or the request is refused before anything is sent |
 | Who can start it | Admins only |
-| Existing evidence only | The evidence pack is built from TeamPulse records. External sources: 0. Files and links are not opened. Names are left out |
+| Existing evidence only | The evidence pack is built from KONVO records. External sources: 0. Files and links are not opened. Names are left out |
 | No external app retrieval | No ViaSocket or connector calls in the analysis path |
 | No M91, email or Slack | Supervised runs emit **no event**: no in-app notification, no M91 delivery, no ViaSocket flow, no outbox row. Automatic analysis on submit/approve is off |
 | No other data change | One `ai_evaluation_runs` row, one `contribution_assessments` row with its dimension rows, one `assessment.created` audit row. The task itself is untouched (tested) |
@@ -52,7 +52,7 @@ The startup log should say: `AI work analysis: viasocket, model anthropic/claude
 3. Check:
    - The card shows "Live AI · viaSocket AI · anthropic/claude-sonnet-5-5", or "viaSocket AI failed — answered by the anthropic backup".
    - Every evidence chip links to something real on the task.
-   - "Rules TeamPulse applied" is reasonable.
+   - "Rules KONVO applied" is reasonable.
    - Nothing is claimed that the task does not show.
    - Impact is labelled as estimated unless an outcome is verified.
 4. Record findings next to the eval dataset expectations.

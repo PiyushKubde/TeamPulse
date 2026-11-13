@@ -1,4 +1,4 @@
-// TeamPulse browser app. Talks only to this server's /api; the server decides every permission.
+// KONVO browser app. Talks only to this server's /api; the server decides every permission.
 import { api, html, raw, esc, avatar, loading, errorBlock, toast, icon, themePref, setThemePref } from './ui.js'
 import { renderLogin, renderWelcome, renderSignup, renderForgot, renderReset, renderVerify, renderInviteAccept } from './views/onboarding.js'
 import { renderLanding } from './views/landing.js'
@@ -16,8 +16,13 @@ import { renderAssistant, renderCopilot } from './views/assistant.js'
 import { renderContributions, renderJourney } from './views/journeys.js'
 import { renderReviews } from './views/reviews.js'
 import { renderSlackIntake } from './views/assignments.js'
+import { BRAND, logoMark } from './brand.js'
 
-const LOGO = raw(`<svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--logo-bg)"/><path d="M6 17h5l3-7 4 13 3-6h5" fill="none" stroke="var(--logo-fg)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`)
+const LOGO = raw(logoMark(28))
+
+// The document title follows the page: "Tasks · KONVO", and the full product line on public pages.
+const setTitle = (label) => { document.title = label ? `${label} · ${BRAND.name}` : `${BRAND.name} — ${BRAND.category}` }
+const titleFor = (key) => [...navItems(), ...footItems()].find((n) => n.key === key)?.label || null
 
 export const app = {
   session: null,
@@ -78,7 +83,7 @@ function shell(active) {
   const tabs = navItems().filter((n) => n.tab)
   return html`<div class="shell" id="shell">
     <aside class="sidebar" id="sidebar" aria-label="Main navigation">
-      <a class="logo" href="#/dashboard">${LOGO}<span>TeamPulse</span></a>
+      <a class="logo" href="#/dashboard">${LOGO}<span class="wordmark">${BRAND.name}</span></a>
       <div class="org-name" title="${m.orgName}"><span class="org-dot" aria-hidden="true">${(m.orgName || '?').slice(0, 1).toUpperCase()}</span><span>${m.orgName}</span></div>
       <nav class="nav" id="nav">${navItems().map((n) => (n.section ? html`<div class="nav-section">${n.section}</div>` : navLink(n, active)))}</nav>
       <div class="sidebar-foot">
@@ -89,7 +94,7 @@ function shell(active) {
     <div class="workspace">
       <header class="topbar">
         <button class="icon-btn" id="nav-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="sidebar">${icon('menu')}</button>
-        <a class="logo" href="#/dashboard">${LOGO}<span>TeamPulse</span></a>
+        <a class="logo" href="#/dashboard">${LOGO}<span class="wordmark">${BRAND.name}</span></a>
         <a class="icon-btn" href="#/alerts" aria-label="Alerts">${icon('alerts')}${app.counts.unread ? html`<span class="dot" data-count="unread">${app.counts.unread}</span>` : ''}</a>
         <button class="profile-mini" id="profile-btn-m" data-profile aria-haspopup="menu" aria-expanded="false" aria-controls="profile-menu" aria-label="Account and theme">${avatar(me.name, me.pictureUrl)}</button>
       </header>
@@ -213,45 +218,60 @@ const ROUTES = [
 ]
 
 let currentShellKey = null
+// Every navigation paints into an element of its own. A page that is still loading when the person moves on keeps writing into the
+// element it was given, which has been replaced by then, so it can no longer paint over (or look up elements of) the page opened after it.
+let navSeq = 0
+function claimRoot() {
+  const old = document.getElementById('root')
+  const fresh = old.cloneNode(false)
+  old.replaceWith(fresh)
+  return fresh
+}
 async function route() {
-  const root = document.getElementById('root')
+  const nav = ++navSeq
   const [path, query = ''] = location.hash.split('?')
   const q = new URLSearchParams(query)
   if (!app.session) app.session = await api('/api/session')
+  if (nav !== navSeq) return // a newer navigation began while the session loaded: it paints, this one must not
   const s = app.session
   // Invitation pages are handled before anything else — they work for signed-in and signed-out users.
   if (path.startsWith('#/invite/')) {
     sessionStorage.setItem('tp_invite', path.slice('#/invite/'.length))
     currentShellKey = null
-    return renderInviteAccept(root, path.slice('#/invite/'.length))
+    setTitle('Accept invitation')
+    return renderInviteAccept(claimRoot(), path.slice('#/invite/'.length))
   }
   // Links from emails work whether or not someone is signed in on this browser.
-  if (path.startsWith('#/verify/')) { currentShellKey = null; return renderVerify(root, path.slice('#/verify/'.length)) }
-  if (path.startsWith('#/reset/')) { currentShellKey = null; return renderReset(root, path.slice('#/reset/'.length)) }
+  if (path.startsWith('#/verify/')) { currentShellKey = null; setTitle('Confirm your email'); return renderVerify(claimRoot(), path.slice('#/verify/'.length)) }
+  if (path.startsWith('#/reset/')) { currentShellKey = null; setTitle('Reset your password'); return renderReset(claimRoot(), path.slice('#/reset/'.length)) }
   if (!s.user) {
     currentShellKey = null
-    if (path === '#/login') return renderLogin(root, q)
-    if (path === '#/signup') return renderSignup(root)
-    if (path === '#/forgot') return renderForgot(root)
-    if (path === '' || path === '#/' || path === '#/landing') return renderLanding(root)
+    if (path === '#/login') { setTitle('Log in'); return renderLogin(claimRoot(), q) }
+    if (path === '#/signup') { setTitle('Create your account'); return renderSignup(claimRoot()) }
+    if (path === '#/forgot') { setTitle('Reset your password'); return renderForgot(claimRoot()) }
+    setTitle(null)
+    if (path === '' || path === '#/' || path === '#/landing') return renderLanding(claimRoot())
     // Any other unknown path for unauthenticated users → landing
-    return renderLanding(root)
+    return renderLanding(claimRoot())
   }
-  if (!s.membership) { currentShellKey = null; return renderWelcome(root) }
+  if (!s.membership) { currentShellKey = null; setTitle('Welcome'); return renderWelcome(claimRoot()) }
   if (path === '' || path === '#/' || path === '#/landing' || path === '#/login' || path === '#/signup' || path === '#/forgot' || path === '#/welcome') { location.replace('#/dashboard'); return }
   const hit = ROUTES.map(([re, key, fn]) => { const m = path.match(re); return m ? { key, view: fn(m) } : null }).find(Boolean)
   let key = hit?.key || 'dashboard'
   if (app.isManager && path.startsWith('#/tasks/')) key = 'team-tasks'
   if (app.isManager && path.startsWith('#/contribution/')) key = 'intelligence'
+  setTitle(titleFor(key))
   if (currentShellKey === null) {
-    root.innerHTML = shell(key)
+    claimRoot().innerHTML = shell(key)
     wireShell()
     refreshCounts()
   } else {
     markActive(key)
   }
   currentShellKey = key
-  const main = document.getElementById('main')
+  const previous = document.getElementById('main')
+  const main = previous.cloneNode(false)
+  previous.replaceWith(main)
   main.innerHTML = loading().toString()
   if (!hit) { main.innerHTML = html`<div class="empty"><h3>Page not found</h3><p><a href="#/dashboard">Go to the dashboard</a></p></div>`.toString(); return }
   // Manager-only screens: a clear message instead of an error (the server refuses the data anyway).

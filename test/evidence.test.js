@@ -1,6 +1,6 @@
 // Sprint 2: external evidence from GitHub, Slack, Gmail, Google Calendar and Google Sheets. viaSocket is a stand-in
 // gateway (mocked responses shaped like the catalog's sample_output); events reach the real webhook with the bearer
-// token from the handler code TeamPulse gave viaSocket. No live integration is claimed by these tests.
+// token from the handler code KONVO gave viaSocket. No live integration is claimed by these tests.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { now, uuid } from '../server/db.js'
@@ -94,7 +94,7 @@ test('GitHub: PRs, commits and review comments ingested; merge updates the same 
   } finally { await t.close() }
 })
 
-test('Slack: channel messages and thread replies; bots, TeamPulse posts and DMs ignored; deleted messages handled', async () => {
+test('Slack: channel messages and thread replies; bots, KONVO posts and DMs ignored; deleted messages handled', async () => {
   const { t, vs, s } = await setup()
   try {
     const conn = connect(t, vs, s, s.employee, 'slack')
@@ -106,7 +106,7 @@ test('Slack: channel messages and thread replies; bots, TeamPulse posts and DMs 
     const [msgs, threads] = tokensOf(vs)
     await deliver(t, msgs, SLACK('1762500000.000100', 'Root cause: the queue consumer restarts mid-batch.'))
     await deliver(t, threads, SLACK('1762500100.000200', 'Pushed a fix for the redelivery case.', 'U0EVE0001', { thread_ts: '1762500000.000100' }))
-    for (const ignored of [SLACK('1762500200.0003', 'Deploy finished', 'U0BOT', { bot_id: 'B1' }), SLACK('1762500300.0004', 'Weekly report\n_Sent by TeamPulse_'), SLACK('1762500400.0005', 'joined', 'U0X', { subtype: 'channel_join' })]) {
+    for (const ignored of [SLACK('1762500200.0003', 'Deploy finished', 'U0BOT', { bot_id: 'B1' }), SLACK('1762500300.0004', 'Weekly report\n_Sent by TeamPulse_'), SLACK('1762500350.00041', 'Weekly report\n_Sent by KONVO_'), SLACK('1762500400.0005', 'joined', 'U0X', { subtype: 'channel_join' })]) {
       assert.equal((await deliver(t, msgs, ignored)).body.status, 'ignored')
     }
     const rows = ev(t)

@@ -1,6 +1,6 @@
-// D. Selected viaSocket apps in context. From a TeamPulse screen a user opens the prebuilt UI restricted to the few
-// apps and events that make sense there (filteredServices); the flow they publish starts from a TeamPulse event,
-// which TeamPulse POSTs to that flow's own URL — only that user's own events.
+// D. Selected viaSocket apps in context. From a KONVO screen a user opens the prebuilt UI restricted to the few
+// apps and events that make sense there (filteredServices); the flow they publish starts from a KONVO event,
+// which KONVO POSTs to that flow's own URL — only that user's own events.
 // https://viasocket.com/docs/embed.md?format=sdk — sections 1, 2, 4a
 import { now } from '../db.js'
 import { AppError, invalid } from '../errors.js'
@@ -67,7 +67,7 @@ export async function contextEmbed(vs, ctx, key, { app } = {}) {
   }
 }
 
-/** Sends one TeamPulse event to every active flow the user built for that context. Logged; never throws. */
+/** Sends one KONVO event to every active flow the user built for that context. Logged; never throws. */
 export async function dispatchContext(db, vs, { orgId, userId, context, payload }) {
   if (!vs.configured) return 0
   const flows = db.prepare(`SELECT * FROM embed_flows WHERE org_id = ? AND user_id = ? AND context = ? AND status = 'active' AND webhook_url IS NOT NULL`).all(orgId, userId, context)

@@ -63,15 +63,16 @@ const attempt = async (fn, message, after) => {
 // ---------- "Awaiting your answer": dashboards and My tasks ----------
 /** What waits on this person: tasks to accept, transfers offered to them, overdue work needing an explanation. Renders nothing when clear. */
 export async function renderInbox(box) {
-  if (!box) return
+  if (!box?.isConnected) return // the page this belonged to is gone
   let inbox
-  try { inbox = await api('/api/assignments/inbox') } catch (e) { box.innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString(); return }
+  try { inbox = await api('/api/assignments/inbox') } catch (e) { if (!box.isConnected) return; box.innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString(); return }
   let explain = []
   try {
     const overdue = await api('/api/tasks?view=mine&condition=overdue')
     const checked = await Promise.all(overdue.slice(0, 6).map((t) => api(`/api/tasks/${t.id}/workflow`).then((w) => (w.deadline.explanationRequired.length ? t : null)).catch(() => null)))
     explain = checked.filter(Boolean)
   } catch { /* the explanation prompts are also on each task */ }
+  if (!box.isConnected) return // the page was replaced while this loaded
   const { awaitingAcceptance: waiting, transfersOfferedToMe: offered, transfersIProposed: proposed, declinedByMe: declined, candidates } = inbox
   if (!waiting.length && !offered.length && !proposed.length && !explain.length && !declined.length) { box.innerHTML = ''; return }
   box.innerHTML = html`<section class="card" aria-labelledby="inbox-h" style="margin-bottom:16px"><div class="card-head"><div><h2 id="inbox-h"><span class="card-icon warn">${icon('inbox')}</span>Waiting for your answer</h2><p>Accepting is one click. You can decline with a reason, or hand a task to a teammate. None of this is held against you.</p></div></div>

@@ -74,7 +74,7 @@ test('1a. backup only for provider failures, timeouts, malformed answers and val
   } finally { await api.close() }
 })
 
-test('1b. TeamPulse authorization, permission and business-rule refusals call no provider at all', async () => {
+test('1b. KONVO authorization, permission and business-rule refusals call no provider at all', async () => {
   const api = await fakeAnthropic()
   const vs = stubVs(() => ({ content: VALID, finishReason: 'completed' }))
   const t = await startApp({ ai: provider(vs, api), cfgOverrides: { ai: { mode: 'supervised' } } })

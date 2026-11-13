@@ -7,7 +7,7 @@
 // issue comments, releases; Slack thread replies) the mapping reads the standard GitHub/Slack API shapes and is
 // checked against a real sample from the person's own scope before the trigger is switched on (sources.js).
 // Nothing is guessed silently: an event without an id is rejected, without an author it is "unknown".
-import { MARKER } from '../integrations/actions.js'
+import { isOwnMessage } from '../integrations/actions.js'
 
 const str = (...vals) => vals.find((x) => (typeof x === 'string' && x.trim()) || typeof x === 'number')
 const s = (...vals) => { const v = str(...vals); return v === undefined ? null : String(v).trim() }
@@ -124,7 +124,7 @@ export const slack = {
     if (m.bot_id || m.bot_profile || m.subtype === 'bot_message') return { ignore: 'posted by a bot' }
     if (m.subtype && !['thread_broadcast', 'file_share'].includes(m.subtype)) return { ignore: `Slack ${m.subtype}` }
     const text = s(m.text)
-    if (text && text.includes(MARKER)) return { ignore: 'sent by TeamPulse' }
+    if (text && isOwnMessage(text)) return { ignore: 'sent by KONVO' }
     const ts = s(m.ts, m.event_ts)
     if (!channel || !ts) return { error: 'message without channel or ts' }
     if (!text && !(Array.isArray(m.files) && m.files.length)) return { ignore: 'empty message' }
@@ -150,7 +150,7 @@ const emailOf = (v) => { const t = s(v?.email, v?.address, v); if (!t) return nu
 const emailsOf = (v) => (Array.isArray(v) ? v : v == null ? [] : typeof v === 'string' ? v.split(',') : [v]).map(emailOf).filter(Boolean)
 export const gmail = {
   app: 'gmail', label: 'Gmail',
-  scopeHelp: 'Choose one Gmail label (e.g. "Work/TeamPulse"). Only emails with that label are collected — never your whole mailbox.',
+  scopeHelp: 'Choose one Gmail label (e.g. "Work/KONVO"). Only emails with that label are collected — never your whole mailbox.',
   pick: { field: 'searchFields.label', key: 'New_Email_Arrives', version: 'v11', existing: { thread: 'include_replies', query: ['label'] } },
   scopeFrom: ({ value, label }) => ({ scope: { label: value }, label: `label “${label || value}”` }),
   kinds: {
@@ -167,7 +167,7 @@ export const gmail = {
     const from = emailOf(e.From) || emailOf(h.From)
     const to = emailsOf(e.To).concat(emailsOf(h.To)).filter((x, i, a) => a.indexOf(x) === i).slice(0, 8)
     const body = stripQuoted(s(e.bodyPlain, e.textPlain, e.snippet))
-    if ((body || '').includes(MARKER)) return { ignore: 'sent by TeamPulse' }
+    if (isOwnMessage(body)) return { ignore: 'sent by KONVO' }
     return [{
       externalId: `gmail:${id}`, kind: kind === 'sent' ? 'email_sent' : 'email_received', actorIdentity: kind === 'sent' ? null : from,
       occurredAt: iso(e.rawInternalDate) || iso(e.date) || iso(h.Date), title: subject || '(no subject)', content: clip(body, 1000),

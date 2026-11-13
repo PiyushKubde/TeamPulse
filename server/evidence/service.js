@@ -15,7 +15,7 @@ const inScope = (db, ctx, uid) => Boolean(uid) && (uid === ctx.user.id || isAdmi
 export const canSeeEvidence = (db, ctx, e) => e.org_id === ctx.orgId && (inScope(db, ctx, e.collector_id) || inScope(db, ctx, e.actor_user_id))
 
 const VERIFICATION_TEXT = { system_recorded: 'Recorded by the app (observed fact)', self_reported: 'Written by a person (their account, not proof)', reported_figure: 'A reported figure (not independently verified)' }
-const ATTRIBUTION_TEXT = { self: 'by the person who collected it', member: 'by another member', external: 'by someone outside the organization', unknown: 'author not known to TeamPulse', disputed: 'attribution disputed' }
+const ATTRIBUTION_TEXT = { self: 'by the person who collected it', member: 'by another member', external: 'by someone outside the organization', unknown: 'author not known to KONVO', disputed: 'attribution disputed' }
 
 export function presentEvidence(db, e, { withLinks = true } = {}) {
   const links = withLinks ? db.prepare(`SELECT l.*, t.title AS task_title, t.assignee_id FROM evidence_task_links l JOIN tasks t ON t.id = l.task_id WHERE l.evidence_id = ? AND l.status != 'rejected' ORDER BY l.confidence DESC`).all(e.id) : []

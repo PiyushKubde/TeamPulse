@@ -1,6 +1,6 @@
-# Deploying TeamPulse on Embarko
+# Deploying KONVO on Embarko
 
-TeamPulse is one Node server app. Embarko installs dependencies and runs `npm start`, which listens on `PORT` and `0.0.0.0`, applies migrations to the SQLite database in `DATA_DIR`, and serves the frontend.
+KONVO is one Node server app. Embarko installs dependencies and runs `npm start`, which listens on `PORT` and `0.0.0.0`, applies migrations to the SQLite database in `DATA_DIR`, and serves the frontend.
 
 ## 1. Deploy
 

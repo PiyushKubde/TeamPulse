@@ -1,7 +1,7 @@
-// Evidence sources: a person chooses, on their OWN connection, what TeamPulse may collect (a repository, channels, a
-// Gmail label, a calendar, one sheet) and which event kinds. For each kind TeamPulse subscribes the viaSocket trigger
+// Evidence sources: a person chooses, on their OWN connection, what KONVO may collect (a repository, channels, a
+// Gmail label, a calendar, one sheet) and which event kinds. For each kind KONVO subscribes the viaSocket trigger
 // on that connection (user.subscribe — the same documented mechanism as the Gmail/Slack intake). viaSocket runs the
-// handler for each event and posts it to TeamPulse with a bearer token for that one subscription.
+// handler for each event and posts it to KONVO with a bearer token for that one subscription.
 // Initial sync = the latest real event from the scope (catalog sampleEvent, read-only), which also proves the
 // mapping; there is no full-history backfill by design. Nothing is ever written to the external apps.
 import { createHash, randomBytes } from 'node:crypto'
@@ -107,7 +107,7 @@ export async function createSource(db, vs, ctx, body, { appUrl }) {
     const hasSample = sample && typeof sample === 'object' && Object.keys(sample).length > 0
     if (hasSample) {
       const mapped = c.normalize(kind, sample, scope)
-      if (mapped?.error) { results.push({ kind, status: 'unmapped', error: `TeamPulse could not read this ${c.label} event (${mapped.error}), so it was not switched on.` }); syncRun(db, ctx.orgId, id, 'initial_sample', 'FAILED', { error: mapped.error }); continue }
+      if (mapped?.error) { results.push({ kind, status: 'unmapped', error: `KONVO could not read this ${c.label} event (${mapped.error}), so it was not switched on.` }); syncRun(db, ctx.orgId, id, 'initial_sample', 'FAILED', { error: mapped.error }); continue }
     }
     // 2. Subscribe the trigger on the person's own connection.
     const subId = uuid()
@@ -117,7 +117,7 @@ export async function createSource(db, vs, ctx, body, { appUrl }) {
 return res.data`
     let created
     try {
-      created = await vs.subscribe(ctx.user.id, c.app, t.key, { authId: conn.auth_id, inputData, version: t.version, code: handler, description: `TeamPulse evidence: ${label} (${t.label})` })
+      created = await vs.subscribe(ctx.user.id, c.app, t.key, { authId: conn.auth_id, inputData, version: t.version, code: handler, description: `KONVO evidence: ${label} (${t.label})` })
     } catch (error) {
       results.push({ kind, status: 'failed', error: viasocketError(error, `switch on ${c.label} ${t.label}`).message }); syncRun(db, ctx.orgId, id, 'subscribe', 'FAILED', { error: error.message }); continue
     }

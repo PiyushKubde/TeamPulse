@@ -98,7 +98,7 @@ try {
   ok(await row.locator('text=Waiting for acceptance').isVisible(), 'row shows waiting for acceptance')
   ok(await row.locator('text=Dana Director').isVisible(), 'requester shown')
   ok(await row.locator('text=tagged Priya Sharma').isVisible(), 'tagged person shown')
-  ok(await m.isVisible('#need-manager li:has-text("not mapped to a TeamPulse person")'), 'needs-a-manager item with the reason')
+  ok(await m.isVisible('#need-manager li:has-text("not mapped to a KONVO person")'), 'needs-a-manager item with the reason')
   ok(await m.isVisible('#slack-people li:has-text("U0GHOST005")'), 'unmapped Slack id listed')
   ok(!(await m.content()).match(/leaderboard|ranking/i), 'no leaderboard or ranking')
   await m.selectOption('#f-acceptance', 'accepted')

@@ -43,7 +43,7 @@ export function loadConfig(overrides = {}) {
     mail: {
       provider: (env.MAIL_PROVIDER || '').toLowerCase(),
       from: env.MAIL_FROM || '',
-      fromName: env.MAIL_FROM_NAME || 'TeamPulse',
+      fromName: env.MAIL_FROM_NAME || 'KONVO',
       smtp: { host: env.SMTP_HOST || '', port: Number(env.SMTP_PORT) || 587, secure: env.SMTP_SECURE === 'true', user: env.SMTP_USER || '', pass: env.SMTP_PASS || '' },
       viasocket: { userId: env.MAIL_VIASOCKET_USER_ID || '', connectionId: env.MAIL_VIASOCKET_CONNECTION_ID || '' }
     },

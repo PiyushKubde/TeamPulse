@@ -1,5 +1,5 @@
 // The AI Work Assistant (employees) and the Manager Copilot. Every answer is built from records the asker may see —
-// TeamPulse tasks, events, reviews, outcomes, the Phase 1 assessments, linked evidence, signals — and every item
+// KONVO tasks, events, reviews, outcomes, the Phase 1 assessments, linked evidence, signals — and every item
 // routes to the underlying record. Questions are understood by a small, explicit intent table; nothing is invented.
 // The AI is used only for an optional write-up of a digest (never for the facts), and only through the existing
 // provider, data-policy and supervised gates. Nothing here counts activity or ranks people.
@@ -131,7 +131,7 @@ export function dayDigest(db, ctx, { day, tz, userId } = {}) {
     completed: by('completed'), delivered: by('delivered'), progressed: by('progressed'), blocked: by('blocked'),
     highlights, missing, unlinkedEvidence: unlinked.slice(0, 10).map((x) => ({ id: x.id, app: x.app, title: clip(x.title, 120), href: x.source_url || '#/evidence' })),
     priorities: priorities(db, ctx, uid), signals: uid === ctx.user.id ? listSignals(db, ctx, { scope: 'mine' }).slice(0, 6) : [],
-    basis: 'records', note: 'Built from your TeamPulse records and the evidence you collected. No score, no activity counts.'
+    basis: 'records', note: 'Built from your KONVO records and the evidence you collected. No score, no activity counts.'
   }
 }
 
@@ -186,7 +186,7 @@ export function ask(db, ctx, body = {}) {
   const intent = body.intent ? String(body.intent) : classify(question, team)
   const valid = suggestions(team).map((s) => s.intent)
   if (!intent || !valid.includes(intent)) {
-    return { intent: null, title: 'I can answer these', answer: `I answer from your TeamPulse records, so I understand a fixed set of questions${question ? ` — "${clip(question, 80)}" is not one of them yet` : ''}. Try one of these:`, items: [], suggestions: suggestions(team), basis: 'records' }
+    return { intent: null, title: 'I can answer these', answer: `I answer from your KONVO records, so I understand a fixed set of questions${question ? ` — "${clip(question, 80)}" is not one of them yet` : ''}. Try one of these:`, items: [], suggestions: suggestions(team), basis: 'records' }
   }
   return team ? teamAnswer(db, ctx, intent, body) : employeeAnswer(db, ctx, intent, body)
 }

@@ -12,8 +12,12 @@ export const ACTIONS = {
   slack_send_message: { slug: 'slack', app: 'Slack', key: 'Send_Message', version: 'v107', actionId: 'row1jrbor', check: 'check the Slack channel' }
 }
 
-/** Every message TeamPulse sends carries this line, so the intake (C) recognises and ignores its own messages. */
-export const MARKER = 'Sent by TeamPulse'
+/** Every message KONVO sends carries this line, so the intake (C) recognises and ignores its own messages. */
+export const MARKER = 'Sent by KONVO'
+/** What messages sent before the product was renamed say. They are still in Slack and Gmail, so they must still be recognised as our own. */
+export const LEGACY_MARKER = 'Sent by TeamPulse'
+/** True for a message KONVO sent, under the current or the former product name. The one place that decides it. */
+export const isOwnMessage = (text) => { const t = String(text || ''); return t.includes(MARKER) || t.includes(LEGACY_MARKER) }
 
 export async function requireActiveConnection(db, vs, ctx, connectionId, action) {
   requireViasocket(vs)
@@ -137,7 +141,7 @@ export async function slackUsers(db, vs, ctx, connectionId, { search } = {}) {
 export async function sendThrough(db, vs, ctx, config, { subject, text, to }) {
   const isGmail = config.channel === 'gmail'
   const ran = await runOnce(db, vs, ctx, config.connectionId, isGmail ? 'gmail_send_email' : 'slack_send_message',
-    isGmail ? gmailInput({ to, subject, body: `${text}\n\n${MARKER}`, fromName: 'TeamPulse' })
+    isGmail ? gmailInput({ to, subject, body: `${text}\n\n${MARKER}`, fromName: 'KONVO' })
       : slackInput({ channelId: config.slackChannelId, userId: config.slackUserId, text: `*${subject}*\n${text}\n_${MARKER}_` }))
   if (ran.outcome !== 'answered') return { status: ran.outcome === 'unknown' ? 'UNKNOWN' : 'FAILED', error: ran.reason }
   const read = isGmail ? readGmailResult(ran.result) : readSlackResult(ran.result)

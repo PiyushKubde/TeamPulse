@@ -45,7 +45,7 @@ export function insufficientAssessment(facts, task) {
   const reason = 'Not enough evidence to judge this: no description, only a short completion note, no attached evidence and no outcome record.'
   return {
     evidenceState: 'insufficient',
-    understanding: 'TeamPulse does not have enough information to understand this work yet.',
+    understanding: 'KONVO does not have enough information to understand this work yet.',
     summary: 'No assessment possible from the available evidence. This says nothing about the quality of the work — only that it is not documented.',
     complexity: { state: 'insufficient_evidence', level: null, confidence: null, reason, refs: [], source: 'rules' },
     dimensions: Object.fromEntries(RATED.map((k) => [k, { state: 'insufficient_evidence', level: null, confidence: null, reason, refs: [], source: 'rules' }])),
@@ -98,7 +98,7 @@ export function applyGuardrails(output, { pack, facts, task }) {
     return ok
   }
   const lower = (d, max, why) => {
-    if (d.state === 'assessed' && d.level > max) { notes.push(why); d.level = max; d.confidence = Math.min(d.confidence ?? 1, 0.5); d.reason = `${d.reason} [Adjusted by TeamPulse rules: ${why}]` }
+    if (d.state === 'assessed' && d.level > max) { notes.push(why); d.level = max; d.confidence = Math.min(d.confidence ?? 1, 0.5); d.reason = `${d.reason} [Adjusted by KONVO rules: ${why}]` }
   }
 
   // Complexity

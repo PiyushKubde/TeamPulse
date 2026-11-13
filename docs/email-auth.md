@@ -20,12 +20,12 @@ Set ONE provider in the app's environment (Embarko: App setup → Environment), 
 | --- | --- |
 | `MAIL_PROVIDER` | `smtp` |
 | `MAIL_FROM` | `no-reply@yourdomain.com`: must be a sender/domain verified with the provider (SPF + DKIM) |
-| `MAIL_FROM_NAME` | `TeamPulse` |
+| `MAIL_FROM_NAME` | `KONVO` |
 | `SMTP_HOST`, `SMTP_PORT` | from the provider, e.g. `smtp.postmarkapp.com`, `587` |
 | `SMTP_SECURE` | `false` for 587 (STARTTLS, enforced), `true` for 465 |
 | `SMTP_USER`, `SMTP_PASS` | the provider's SMTP credentials (secret) |
 
-**Or Gmail through ViaSocket** (`MAIL_PROVIDER=viasocket_gmail`): needs the ViaSocket keys, an active TeamPulse member
+**Or Gmail through ViaSocket** (`MAIL_PROVIDER=viasocket_gmail`): needs the ViaSocket keys, an active KONVO member
 who connected Gmail in the Automation Center (`MAIL_VIASOCKET_USER_ID` = their user id) and that connection's id
 (`MAIL_VIASOCKET_CONNECTION_ID`). Fine for a pilot; Gmail sending limits apply and mail comes from that person's address.
 

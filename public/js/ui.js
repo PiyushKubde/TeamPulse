@@ -244,7 +244,7 @@ export const requestBadge = (s) => html`<span class="badge ${({ PENDING: 'info',
 export const verifyBadge = (s) => html`<span class="badge ${({ PENDING: 'info', VERIFIED: 'ok', REJECTED: 'bad' })[s]}">${({ PENDING: 'Pending verification', VERIFIED: 'Verified', REJECTED: 'Not verified' })[s]}</span>`
 /**
  * Provenance label — where a statement comes from. The same visual language everywhere:
- * fact (recorded by TeamPulse or a connected app) · ai (an AI interpretation) · suggested (a proposal awaiting a person) ·
+ * fact (recorded by KONVO or a connected app) · ai (an AI interpretation) · suggested (a proposal awaiting a person) ·
  * self (the person's own account) · verified (a manager verified it) · unverified (a claim) · missing (no evidence yet).
  */
 const PROV = { fact: ['eye', 'From records'], ai: ['sparkles', 'AI interpretation'], suggested: ['sparkles', 'Suggested'], self: ['message', 'Your account'], verified: ['shield', 'Manager verified'], unverified: ['alert', 'Not verified yet'], missing: ['help', 'Missing'] }

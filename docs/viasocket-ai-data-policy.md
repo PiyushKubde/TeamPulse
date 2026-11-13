@@ -30,9 +30,9 @@ People's names are left out, but this is still work-performance information abou
 | Subprocessors | Calls are run on OpenAI, Anthropic or Gemini models, chosen per call. The page does not say under which terms or data-retention settings viaSocket uses those vendors. |
 | Region / location | **Not stated.** |
 | Security / access | **Not stated** — who at viaSocket can read stored threads. |
-| Web tools | The assistant's web search and browser "cannot be turned off". TeamPulse instructs the model not to use them; this cannot be enforced. |
-| Model reporting | Synchronous replies do not name the model that answered; TeamPulse records the model as requested and "not confirmed". |
-| Memory feature | A separate "AI memory" service exists. Its guide could not be read (host not reachable from this environment); TeamPulse does not use it. |
+| Web tools | The assistant's web search and browser "cannot be turned off". KONVO instructs the model not to use them; this cannot be enforced. |
+| Model reporting | Synchronous replies do not name the model that answered; KONVO records the model as requested and "not confirmed". |
+| Memory feature | A separate "AI memory" service exists. Its guide could not be read (host not reachable from this environment); KONVO does not use it. |
 
 ## Questions to send to viaSocket
 
@@ -57,4 +57,4 @@ Anthropic is used only when viaSocket fails for a provider reason. Its data hand
 - Only an administrator can start an analysis, only on tasks listed in `AI_SUPERVISED_TASKS`, and the task owner's email must match (supervised mode, the default).
 - The preview shows exactly what would be sent, without sending it.
 - Names are left out. Linked files and pages are not opened. No external sources are used.
-- Each analysis uses a fresh thread under a TeamPulse-only identifier, `teampulse-ai-<orgId>`, never an employee's own chat.
+- Each analysis uses a fresh thread under a KONVO-only identifier, `teampulse-ai-<orgId>`, never an employee's own chat.

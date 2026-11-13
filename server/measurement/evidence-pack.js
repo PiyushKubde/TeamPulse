@@ -1,4 +1,4 @@
-// Builds the evidence pack for one person's work on one task: everything TeamPulse already knows, as numbered
+// Builds the evidence pack for one person's work on one task: everything KONVO already knows, as numbered
 // references the model may cite (and nothing else), plus deterministic signals the guardrails rely on.
 // The pack is deterministic (no "now"), so identical inputs hash identically and are never analysed twice.
 //
@@ -21,7 +21,7 @@ const hostOf = (url) => { try { return new URL(url).host } catch { return null }
 // Quality problems mentioned in people's text (reviews, comments, submissions). Structured signals come first —
 // a reopening after completion and "changes requested" review decisions are recorded events, not keywords. Text is
 // only a secondary signal, so it is deliberately narrow: "added a regression test", "no regressions", "fixed the
-// failing tests" are not problems. TeamPulse has no structured test results yet (CI data would come in phase 2).
+// failing tests" are not problems. KONVO has no structured test results yet (CI data would come in phase 2).
 const QUALITY_RE = /\b(fail(?:ed|ing|s)?\s+tests?|tests?\s+(?:are\s+|were\s+|still\s+)?fail(?:ed|ing|s|ures?)?|test\s+failures?|CI\s+(?:is\s+|was\s+)?(?:failing|red|broken)|regression(?!\s+(?:tests?|suites?|coverage|checks?|testing))|regressed|broke(?:n)?\s|bug\s+(?:was\s+)?(?:re)?introduced|rolled\s+back|rollback)/gi
 const NEGATED = /\b(no|not|without|zero|fixed|fixes|fixing|resolved|resolves|addressed|prevent(?:s|ed|ing)?|avoid(?:s|ed|ing)?)\b[^.;!?]{0,25}$/i
 /** True when the text reports a quality problem that is not negated or described as fixed. Exported for tests. */
@@ -135,7 +135,7 @@ export function buildEvidencePack(db, task, subjectId) {
     add('context', { at: c.created_at, author: 'employee', selfReported: true, text: clip(c.comment, 2000) }, { label: 'Context added by the employee', taskId: task.id })
   }
 
-  // Collaboration already visible in TeamPulse: blockers of other people's tasks this person resolved, and their
+  // Collaboration already visible in KONVO: blockers of other people's tasks this person resolved, and their
   // comments on other people's tasks, while this task was open. (Message volume is never counted.)
   const from = task.started_at || task.assigned_at || task.created_at
   const to = task.completed_at || task.submitted_at || null

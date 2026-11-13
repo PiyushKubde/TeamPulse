@@ -73,7 +73,7 @@ export function handleEvent(db, e) {
       if (!task) return
       const requester = db.prepare('SELECT sender_name FROM slack_intake_items WHERE task_id = ?').get(task.id)?.sender_name
       const who = e.via === 'slack' ? `${requester || 'Someone'} tagged ${nameOf(db, e.assigneeId)} in Slack` : e.via === 'transfer' ? `${nameOf(db, e.actorId)} handed this over` : `${nameOf(db, e.actorId)} assigned ${nameOf(db, e.assigneeId)}`
-      const body = [`${who}.`, task.description ? task.description.slice(0, 280) : null, `Priority: ${task.priority.toLowerCase()}.`, task.due_at ? `Due ${dueText(task.due_at, db, task.org_id)}.` : 'No deadline set.', 'Accept, decline or transfer it in TeamPulse.'].filter(Boolean).join(' ')
+      const body = [`${who}.`, task.description ? task.description.slice(0, 280) : null, `Priority: ${task.priority.toLowerCase()}.`, task.due_at ? `Due ${dueText(task.due_at, db, task.org_id)}.` : 'No deadline set.', 'Accept, decline or transfer it in KONVO.'].filter(Boolean).join(' ')
       raiseAlert(db, { orgId: e.orgId, rule: 'task_assignment', userIds: [e.assigneeId], taskId: task.id, title: `New task: ${task.title}`, body, link: taskLink(task.id), anchor: e.assignmentId })
       return
     }

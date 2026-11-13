@@ -46,7 +46,7 @@ if (m91.status().state === 'ready') {
 
 // Events left PENDING by a previous process (crash, restart, redeploy) are replayed now; their handlers are idempotent.
 setTimeout(() => { try { const { recoverOutbox } = app.locals.events; recoverOutbox({ olderThanMs: 0 }) } catch (e) { console.error('[events] recovery failed:', e.message) } }, 2000).unref()
-const server = app.listen(cfg.port, cfg.host, () => console.log(`TeamPulse listening on http://${cfg.host}:${cfg.port}`))
+const server = app.listen(cfg.port, cfg.host, () => console.log(`KONVO listening on http://${cfg.host}:${cfg.port}`))
 
 // Local development only: Embarko runs the jobs through embarko.json schedules, never an in-process timer.
 if (cfg.localScheduler && !cfg.production) {

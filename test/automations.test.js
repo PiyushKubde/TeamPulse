@@ -1,4 +1,4 @@
-// Automation logic against a stand-in with the viasocket-apps 0.19 gateway shape. These prove TeamPulse's own rules
+// Automation logic against a stand-in with the viasocket-apps 0.19 gateway shape. These prove KONVO's own rules
 // (scoping, idempotency, loops, approval); they are NOT live viaSocket tests — those run against the real service.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -102,7 +102,8 @@ test('A1: an employee’s own Slack DM; A2: the manager’s team channel — eac
     const ch = vs.runs.find((r) => r.input.destination.messageto === 'channel')
     assert.deepEqual(dm.input.destination, { messageto: 'user', userId: ['U1'] })
     assert.match(dm.input.markdown_content, /Eve Employee, you have a new medium priority task: Fix login/)
-    assert.match(dm.input.markdown_content, /Sent by TeamPulse/)
+    assert.match(dm.input.markdown_content, /Sent by KONVO/)
+    assert.doesNotMatch(JSON.stringify(dm.input), /TeamPulse/, 'an outgoing Slack message carries the current product name only')
     assert.equal(dm.key, 'Send_Message'); assert.equal(dm.version, 'v107')
     assert.ok(dm.scriptId !== ch.scriptId, 'each person’s own enabled flow')
     assert.ok(vs.flows.get(s.employee.id).some((f) => f.id === dm.scriptId))
@@ -135,6 +136,9 @@ test('A2 via Gmail to the assignee; failures logged, retried, three in a row →
     await t.settled()
     assert.equal(vs.runs[0].input.to, s.employee.email)
     assert.equal(vs.runs[0].key, 'Send_Email'); assert.equal(vs.runs[0].version, 'v55')
+    const sentEmail = JSON.stringify(vs.runs[0].input)
+    assert.match(sentEmail, /Sent by KONVO/); assert.doesNotMatch(sentEmail, /TeamPulse/, 'an outgoing email carries the current product name only (sender name included)')
+    assert.match(sentEmail, /KONVO/)
     const list = await t.call('/api/automations', { as: s.manager })
     const ntn = list.body.automations.find((a) => a.key === 'new_task_notification')
     assert.equal(ntn.workflow.status, 'FAILED')
@@ -203,7 +207,11 @@ test('C: Gmail label / Slack channel intake → pending requests only; duplicate
     const ev = { id: 'm1', subject: 'Export is broken', from: 'Customer <c@example.com>', snippet: 'CSV export fails since Monday' }
     assert.equal((await post(gi.body.id, token, ev)).body.status, 'created')
     assert.equal((await post(gi.body.id, token, ev)).body.status, 'duplicate')
+    // Our own emails are ignored under the current name and under the name used before the rename (those are still in people's mailboxes).
     assert.equal((await post(gi.body.id, token, { id: 'm2', subject: 'New task: x', snippet: 'Hi\n\nSent by TeamPulse' })).body.status, 'ignored')
+    assert.equal((await post(gi.body.id, token, { id: 'm2b', subject: 'New task: y', snippet: 'Hi\n\nSent by KONVO' })).body.status, 'ignored')
+    assert.equal((await post(gi.body.id, token, { id: 'm2c', subject: 'Weekly summary', from: 'TeamPulse <no-reply@example.com>', snippet: 'Summary' })).body.status, 'ignored', 'former sender name')
+    assert.equal((await post(gi.body.id, token, { id: 'm2d', subject: 'Weekly summary', from: 'KONVO <no-reply@example.com>', snippet: 'Summary' })).body.status, 'ignored', 'current sender name')
     const reqs = await t.call('/api/requests', { as: s.manager })
     assert.equal(reqs.body.length, 1)
     assert.equal(reqs.body[0].status, 'PENDING'); assert.equal(reqs.body[0].source, 'external'); assert.equal(reqs.body[0].suggestedAssigneeId, null)

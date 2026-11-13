@@ -1,4 +1,4 @@
-// Slack user id → TeamPulse person, per organization (external_identities, app = 'slack').
+// Slack user id → KONVO person, per organization (external_identities, app = 'slack').
 // A person may declare their own Slack id, but a declaration is only a claim: tasks are assigned through a Slack tag
 // only when a manager confirmed the mapping (mapped_by). Display names are never used to find a person.
 import { now, uuid, json } from '../db.js'

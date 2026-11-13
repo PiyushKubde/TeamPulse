@@ -1,6 +1,6 @@
 // C. Gmail / Slack intake → PENDING task requests.
 // A manager subscribes their own Gmail (a label) or Slack (one channel) with viaSocket's trigger; the handler runs on
-// viaSocket and posts each event to TeamPulse with a bearer token for that one subscription (only its hash is stored).
+// viaSocket and posts each event to KONVO with a bearer token for that one subscription (only its hash is stored).
 // Each event becomes at most one pending task request (idempotent by message id). Nothing is ever assigned or approved.
 // https://viasocket.com/docs/skill/actions-and-events.md?format=sdk — "Events"
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
@@ -9,7 +9,7 @@ import { AppError, conflict, invalid, notFound, forbidden } from '../errors.js'
 import { isAdmin, requireManager } from '../access.js'
 import { audit } from '../services/audit.js'
 import { createExternalRequest } from '../services/requests.js'
-import { requireActiveConnection, pickOptions, MARKER } from '../integrations/actions.js'
+import { requireActiveConnection, pickOptions, isOwnMessage } from '../integrations/actions.js'
 import { requireViasocket, viasocketError } from '../integrations/errors.js'
 import { startLog, finishLog } from './engine.js'
 import * as v from '../validate.js'
@@ -56,11 +56,11 @@ export function listIntakes(db, ctx) {
   return rows.map((r) => ({ ...present(db, r), mine: r.owner_id === ctx.user.id }))
 }
 
-/** Outgoing TeamPulse posts must never land in an intake channel: refuse a Slack intake on a channel we post to. */
+/** Outgoing KONVO posts must never land in an intake channel: refuse a Slack intake on a channel we post to. */
 function assertNotOutbound(db, orgId, channelId) {
   const used = db.prepare(`SELECT config FROM automation_workflows WHERE org_id = ? AND status != 'PAUSED'`).all(orgId).some((w) => json(w.config, {}).slackChannelId === channelId)
     || db.prepare(`SELECT 1 FROM notification_prefs WHERE org_id = ? AND channel = 'slack' AND slack_mode = 'channel' AND slack_target = ?`).get(orgId, channelId)
-  if (used) throw conflict('TeamPulse already posts notifications or reports to that channel; using it for intake would turn them into new requests. Choose a separate intake channel.', 'intake_loop')
+  if (used) throw conflict('KONVO already posts notifications or reports to that channel; using it for intake would turn them into new requests. Choose a separate intake channel.', 'intake_loop')
 }
 
 /**
@@ -94,7 +94,7 @@ export async function createIntake(db, vs, ctx, body, { appUrl }) {
   const mapped = parseEvent(app, sample)
   console.log(`[intake] ${app} sample before switch-on: keys ${keyPaths(sample).slice(0, 40).join(', ')}; ${mapped.title && mapped.externalRef ? 'mapped' : 'NOT mapped'}`)
   if (!sample || !Object.keys(sample).length) throw new AppError(409, 'no_sample', `No message found in that ${app === 'gmail' ? 'label' : 'channel'} yet. Send one test message there, then switch the intake on.`)
-  if (!mapped.title || !mapped.externalRef) throw new AppError(409, 'unmapped_sample', `TeamPulse could not read a title and a message id from the latest ${t.app} message, so the intake was not switched on. Fields seen: ${keyPaths(sample).slice(0, 15).join(', ')}.`)
+  if (!mapped.title || !mapped.externalRef) throw new AppError(409, 'unmapped_sample', `KONVO could not read a title and a message id from the latest ${t.app} message, so the intake was not switched on. Fields seen: ${keyPaths(sample).slice(0, 15).join(', ')}.`)
   const dup = db.prepare(`SELECT 1 FROM intake_subscriptions WHERE org_id = ? AND owner_id = ? AND app = ? AND status IN ('ACTIVE','PAUSED') AND input_data = ?`).get(ctx.orgId, ctx.user.id, app, JSON.stringify(inputData))
   if (dup) throw conflict('You already have an intake on that label or channel.', 'intake_exists')
 
@@ -108,7 +108,7 @@ export async function createIntake(db, vs, ctx, body, { appUrl }) {
 return res.data`
   let sub
   try {
-    sub = await vs.subscribe(ctx.user.id, t.slug, t.key, { authId: conn.auth_id, inputData, version: t.version, code: handler, description: `TeamPulse intake: ${hit.label} → task requests` })
+    sub = await vs.subscribe(ctx.user.id, t.slug, t.key, { authId: conn.auth_id, inputData, version: t.version, code: handler, description: `KONVO intake: ${hit.label} → task requests` })
   } catch (error) {
     throw viasocketError(error, `switch on the ${t.app} intake`)
   }
@@ -195,14 +195,14 @@ export function parseEvent(app, raw, { threads = false } = {}) {
     const from = first(e.from, e.From, e.sender, e.senderEmail, header(h, 'from'))
     const body = first(e.textPlain, e.text, e.body, e.plainBody, e.bodyText, e.snippet, e.textHtml?.replace?.(/<[^>]+>/g, ' '))
     const id = first(e.messageId, e.message_id, e.id, header(h, 'message-id'))
-    const ownMessage = (body || '').includes(MARKER) || /\bTeamPulse\b/.test(from || '')
-    return { title: subject || (body ? body.split('\n')[0].slice(0, 120) : null), description: body ? body.slice(0, 4000) : null, requester: from, externalRef: id ? `gmail:${id}` : null, ignore: ownMessage ? 'sent by TeamPulse' : null }
+    const ownMessage = isOwnMessage(body) || /\b(?:KONVO|TeamPulse)\b/.test(from || '')
+    return { title: subject || (body ? body.split('\n')[0].slice(0, 120) : null), description: body ? body.slice(0, 4000) : null, requester: from, externalRef: id ? `gmail:${id}` : null, ignore: ownMessage ? 'sent by KONVO' : null }
   }
   const text = first(e.text, e.message?.text)
   const bot = Boolean(e.bot_id || e.bot_profile || e.subtype === 'bot_message' || e.message?.bot_id)
   const ts = first(e.ts, e.event_ts, e.message?.ts)
   const channel = first(e.channel, e.channel_id, e.message?.channel)
-  const ownMessage = (text || '').includes(MARKER)
+  const ownMessage = isOwnMessage(text)
   const senderId = first(e.user, e.user_id, e.message?.user)
   const teamId = first(e.team, e.team_id, e.user_team, e.message?.team)
   const permalink = first(e.permalink, e.message?.permalink)
@@ -211,7 +211,7 @@ export function parseEvent(app, raw, { threads = false } = {}) {
     title: text ? text.split('\n')[0].replace(/[*_`]/g, '').slice(0, 120) : null, description: text ? text.slice(0, 4000) : null,
     requester: first(e.user_name, e.username, e.user_profile?.real_name, e.user), externalRef: ts ? `slack:${channel || ''}:${ts}` : null,
     // Task-from-mention intakes also read thread replies (a reply can carry the real request); requests ignore them as before.
-    ignore: ownMessage ? 'sent by TeamPulse' : bot ? 'posted by a bot' : !threads && e.thread_ts && e.thread_ts !== e.ts ? 'a thread reply' : null,
+    ignore: ownMessage ? 'sent by KONVO' : bot ? 'posted by a bot' : !threads && e.thread_ts && e.thread_ts !== e.ts ? 'a thread reply' : null,
     text, mentions: extractMentions(text), senderId: senderId && /^[UW][A-Z0-9]{6,20}$/.test(senderId) ? senderId : null, ts, threadTs, channel,
     teamId: teamId && /^[A-Z0-9]{6,20}$/.test(teamId) ? teamId : null,
     permalink: permalink && /^https:\/\/([a-z0-9-]+\.)*slack\.com\//i.test(permalink) ? permalink : null

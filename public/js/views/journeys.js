@@ -1,10 +1,10 @@
 // Contributions: one journey per piece of work, and the journey itself as an interactive timeline across stages.
-// Facts carry their source and author; the stage is TeamPulse's rule-based reading; suggestions and missing steps are
+// Facts carry their source and author; the stage is KONVO's rule-based reading; suggestions and missing steps are
 // labelled as such and never filled in.
 import { api, html, raw, toast, errorText, ago, dt, empty, loading, confirmDialog, icon, avatar, appTile, prov } from '../ui.js'
 import { app } from '../app.js'
 
-const SRC = { teampulse: 'TeamPulse', github: 'GitHub', slack: 'Slack', gmail: 'Gmail', 'google-calendar': 'Calendar', 'google-sheets': 'Sheets', external: 'Request', gmail_intake: 'Email', slack_intake: 'Slack' }
+const SRC = { teampulse: 'KONVO', github: 'GitHub', slack: 'Slack', gmail: 'Gmail', 'google-calendar': 'Calendar', 'google-sheets': 'Sheets', external: 'Request', gmail_intake: 'Email', slack_intake: 'Slack' }
 const OUTCOME = { verified: () => prov('verified', 'Verified outcome'), claimed: () => prov('unverified', 'Outcome claimed'), none: () => prov('missing', 'No outcome yet') }
 const STAGE_LABEL = { reported: 'Reported', planned: 'Planned', investigated: 'Investigated', implemented: 'Implemented', reviewed: 'Reviewed', rework: 'Rework', blocked: 'Blocked', delivered: 'Delivered', accepted: 'Accepted', outcome: 'Outcome' }
 const sourceTile = (src, size = 'sm') => (['github', 'slack', 'gmail', 'google-calendar', 'google-sheets'].includes(src) ? appTile(src, size) : html`<span class="app-icon ${size} tp">${icon(src === 'external' || src === 'gmail_intake' || src === 'slack_intake' ? 'inbox' : 'tasks')}</span>`)
@@ -33,7 +33,7 @@ const stepProvenance = (s) => {
   if (s.linkedBy === 'confirmed by a person') return prov('self', 'Confirmed by a person')
   if (s.stage === 'outcome') return s.verified ? prov('verified', 'Manager verified') : prov('unverified', s.verification === 'reported_figure' ? 'Reported figure, not verified' : 'A person’s account')
   if (s.selfReported) return prov('self', 'The employee’s own account')
-  return prov('fact', s.source === 'teampulse' ? 'Recorded by TeamPulse' : 'Recorded by the app')
+  return prov('fact', s.source === 'teampulse' ? 'Recorded by KONVO' : 'Recorded by the app')
 }
 
 export async function renderJourney(main, taskId) {
@@ -45,7 +45,7 @@ export async function renderJourney(main, taskId) {
   main.innerHTML = html`<div class="crumbs"><a href="${back}">Contributions</a>${icon('chevronRight', 'xs')}<span>${j.task.title.length > 48 ? `${j.task.title.slice(0, 48)}…` : j.task.title}</span></div>
     <div class="page-head"><div><h1>${j.task.title}</h1><p>${j.task.ref} · ${j.task.ownerName || 'unassigned'} · ${j.task.status.replace(/_/g, ' ').toLowerCase()}${j.assessment?.complexity ? ` · assessed ${j.assessment.complexity}` : ''}</p></div>
       <div class="row"><a class="btn ghost" href="#/tasks/${j.task.id}">Open the task</a></div></div>
-    <div class="principle" style="margin-bottom:16px">${icon('eye')}<span>Each step is a recorded fact with its source and author. The stage it sits in is TeamPulse’s rule-based reading. <b>Suggestions</b> and <b>missing steps</b> are labelled and never filled in.</span></div>
+    <div class="principle" style="margin-bottom:16px">${icon('eye')}<span>Each step is a recorded fact with its source and author. The stage it sits in is KONVO’s rule-based reading. <b>Suggestions</b> and <b>missing steps</b> are labelled and never filled in.</span></div>
     <section class="card"><div class="stage-strip" role="list">${j.stages.map((s) => html`<a class="stage ${s.reached ? 'on' : ''} ${['blocked', 'rework'].includes(s.key) ? 'side' : ''}" role="listitem" href="#st-${s.key}" ${s.reached ? '' : raw('aria-disabled="true"')}><span>${s.label}</span><small>${byStage(s.key).length ? `${byStage(s.key).length} step(s)` : 'not evidenced'}</small></a>`)}</div></section>
     <div class="grid side" style="margin-top:16px">
       <section class="card"><div class="card-head"><h2>Timeline</h2>${prov('fact', 'From records')}</div>
@@ -54,7 +54,7 @@ export async function renderJourney(main, taskId) {
             ${s.disputed ? html`<span class="badge warn">authorship disputed</span>` : ''}${s.shared ? html`<span class="badge outline">shared</span>` : ''}${s.outsideControl ? html`<span class="badge info">outside their control</span>` : ''}</div>
           <div class="step-title"><a href="${s.href}" ${/^https?:/.test(s.href) ? raw('target="_blank" rel="noopener noreferrer"') : ''}><b>${s.title}</b></a></div>
           ${s.detail ? html`<div class="small pre step-detail">${s.detail}</div>` : ''}
-          <div class="meta" style="margin-top:4px">${s.author?.name ? html`<span class="row nowrap" style="gap:6px">${avatar(s.author.name, null, 'sm')}${s.author.name}</span>` : html`<span>unknown</span>`}${s.author?.external ? html`<span>(outside the organization)</span>` : s.author?.unknown ? html`<span>(not known to TeamPulse)</span>` : ''}<span class="sep"></span><span>${dt(s.at)}</span></div>
+          <div class="meta" style="margin-top:4px">${s.author?.name ? html`<span class="row nowrap" style="gap:6px">${avatar(s.author.name, null, 'sm')}${s.author.name}</span>` : html`<span>unknown</span>`}${s.author?.external ? html`<span>(outside the organization)</span>` : s.author?.unknown ? html`<span>(not known to KONVO)</span>` : ''}<span class="sep"></span><span>${dt(s.at)}</span></div>
           ${s.linkIds?.length && (j.task.ownerId === app.me.id || app.isManager) ? html`<div class="row" style="gap:6px;margin-top:6px"><button class="btn small link" data-unlink="${s.linkIds.join(',')}">Not part of this work</button></div>` : ''}
         </li>`)}</ol></section>
       <div class="stack">
@@ -67,7 +67,7 @@ export async function renderJourney(main, taskId) {
         <section class="card"><div class="card-head"><h2><span class="card-icon brand">${icon('intelligence')}</span>Assessment</h2></div>${j.assessment ? html`<p>${j.assessment.complexity ? html`<span class="badge brand">${j.assessment.complexity}</span> ` : ''}${j.assessment.evidenceState} evidence · manager ${j.assessment.managerStatus.toLowerCase()}${j.assessment.simulated ? ' · simulated' : ''}</p><a class="small" href="#/tasks/${j.task.id}">See reasons and evidence ${icon('arrowRight', 'xs')}</a>` : html`<p class="small muted" style="margin:0">Not analysed yet. The analysis on the task page is the source of truth for complexity and quality.</p>`}</section>
       </div></div>`.toString()
   main.querySelectorAll('[data-unlink]').forEach((b) => b.addEventListener('click', async () => {
-    const r = await confirmDialog({ title: 'Not part of this work?', body: 'The evidence stays in TeamPulse but is no longer linked to this task.', confirm: 'Unlink' })
+    const r = await confirmDialog({ title: 'Not part of this work?', body: 'The evidence stays in KONVO but is no longer linked to this task.', confirm: 'Unlink' })
     if (!r?.ok) return
     try { for (const id of b.dataset.unlink.split(',')) await api(`/api/work-evidence-links/${id}`, { method: 'POST', body: { action: 'REJECT' } }); toast('Unlinked.'); reload() } catch (e) { toast(errorText(e), { error: true }) }
   }))

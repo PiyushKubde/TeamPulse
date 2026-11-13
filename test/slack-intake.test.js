@@ -2,7 +2,7 @@
 // No live Slack or viaSocket: events are posted to the real HTTP route the way viaSocket's handler does.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { MARKER } from '../server/integrations/actions.js'
+import { MARKER, LEGACY_MARKER } from '../server/integrations/actions.js'
 import { interpretMessage, parseDeadline } from '../server/automations/slack-tasks.js'
 import { setup, addIntake, post, tag, taskOf, counts, slackTask, plain, SLACK, WS, CH } from './slack-helpers.js'
 
@@ -92,7 +92,7 @@ test('Slack message → task for the tagged person: requester, source, deadline,
   } finally { await t.close() }
 })
 
-test('ordinary conversation, bots and TeamPulse messages never become tasks; chat is not kept', async () => {
+test('ordinary conversation, bots and KONVO messages never become tasks; chat is not kept', async () => {
   const { t, sub } = await setup()
   try {
     const before = counts(t)
@@ -101,10 +101,11 @@ test('ordinary conversation, bots and TeamPulse messages never become tasks; cha
       assert.equal(r.body.status, 'ignored', text)
     }
     assert.equal((await post(t, sub, { text: 'please fix the deploy pipeline now', bot: true })).body.reason, 'posted by a bot')
-    assert.equal((await post(t, sub, { text: `${MARKER} New task assigned to you` })).body.reason, 'sent by TeamPulse')
+    assert.equal((await post(t, sub, { text: `${MARKER} New task assigned to you` })).body.reason, 'sent by KONVO')
+    assert.equal((await post(t, sub, { text: `${LEGACY_MARKER} New task assigned to you` })).body.reason, 'sent by KONVO', 'messages sent before the rename are still recognised as our own')
     assert.deepEqual(counts(t), before, 'no task and no request')
     const bot = t.db.prepare(`SELECT * FROM slack_intake_items WHERE reason = 'posted by a bot'`).get()
-    assert.equal(bot.text, null, 'bot and TeamPulse messages keep no text')
+    assert.equal(bot.text, null, 'bot and KONVO messages keep no text')
     // The scheduled job erases the excerpt of chat after 24 hours (the approved retention): not before, and only chat.
     const { purgeIgnoredText, IGNORED_TEXT_RETENTION_DAYS } = await import('../server/automations/slack-tasks.js')
     assert.equal(IGNORED_TEXT_RETENTION_DAYS, 1)
@@ -115,7 +116,7 @@ test('ordinary conversation, bots and TeamPulse messages never become tasks; cha
     t.db.prepare(`UPDATE slack_intake_items SET created_at = ? WHERE outcome = 'IGNORED'`).run(new Date(Date.now() - 25 * 3600000).toISOString())
     assert.equal(purgeIgnoredText(t.db), 6); assert.equal(chat(), 0, 'a 25-hour-old excerpt is erased')
     assert.equal(t.db.prepare(`SELECT COUNT(*) AS n FROM slack_intake_items WHERE sender_name IS NOT NULL AND outcome = 'IGNORED'`).get().n, 0, 'with the sender name')
-    assert.equal(t.db.prepare(`SELECT COUNT(*) AS n FROM slack_intake_items WHERE outcome = 'IGNORED'`).get().n, 8, 'the duplicate-protection records stay')
+    assert.equal(t.db.prepare(`SELECT COUNT(*) AS n FROM slack_intake_items WHERE outcome = 'IGNORED'`).get().n, 9, 'the duplicate-protection records stay')
   } finally { await t.close() }
 })
 
@@ -130,7 +131,7 @@ test('no guessed ownership: no tag, a name without a tag, an unmapped or unconfi
     }
     await asManager('Please investigate the payment failure issue by tomorrow', /Nobody was tagged/)
     await asManager('Eve please investigate the payment failure issue', /Nobody was tagged/) // a display name is never matched
-    const ghost = await asManager(`${tag(SLACK.ghost)} please investigate the payment failure issue`, /not mapped to a TeamPulse person/)
+    const ghost = await asManager(`${tag(SLACK.ghost)} please investigate the payment failure issue`, /not mapped to a KONVO person/)
     await asManager(`${tag(SLACK.eve)} and ${tag(SLACK.ed)} please fix the login bug`, /2 people were tagged/)
     // The Slack message waits as a normal pending request, the manager is notified, the message is preserved.
     const req = t.db.prepare('SELECT * FROM task_requests WHERE id = ?').get(ghost.body.requestId)

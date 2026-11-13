@@ -25,7 +25,7 @@ export async function renderReviews(main, q) {
   const data = { analyses: by('Analysis'), submissions: by('Submission'), outcomes: by('Outcome'), evidence: { length: evidence.length }, signals }
   data.overview = { length: 0 }
   const tab = TABS.some(([k]) => k === q.get('tab')) ? q.get('tab') : 'overview'
-  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('reviews', 'xs')}Contribution reviews</div><h1>Contribution reviews</h1><p>The decisions only you can make: judging analyses, approving work, verifying outcomes and deciding whose work it is. Everything else TeamPulse handles.</p></div></div>
+  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('reviews', 'xs')}Contribution reviews</div><h1>Contribution reviews</h1><p>The decisions only you can make: judging analyses, approving work, verifying outcomes and deciding whose work it is. Everything else KONVO handles.</p></div></div>
     <div class="principle" style="margin-bottom:16px">${icon('shield')}<span><b>The AI suggests; you decide.</b> Every assessment keeps the AI’s original, the employee’s own account and your decision — with your reasons — side by side. Nothing becomes final without you.</span></div>
     <nav class="tabs review-tabs" aria-label="Review queues">${TABS.map(([k, l, ic]) => html`<a href="#/reviews?tab=${k}" ${k === tab ? raw('aria-current="page"') : ''}>${icon(ic, 'sm')}${l}${data[k].length ? html`<span class="count-pill">${data[k].length}</span>` : ''}</a>`)}</nav>
     <div id="review-body"></div>`.toString()

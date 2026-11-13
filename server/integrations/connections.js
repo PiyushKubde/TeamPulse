@@ -79,7 +79,7 @@ export async function reconnectDetails(db, vs, ctx, id) {
   return { token, serviceId: row.service_id, authId: row.auth_id, app: row.app_slug }
 }
 
-/** Pauses the flows TeamPulse enabled on it, revokes it on viaSocket, then forgets it. Automations using it need setup again. */
+/** Pauses the flows KONVO enabled on it, revokes it on viaSocket, then forgets it. Automations using it need setup again. */
 export async function disconnect(db, vs, ctx, id) {
   requireViasocket(vs)
   const row = requireOwnConnection(db, ctx, id)

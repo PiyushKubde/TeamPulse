@@ -1,4 +1,4 @@
-// The ViaSocket apps TeamPulse offers, each in context. Not an open catalog: the full catalog lives only in the
+// The ViaSocket apps KONVO offers, each in context. Not an open catalog: the full catalog lives only in the
 // Advanced Automation Builder. Availability verified on viasocket.com/docs/<slug>.md (2026-11-09).
 // `actions` are the action_ids the Connect popup asks consent for (from DealSaathi's live-tested integration).
 import { AppError } from '../errors.js'
@@ -48,6 +48,6 @@ export async function curatedApps(vs) {
 
 export function requireCurated(slug) {
   const app = curatedSlug(slug)
-  if (!app) throw new AppError(400, 'app_not_supported', 'TeamPulse does not use that app here. Use the Advanced Builder for other apps.')
+  if (!app) throw new AppError(400, 'app_not_supported', 'KONVO does not use that app here. Use the Advanced Builder for other apps.')
   return app
 }

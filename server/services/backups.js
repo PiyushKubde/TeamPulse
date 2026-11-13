@@ -37,7 +37,7 @@ export function packArchive(dbBytes, uploads) {
 
 export function unpackArchive(buf) {
   const a = JSON.parse(gunzipSync(buf).toString('utf8'))
-  if (a.format !== 'teampulse-backup') throw new Error('Not a TeamPulse backup.')
+  if (a.format !== 'teampulse-backup') throw new Error('Not a KONVO backup.')
   const db = Buffer.from(a.database.b64, 'base64')
   if (sha(db) !== a.database.sha256) throw new Error('Database checksum mismatch.')
   const uploads = a.uploads.map((u) => {
@@ -57,7 +57,7 @@ export function encrypt(buf, secret) {
   return Buffer.concat([MAGIC, salt, iv, c.getAuthTag(), body])
 }
 export function decrypt(buf, secret) {
-  if (!buf.subarray(0, 4).equals(MAGIC)) throw new Error('Not an encrypted TeamPulse backup.')
+  if (!buf.subarray(0, 4).equals(MAGIC)) throw new Error('Not an encrypted KONVO backup.')
   const salt = buf.subarray(4, 20); const iv = buf.subarray(20, 32); const tag = buf.subarray(32, 48)
   const d = createDecipheriv('aes-256-gcm', keyFrom(secret, salt), iv)
   d.setAuthTag(tag)

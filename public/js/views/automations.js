@@ -1,4 +1,4 @@
-// Automation Center: (1) Connected Apps — curated ViaSocket apps in context, (2) Ready-made TeamPulse automations,
+// Automation Center: (1) Connected Apps — curated ViaSocket apps in context, (2) Ready-made KONVO automations,
 // (3) Advanced Builder — the full ViaSocket Embed. The browser only ever holds the per-user embed token.
 import { api, html, raw, esc, modal, bindForm, toast, errorText, ago, empty, confirmDialog, loading, icon, appTile } from '../ui.js'
 import { app } from '../app.js'
@@ -15,7 +15,7 @@ export async function renderAutomations(main, q) {
   const tab = q.get('tab') || 'apps'
   const [conns, autos] = await Promise.all([api('/api/viasocket/connections'), api('/api/automations')])
   main.innerHTML = html`
-    <div class="page-head"><div><div class="eyebrow">${icon('apps', 'xs')}Connected apps</div><h1>${app.isManager ? 'Automation Center' : 'Connected apps'}</h1><p>Connect the apps you already use. TeamPulse can then collect the work evidence you allow, send notifications, and run ready-made automations — the full builder is there when you need more.</p></div></div>
+    <div class="page-head"><div><div class="eyebrow">${icon('apps', 'xs')}Connected apps</div><h1>${app.isManager ? 'Automation Center' : 'Connected apps'}</h1><p>Connect the apps you already use. KONVO can then collect the work evidence you allow, send notifications, and run ready-made automations — the full builder is there when you need more.</p></div></div>
     <section class="card steps-card"><ol class="steps"><li class="${(conns.connections || []).length ? 'done' : ''}"><b>Connect</b> an app below</li><li><a href="#/evidence"><b>Choose what to collect</b></a> — repositories, channels, a label, a calendar or a sheet</li><li><a href="#/assistant"><b>Analyse your work</b></a> — the evidence is linked to your tasks for you</li></ol>${app.isManager ? html`<p class="small muted" style="margin-top:8px">As a manager: once an app is connected, go to <a href="#/automations?tab=ready"><b>Ready-made automations</b></a> to set up task notifications, the weekly report, and intake.</p>` : ''}</section>
     ${!conns.configured ? html`<div class="notice warn"><b>ViaSocket is not configured on this server.</b> App connections, the New Task Notification, the Weekly Team Report delivery and the Advanced Builder need an admin to set <span class="mono">VIASOCKET_ORG_ID</span>, <span class="mono">VIASOCKET_PROJECT_ID</span> and <span class="mono">VIASOCKET_EMBED_SECRET</span> (see README → ViaSocket). External requests and in-app notifications work without it.</div>` : ''}
     <div class="tabs" role="tablist">${[['apps', 'Connected apps'], ['ready', 'Ready-made automations'], ['builder', 'Advanced builder']].map(([k, l]) => html`<a href="#/automations?tab=${k}" ${tab === k ? raw('aria-current="page"') : ''}>${l}</a>`)}</div>
@@ -32,7 +32,7 @@ function renderApps(body, conns, reload) {
   body.innerHTML = html`
     ${conns.error ? html`<div class="notice warn">${conns.error}</div>` : ''}
     <div class="grid two">${conns.apps.map((a) => html`<article class="card"><div class="app-card">${a.slug ? appTile(a.slug, 'lg') : html`<div class="app-icon lg" aria-hidden="true">${a.name[0]}</div>`}<div style="flex:1;min-width:0">
-      <div class="row between"><h3>${a.name}</h3>${a.runsInTeamPulse ? html`<span class="badge brand">Used by TeamPulse</span>` : html`<span class="badge outline">Builder</span>`}</div>
+      <div class="row between"><h3>${a.name}</h3>${a.runsInTeamPulse ? html`<span class="badge brand">Used by KONVO</span>` : html`<span class="badge outline">Builder</span>`}</div>
       <p class="small" style="margin-top:4px">${a.purpose}</p>
       <div class="small muted">Used by: ${a.usedBy.join(' · ')}</div>
       ${a.error ? html`<div class="notice err small" style="margin-top:8px">${a.error}</div>` : ''}
@@ -42,8 +42,8 @@ function renderApps(body, conns, reload) {
         <button class="btn small" data-connect="${a.slug}" ${!conns.configured || !a.serviceId ? raw('disabled') : ''}>${byApp(a.slug).length ? 'Connect another' : `Connect ${a.name}`}</button>
         <button class="btn small ghost" data-build="${a.slug}" data-name="${a.name}" ${!conns.configured ? raw('disabled') : ''}>Build with ${a.name}</button>
       </div></div></div></article>`)}</div>
-    <p class="small muted" style="margin-top:12px">You sign in on each app’s own page in a ViaSocket popup. ViaSocket keeps the access; TeamPulse stores only a reference to your connection, on the server.</p>`
-  // Restricted builder: only this app, only its curated actions, started from a TeamPulse event this person may use.
+    <p class="small muted" style="margin-top:12px">You sign in on each app’s own page in a ViaSocket popup. ViaSocket keeps the access; KONVO stores only a reference to your connection, on the server.</p>`
+  // Restricted builder: only this app, only its curated actions, started from a KONVO event this person may use.
   body.querySelectorAll('[data-build]').forEach((b) => b.addEventListener('click', async () => {
     let contexts
     try { contexts = await api(`/api/viasocket/contexts?app=${b.dataset.build}`) } catch (e) { toast(errorText(e), { error: true }); return }
@@ -78,7 +78,7 @@ function renderApps(body, conns, reload) {
     } catch (e) { if (e.code !== 'closed') toast(CONNECT_ERRORS[e.code] || errorText(e), { error: true }) }
   }))
   body.querySelectorAll('[data-disconnect]').forEach((b) => b.addEventListener('click', async () => {
-    const r = await confirmDialog({ title: `Disconnect ${b.dataset.name}?`, body: 'TeamPulse pauses what it runs on this account and revokes the connection on ViaSocket. Automations that use it will need setup again.', confirm: 'Disconnect', danger: true })
+    const r = await confirmDialog({ title: `Disconnect ${b.dataset.name}?`, body: 'KONVO pauses what it runs on this account and revokes the connection on ViaSocket. Automations that use it will need setup again.', confirm: 'Disconnect', danger: true })
     if (!r?.ok) return
     try { await api(`/api/viasocket/connections/${b.dataset.disconnect}`, { method: 'DELETE' }); toast('Disconnected.'); reload() } catch (e) { toast(errorText(e), { error: true }) }
   }))
@@ -256,7 +256,7 @@ async function addIntake(conns, done) {
       $('#i-conn').innerHTML = (isG ? g : s).map((c) => `<option value="${esc(c.id)}">${esc(c.label || $('#i-app').value)}</option>`).join('')
       $('#i-target-label').textContent = isG ? 'Gmail label' : 'Slack channel'
       $('#i-assign-wrap').hidden = isG
-      $('#i-hint').textContent = isG ? 'Create a label such as “TeamPulse” in Gmail and apply it to emails that should become requests.' : 'Use a channel only for requests — not one TeamPulse posts notifications or reports to.'
+      $('#i-hint').textContent = isG ? 'Create a label such as “KONVO” in Gmail and apply it to emails that should become requests.' : 'Use a channel only for requests — not one KONVO posts notifications or reports to.'
       await fillTargets()
     }
     const fillTargets = async () => {
@@ -282,12 +282,12 @@ async function addIntake(conns, done) {
   })
 }
 
-// D: the restricted builder for one TeamPulse context, in a modal. Used by My Tasks, Reports and Team Tasks.
+// D: the restricted builder for one KONVO context, in a modal. Used by My Tasks, Reports and Team Tasks.
 export async function openContextBuilder(context, appSlug) {
   let cfg
   try { cfg = await api(`/api/viasocket/context/${context}${appSlug ? `?app=${encodeURIComponent(appSlug)}` : ''}`) } catch (e) { toast(errorText(e), { error: true }); return }
   const names = { 'google-sheets': 'Google Sheets', slack: 'Slack', gmail: 'Gmail', 'google-calendar': 'Google Calendar', github: 'GitHub' }
-  await modal(html`<h2 id="modal-title">Automate: ${cfg.label}</h2><p class="small muted">Pick an app (${Object.keys(cfg.serviceIds).map((s) => names[s] || s).join(', ')}) and publish. TeamPulse then sends your own events here.</p>
+  await modal(html`<h2 id="modal-title">Automate: ${cfg.label}</h2><p class="small muted">Pick an app (${Object.keys(cfg.serviceIds).map((s) => names[s] || s).join(', ')}) and publish. KONVO then sends your own events here.</p>
     <div id="ctx-box" style="height:560px;border:1px solid var(--border);border-radius:8px"><div class="loading">Loading…</div></div>
     <div class="row end" style="margin-top:10px"><button class="btn" data-close>Done</button></div>`.toString(), async (el) => {
     const dlg = document.getElementById('modal'); dlg.style.width = 'min(1100px, calc(100vw - 32px))'
@@ -320,7 +320,7 @@ async function renderBuilder(body, conns, appSlug) {
       try {
         const runs = await api(`/api/viasocket/embed-flows/${encodeURIComponent(b.dataset.runs)}/runs`)
         el.querySelector('#runs').innerHTML = runs.length ? html`<div class="table-wrap"><table><thead><tr><th>When</th><th>Status</th><th>Error</th></tr></thead><tbody>${runs.map((r) => html`<tr><td class="nowrap">${r.at ? ago(r.at) : '—'}</td><td><span class="badge ${r.status === 'failed' ? 'bad' : /success|ok|complete/.test(r.status) ? 'ok' : 'outline'}">${r.status}</span></td><td class="small">${r.error || ''}</td></tr>`)}</tbody></table></div><p class="small muted">Last 30 days, from ViaSocket.</p>`.toString()
-          : empty('No runs yet', 'Runs appear here once TeamPulse sends an event to this flow.').toString()
+          : empty('No runs yet', 'Runs appear here once KONVO sends an event to this flow.').toString()
       } catch (e) { el.querySelector('#runs').innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString() }
     })
   }))
@@ -338,7 +338,7 @@ async function renderBuilder(body, conns, appSlug) {
     box.innerHTML = ''
     const embed = window.viaSocket.mount({
       embedToken: token, parent: '#embed-box',
-      config: { pageheading: 'Automation', pagesubheading: 'Automate the work around your TeamPulse tasks.', showTemplates: true, themeJson: { '--primary-color': '#111111' } },
+      config: { pageheading: 'Automation', pagesubheading: 'Automate the work around your KONVO tasks.', showTemplates: true, themeJson: { '--primary-color': '#111111' } },
       ...(focus && serviceIds[focus.slug] ? { open: { serviceId: serviceIds[focus.slug] } } : {})
     })
     embed.on?.('error', (e) => { box.innerHTML = html`<div class="notice err" style="margin:12px">The builder reported an error: ${e?.message || 'unknown'}</div>`.toString() })

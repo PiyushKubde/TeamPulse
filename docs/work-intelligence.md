@@ -1,7 +1,7 @@
 # Work intelligence: assistant, contribution journeys, copilot, signals
 
 This is the final sprint's layer on top of tasks, measurement (docs/ai-work-measurement.md) and work evidence
-(docs/work-evidence.md). **No new data is collected.** Everything here reads records TeamPulse already holds.
+(docs/work-evidence.md). **No new data is collected.** Everything here reads records KONVO already holds.
 AI is optional and only writes up facts that have already been selected.
 
 ## Principles kept in the code

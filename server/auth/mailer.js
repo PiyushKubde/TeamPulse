@@ -1,6 +1,6 @@
 // Transactional email (verification, password reset). Two real providers, chosen by MAIL_PROVIDER:
 //   smtp            — any SMTP service (Postmark, SES, Resend, SendGrid, MSG91, Gmail app password…) via nodemailer
-//   viasocket_gmail — a Gmail account connected in TeamPulse's Automation Center, sent through viaSocket
+//   viasocket_gmail — a Gmail account connected in KONVO's Automation Center, sent through viaSocket
 // With neither configured, `configured` is false and nothing pretends to send: email sign-up and password reset
 // say they are unavailable. Tests inject a capturing mailer.
 import nodemailer from 'nodemailer'
@@ -33,8 +33,8 @@ export function createMailer(mail, { db, vs } = {}) {
       async send({ to, subject, text }) {
         const user = db.prepare('SELECT * FROM users WHERE id = ?').get(mail.viasocket.userId)
         const ctx = user ? loadContext(db, user) : null
-        if (!ctx?.membership) throw new Error('The system mail sender is not an active TeamPulse member.')
-        const ran = await runOnce(db, vs, ctx, mail.viasocket.connectionId, 'gmail_send_email', gmailInput({ to, subject, body: text, fromName: mail.fromName || 'TeamPulse' }))
+        if (!ctx?.membership) throw new Error('The system mail sender is not an active KONVO member.')
+        const ran = await runOnce(db, vs, ctx, mail.viasocket.connectionId, 'gmail_send_email', gmailInput({ to, subject, body: text, fromName: mail.fromName || 'KONVO' }))
         if (ran.outcome !== 'answered') throw new Error(ran.reason || 'Gmail did not confirm the email.')
         const read = readGmailResult(ran.result)
         if (!read.ok) throw new Error(read.reason)
@@ -47,16 +47,18 @@ export function createMailer(mail, { db, vs } = {}) {
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 function message(subject, lines, link, button) {
-  const text = [...lines, '', link, '', 'If you did not ask for this, you can ignore this email.', '— TeamPulse'].join('\n')
-  const html = `<div style="font-family:system-ui,Arial,sans-serif;max-width:520px">${lines.map((l) => `<p>${esc(l)}</p>`).join('')}
-<p><a href="${esc(link)}" style="display:inline-block;background:#4338ca;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none">${esc(button)}</a></p>
-<p style="color:#666;font-size:13px">Or open: ${esc(link)}</p><p style="color:#666;font-size:13px">If you did not ask for this, you can ignore this email.</p></div>`
+  const text = [...lines, '', link, '', 'If you did not ask for this, you can ignore this email.', '— KONVO'].join('\n')
+  // Matte black and white, Inter first with safe fallbacks (email clients do not load web fonts reliably).
+  const html = `<div style="font-family:Inter,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;max-width:520px;color:#111111;line-height:1.55">
+<p style="margin:0 0 24px;font-size:13px;font-weight:700;letter-spacing:.16em">KONVO</p>${lines.map((l) => `<p>${esc(l)}</p>`).join('')}
+<p><a href="${esc(link)}" style="display:inline-block;background:#111111;color:#ffffff;padding:11px 18px;border-radius:6px;text-decoration:none;font-weight:600">${esc(button)}</a></p>
+<p style="color:#666666;font-size:13px">Or open: ${esc(link)}</p><p style="color:#666666;font-size:13px">If you did not ask for this, you can ignore this email.</p></div>`
   return { subject, text, html }
 }
 
 export const EMAILS = {
-  verify: (name, link) => message('Confirm your email for TeamPulse', [`Hi ${name},`, 'Confirm your email address to finish creating your TeamPulse account. The link works for 24 hours.'], link, 'Confirm email'),
-  reset: (name, link) => message('Reset your TeamPulse password', [`Hi ${name},`, 'Someone (hopefully you) asked to reset your TeamPulse password. The link works for 30 minutes and only once.'], link, 'Choose a new password'),
-  linkPassword: (name, link) => message('Add password sign-in to your TeamPulse account', [`Hi ${name},`, 'Your TeamPulse account signs in with Google. Someone asked to add email and password sign-in to it. To do that, set a password with this link (1 hour, once). Your organization, role and work stay the same.'], link, 'Set a password'),
-  alreadyRegistered: (name, link) => message('You already have a TeamPulse account', [`Hi ${name},`, 'Someone tried to create a TeamPulse account with this email, but you already have one. Sign in, or reset your password if you forgot it.'], link, 'Sign in')
+  verify: (name, link) => message('Confirm your email for KONVO', [`Hi ${name},`, 'Confirm your email address to finish creating your KONVO account. The link works for 24 hours.'], link, 'Confirm email'),
+  reset: (name, link) => message('Reset your KONVO password', [`Hi ${name},`, 'Someone (hopefully you) asked to reset your KONVO password. The link works for 30 minutes and only once.'], link, 'Choose a new password'),
+  linkPassword: (name, link) => message('Add password sign-in to your KONVO account', [`Hi ${name},`, 'Your KONVO account signs in with Google. Someone asked to add email and password sign-in to it. To do that, set a password with this link (1 hour, once). Your organization, role and work stay the same.'], link, 'Set a password'),
+  alreadyRegistered: (name, link) => message('You already have a KONVO account', [`Hi ${name},`, 'Someone tried to create a KONVO account with this email, but you already have one. Sign in, or reset your password if you forgot it.'], link, 'Sign in')
 }

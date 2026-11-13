@@ -1,4 +1,4 @@
-// Proactive work signals: deterministic rules over TeamPulse records (no AI call). Each signal has a reason, the
+// Proactive work signals: deterministic rules over KONVO records (no AI call). Each signal has a reason, the
 // records behind it, a severity, a suggested next action, a status and a history. A signal is help to act — never a
 // performance penalty; blockers outside someone's control say so. Detection is idempotent (one row per condition,
 // updated on every run) and a signal whose condition is gone resolves itself.

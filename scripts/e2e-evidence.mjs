@@ -111,7 +111,7 @@ try {
   ok(await m.isVisible('h2:has-text("Open blockers")'), 'blockers section'); ok(await m.isVisible('text=outside their control'), 'external blocker marked')
   await shot(m, 'ev4-intelligence')
   await m.click('a:has-text("Evidence to review")')
-  await m.waitForSelector('text=author not known to TeamPulse')
+  await m.waitForSelector('text=author not known to KONVO')
   const sel = await m.$('select[data-resolve-select]')
   const dev = await sel.$$eval('option', (os) => os.find((o) => o.textContent === 'Dev Patel').value)
   await sel.selectOption(dev)

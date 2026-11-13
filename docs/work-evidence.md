@@ -2,13 +2,13 @@
 
 > We are measuring meaningful work, not digital activity.
 
-TeamPulse collects work evidence from apps a person connected:
+KONVO collects work evidence from apps a person connected:
 
 - GitHub, Slack, Gmail, Google Calendar and Google Sheets;
 - only from the scopes that person chose;
 - on that person's own viaSocket connection.
 
-TeamPulse links each piece of evidence to the right task. The Phase 1 measurement engine then uses it **when someone asks for an analysis**. Collection never starts an analysis.
+KONVO links each piece of evidence to the right task. The Phase 1 measurement engine then uses it **when someone asks for an analysis**. Collection never starts an analysis.
 
 ## Architecture
 
@@ -84,7 +84,7 @@ The catalog also has read-only actions (e.g. `List_Pull_Requests`, `Get_Messages
 - **Rate limit:** 120 events/minute per subscription (429).
 - **Health:** at most hourly, one read-only `listConnections` per owner. A missing or expired connection sets the source to `NEEDS_RECONNECT`, and disconnecting the account pauses its flows.
 - **Writes to external apps:** none. Collection only reads.
-- **Unknown:** whether viaSocket retries a delivery TeamPulse answered with an error is not documented.
+- **Unknown:** whether viaSocket retries a delivery KONVO answered with an error is not documented.
 
 ## Attribution: whose work is it?
 
