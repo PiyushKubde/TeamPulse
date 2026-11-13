@@ -27,6 +27,7 @@ import * as evidence from './services/evidence.js'
 import * as reflections from './services/reflections.js'
 import * as reports from './services/reports.js'
 import { dashboard } from './services/dashboard.js'
+import { getWorkboard } from './services/workboard.js'
 import { listNotifications, markRead } from './services/notify.js'
 import { listAudit } from './services/audit.js'
 import * as alerts from './services/alerts.js'
@@ -310,6 +311,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
 
   // ---------- dashboard ----------
   app.get('/api/dashboard', h((req) => dashboard(db, member(req))))
+  app.get('/api/workboard', h((req) => getWorkboard(db, member(req), req.query)))
   app.get('/api/reflections/today', h((req) => reflections.getReflection(db, member(req), req.query.day)))
   app.put('/api/reflections', h((req) => reflections.saveReflection(db, member(req), req.body)))
   app.get('/api/reflections', h((req) => reflections.recentReflections(db, member(req))))

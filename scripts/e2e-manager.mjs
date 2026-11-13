@@ -77,9 +77,10 @@ try {
     step = `manager dashboard (${theme})`
     const m = await session('manager@demo.teampulse', { theme })
     ok(await themeOf(m) === theme, `theme is ${theme}`)
-    await m.waitForSelector('h2:has-text("Where to intervene")')
-    for (const h of ['Contributions that matter', 'Blocked work', 'Deadline risks', 'Shared contributions', 'Important developments', 'Attention required', 'Team workload']) ok(await m.isVisible(`h2:has-text("${h}")`), `dashboard section ${h}`)
-    ok(await m.isVisible('nav[aria-label="Decisions waiting for you"]'), 'decisions strip')
+    await m.waitForSelector('.wb-col')
+    ok((await m.locator('.wb-col h2').allTextContents()).join('|') === 'To do|In progress|Blocked|In review|Done', 'workboard columns')
+    ok((await m.locator('.wb-metric').count()) === 4, 'four summary metrics')
+    ok(!(await m.locator('nav[aria-label="Decisions waiting for you"], .intervene').count()), 'the old overview panels are gone')
     ok(await overflow(m) <= 1, `dashboard fits (${await overflow(m)}px)`)
 
     step = `team intelligence (${theme})`
@@ -152,7 +153,7 @@ try {
   step = 'phone layouts'
   for (const theme of ['light', 'dark']) {
     const p = await session('manager@demo.teampulse', { theme, viewport: { width: 390, height: 844 }, mobile: true })
-    for (const [h, sel] of [['#/dashboard', 'h2:has-text("Where to intervene")'], ['#/contribution', 'h1:has-text("Team intelligence")'], ['#/reviews?tab=signals', '.signal'], ['#/copilot', '.q-card'], ['#/requests', 'h1:has-text("Task requests")'], ['#/team-tasks', 'table.task-table'], ['#/contribution/' + priyaId, 'h2:has-text("In short")']]) {
+    for (const [h, sel] of [['#/dashboard', '.wb-col'], ['#/contribution', 'h1:has-text("Team intelligence")'], ['#/reviews?tab=signals', '.signal'], ['#/copilot', '.q-card'], ['#/requests', 'h1:has-text("Task requests")'], ['#/team-tasks', 'table.task-table'], ['#/contribution/' + priyaId, 'h2:has-text("In short")']]) {
       await p.goto(`${base}/${h}`); await p.waitForSelector(sel)
       ok(await overflow(p) <= 1, `${h} fits a phone in ${theme} (${await overflow(p)}px)`)
     }

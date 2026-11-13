@@ -107,7 +107,7 @@ try {
   ok(await m.isVisible('text=1× L4'), 'complexity mix in profile')
   await shot(m, 'm4-profile')
   await m.goto(`${base}/#/dashboard`)
-  await m.waitForSelector('#contrib-dash >> text=analysed')
+  await m.waitForSelector('.wb-col')
 
   step = 'employee sees own profile, not the team'
   await e.goto(`${base}/#/contribution`)

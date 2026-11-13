@@ -235,20 +235,21 @@ export async function renderPerson(main, userId, q) {
   main.innerHTML = loading().toString()
   const p = await api(`/api/contribution/people/${userId}?from=${encodeURIComponent(from)}`)
   const me = userId === app.me.id
+  const fromBoard = q?.get('from') === 'dashboard' // opened from the Workboard: the way back is the Workboard
   const dimCard = ([, s]) => html`<div class="dim-card"><div class="row between"><b>${s.label}</b><span class="small muted">${s.assessed} assessed${s.insufficient ? ` · ${s.insufficient} not enough evidence` : ''}${s.notApplicable ? ` · ${s.notApplicable} n/a` : ''}</span></div>
     <div class="row" style="gap:4px;margin:6px 0">${[5, 4, 3, 2, 1].filter((l) => s.levels[l]).map((l) => html`<span class="badge ${l >= 4 ? 'ok' : l === 3 ? 'info' : 'warn'}">${s.levels[l]}× level ${l}</span>`)}</div>
     ${s.highlights.length ? html`<ul class="plain small">${s.highlights.map((h) => html`<li><a href="#/tasks/${h.taskId}">${h.taskTitle}</a>${h.complexity ? html` <span class="badge outline">L${h.complexity}</span>` : ''} — ${h.level}/5${h.source === 'manager' ? ' (manager)' : ''}: ${h.reason}</li>`)}</ul>` : ''}</div>`
-  main.innerHTML = html`<div class="crumbs">${app.isManager ? html`<a href="#/contribution">Team intelligence</a>` : html`<a href="#/dashboard">Overview</a>`}${icon('chevronRight', 'xs')}<span>${me ? 'My contribution' : p.person.name}</span></div>
-    <div class="page-head person-head"><div class="row nowrap" style="gap:14px;align-items:center">${avatar(p.person.name, null, 'lg')}<div><h1>${me ? 'My contribution' : p.person.name}</h1><p style="margin:2px 0 0">${p.person.title || p.person.role}${p.person.team ? ` · ${p.person.team}` : ''}</p></div></div>
+  main.innerHTML = html`<div class="crumbs">${app.isManager && !fromBoard ? html`<a href="#/contribution">Team intelligence</a>` : html`<a href="#/dashboard">Overview</a>`}${icon('chevronRight', 'xs')}<span>${me ? 'My contribution' : p.person.name}</span></div>
+    <div class="page-head person-head"><div class="row nowrap" style="gap:14px;align-items:center">${avatar(p.person.name, null, 'lg')}<div style="min-width:0;white-space:normal"><h1>${me ? 'My contribution' : p.person.name}</h1><p style="margin:2px 0 0">${[p.person.role[0].toUpperCase() + p.person.role.slice(1), p.person.title, p.person.team].filter(Boolean).join(' · ')}</p>${me ? '' : html`<p class="small muted" style="margin:3px 0 0">Responsibilities are read from the tasks assigned to them, below. No separate list is recorded.</p>`}</div></div>
       <div class="row"><a class="btn ghost" href="#/contributions?userId=${userId}">${icon('journeys')}Journeys</a>${app.isManager && !me ? html`<a class="btn ghost" href="#/team-tasks?assigneeId=${userId}">${icon('tasks')}Their tasks</a>` : ''}</div></div>
-    <div class="segmented" role="group" aria-label="Period" style="margin-bottom:16px">${[[30, 'Last 30 days'], [90, 'Last 90 days'], [180, 'Last 6 months']].map(([n, l]) => html`<a href="#/contribution/${userId}?days=${n}" ${days === n ? raw('aria-current="page"') : ''}>${l}</a>`)}</div>
+    <div class="segmented" role="group" aria-label="Period" style="margin-bottom:16px">${[[30, 'Last 30 days'], [90, 'Last 90 days'], [180, 'Last 6 months']].map(([n, l]) => html`<a href="#/contribution/${userId}?days=${n}${fromBoard ? '&from=dashboard' : ''}" ${days === n ? raw('aria-current="page"') : ''}>${l}</a>`)}</div>
     <div class="principle" style="margin-bottom:16px">${icon('shield')}<span>${p.note}</span></div>
     ${p.canReview ? html`<div class="row" style="margin-bottom:12px"><button class="btn small" id="analyse-person">Analyse ${p.person.name}'s recent work</button><span class="small muted">Uses their tasks and the evidence linked to them. Results appear on each task.</span></div>` : me ? html`<div class="row" style="margin-bottom:12px"><a class="btn small" href="#/evidence">My work evidence and “Analyse my work”</a></div>` : ''}
     <section class="card"><div class="card-head"><h2>In short</h2>${prov('ai', 'Summary of the assessments below')}</div><p>${p.narrative}</p>
       <div class="row" style="margin-top:8px">${mix(p.complexityMix)}${p.reviews.awaitingManager && !me ? html`<span class="badge warn">${p.reviews.awaitingManager} awaiting review</span>` : ''}${p.reviews.awaitingEmployee && me ? html`<span class="badge info">${p.reviews.awaitingEmployee} waiting for your confirmation</span>` : ''}</div></section>
     ${me ? '' : html`<div class="grid two" style="margin-top:16px"><section class="card" id="p-tasks"><div class="card-head"><h2><span class="card-icon">${icon('tasks')}</span>Assigned tasks</h2><a class="btn small subtle" href="#/team-tasks?assigneeId=${userId}">All${icon('arrowRight', 'sm')}</a></div>${loading()}</section>
       <section class="card" id="p-evidence"><div class="card-head"><h2><span class="card-icon teal">${icon('evidence')}</span>Recent evidence</h2></div>${loading()}</section></div>`}
-    <div class="grid two" style="margin-top:16px">${Object.entries(p.dimensions).map(dimCard)}</div>
+    ${(() => { const all = Object.entries(p.dimensions); const rated = all.filter(([, s]) => s.assessed); const rest = all.filter(([, s]) => !s.assessed); return html`${rated.length ? html`<div class="grid two" style="margin-top:16px">${rated.map(dimCard)}</div>` : ''}${rest.length ? html`<p class="small muted" style="margin:12px 0 0">Not enough evidence to rate yet: ${rest.map(([, x]) => x.label).join(', ')}. Nothing is guessed.</p>` : ''}` })()}
     <div class="grid two" style="margin-top:16px">
       <section class="card"><h2 style="margin-bottom:8px">Verified outcomes</h2>
         ${p.verified.length ? html`<ul class="list">${p.verified.map((o) => html`<li><div class="grow"><a href="#/impact/${o.impactId}"><b>${o.title}</b></a> <span class="small muted">· ${o.categoryLabel}</span>
@@ -258,14 +259,21 @@ export async function renderPerson(main, userId, q) {
         ${p.estimated.length ? html`<ul class="plain small">${p.estimated.map((e) => html`<li>• ${e.text} — <a href="#/tasks/${e.taskId}">${e.taskTitle}</a></li>`)}</ul>` : html`<p class="muted small">None.</p>`}
         ${p.blockers.itemsAffected ? html`<p class="small" style="margin-top:10px"><span class="badge info">Context</span> ${p.blockers.itemsAffected} piece(s) of work held up by others (about ${p.blockers.outsideControlHours}h). Not a fault.</p>` : ''}</section>
     </div>
-    <section class="card" style="margin-top:16px"><h2 style="margin-bottom:8px">Analysed work</h2>
+    <section class="card" id="p-work" style="margin-top:16px"><h2 style="margin-bottom:4px">Analysed work</h2><p class="small muted" style="margin:0 0 8px">Simulated = development simulation · Rules only = no AI model read it · Approved/Adjusted = a manager has judged it · Estimates are never verified outcomes.</p>
       ${p.work.length ? html`<div class="table-wrap"><table><thead><tr><th>Task</th><th>Complexity</th>${DIM_KEYS.slice(1).map(([, l]) => html`<th class="num hide-sm">${l}</th>`)}<th>Status</th></tr></thead><tbody>
-        ${p.work.map((w) => html`<tr><td><a href="#/tasks/${w.taskId}">${w.taskTitle}</a><div class="small muted">${d(w.periodEnd)}${w.simulated ? ' · simulated' : ''}${w.provider === 'rules' ? ' · rules only' : ''}</div></td>
+        ${p.work.map((w) => html`<tr><td><a href="#/tasks/${w.taskId}">${w.taskTitle}</a><div class="small muted">${d(w.periodEnd)}${w.simulated ? html` <span class="badge warn" title="A development simulation, not an AI analysis">Simulated</span>` : ''}${w.provider === 'rules' ? html` <span class="badge outline" title="Rules only: no AI model read this work">Rules only</span>` : ''}</div></td>
           <td>${w.complexity ? html`<span class="badge brand">${w.complexity}</span>` : html`<span class="badge outline">?</span>`}</td>
           ${DIM_KEYS.slice(1).map(([k]) => html`<td class="num hide-sm">${w.levels[k] ?? html`<span class="muted">—</span>`}</td>`)}
-          <td><span class="badge ${EMP[w.employeeStatus][1]}">${EMP[w.employeeStatus][0]}</span> <span class="badge ${MGR[w.managerStatus][1]}">${MGR[w.managerStatus][0]}</span></td></tr>`)}
+          <td><span class="badge ${EMP[w.employeeStatus][1]}">${!me && w.employeeStatus === 'PENDING' ? 'Waiting for the employee' : EMP[w.employeeStatus][0]}</span> <span class="badge ${MGR[w.managerStatus][1]}">${MGR[w.managerStatus][0]}</span></td></tr>`)}
       </tbody></table></div>` : empty('No analysed work in this period', me ? 'Your work is analysed when you submit it for review, or when you press “Analyse my work” on a task.' : 'Work is analysed when it is submitted for review.')}
     </section>`.toString()
+  // A long history would bury the work that carries weight: show the newest rows and keep the rest one click away.
+  const workRows = [...main.querySelectorAll('#p-work tbody tr')]
+  if (workRows.length > 8) {
+    workRows.slice(8).forEach((r) => { r.hidden = true })
+    main.querySelector('#p-work .table-wrap').insertAdjacentHTML('afterend', `<button type="button" class="btn small ghost" id="p-work-all" style="margin-top:10px">Show all ${workRows.length} analysed pieces</button>`)
+    main.querySelector('#p-work-all').addEventListener('click', (e) => { workRows.forEach((r) => { r.hidden = false }); e.currentTarget.remove() })
+  }
   if (!me) {
     api(`/api/tasks?view=team&assigneeId=${userId}`).then((tasks) => {
       const box = main.querySelector('#p-tasks'); if (!box) return

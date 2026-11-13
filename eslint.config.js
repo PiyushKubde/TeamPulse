@@ -3,7 +3,7 @@ import globals from 'globals'
 
 export default [
   { ignores: ['node_modules/', 'data/'] },
-  { files: ['scripts/e2e.mjs'], languageOptions: { globals: { ...globals.browser } } },
+  { files: ['scripts/e2e.mjs', 'scripts/e2e-workboard.mjs'], languageOptions: { globals: { ...globals.browser } } },
   js.configs.recommended,
   {
     files: ['server/**/*.js', 'test/**/*.js', 'scripts/**/*.{js,mjs}', 'eslint.config.js'],

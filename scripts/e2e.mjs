@@ -41,10 +41,10 @@ try {
   // ---- Manager ----
   step = 'manager dashboard'
   const { page: m } = await session('manager@demo.teampulse')
-  await m.waitForSelector('text=Attention required')
-  ok(await m.isVisible('text=Team workload'), 'workload card')
-  ok(await m.isVisible('text=Team impact'), 'impact card')
-  ok(await m.locator('.stat').count() >= 10, 'stat cards')
+  await m.waitForSelector('.wb-col')
+  ok(await m.isVisible('h1:has-text("Team Workboard")'), 'workboard title')
+  ok((await m.locator('.wb-col').count()) === 5, 'five status columns')
+  ok((await m.locator('.wb-metric').count()) === 4, 'four summary metrics')
   await shot(m, '01-manager-dashboard')
 
   step = 'team tasks + filters'
@@ -140,7 +140,8 @@ try {
   // ---- Employee ----
   step = 'employee dashboard'
   const { page: e } = await session('dev@demo.teampulse')
-  await e.waitForSelector('text=Daily reflection')
+  await e.waitForSelector('.wb-col')
+  await e.click('#refl-h')
   ok(!(await e.isVisible('nav >> text="Tasks"')), 'employee has no Team Work nav')
   ok(!(await e.isVisible('nav >> text=Reports')), 'employee has no Reports nav')
   await e.fill('#r-contribution', 'Unblocked the billing migration plan')
@@ -196,7 +197,7 @@ try {
   // ---- Responsive ----
   step = 'mobile layout'
   const { page: p } = await session('manager@demo.teampulse', { width: 390, height: 844 })
-  await p.waitForSelector('text=Attention required')
+  await p.waitForSelector('.wb-col')
   const overflow = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   ok(overflow <= 1, `no horizontal page scroll on phone (overflow ${overflow}px)`)
   ok(await p.isVisible('#nav-toggle'), 'menu button on phone')

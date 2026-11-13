@@ -93,7 +93,7 @@ export async function renderTaskList(main, { view, q }) {
 }
 
 // ---------- create / edit ----------
-export async function openTaskForm(existing = null, { defaultTeamId = null, defaultAssigneeId = null } = {}) {
+export async function openTaskForm(existing = null, { defaultTeamId = null, defaultAssigneeId = null, onCreated = null } = {}) {
   const mode = existing ? 'edit' : app.session.membership.creationMode
   const [people, teamList] = await Promise.all([assignable().catch(() => []), teams().catch(() => [])])
   const myTeams = app.isAdmin ? teamList : app.role === 'manager' ? teamList.filter((t) => t.managedByMe) : teamList.filter((t) => t.id === app.session.membership.teamId)
@@ -187,6 +187,7 @@ export async function openTaskForm(existing = null, { defaultTeamId = null, defa
         if (existing) { toast('Task updated.'); window.dispatchEvent(new HashChangeEvent('hashchange')); return }
         if (isRequest || out.mode === 'request') { toast('Suggestion sent for approval.'); location.hash = '#/requests'; return }
         toast('Task created.')
+        if (onCreated) { onCreated(out.task); return } // the caller (the workboard) stays where it is and refreshes itself
         location.hash = `#/tasks/${out.task.id}`
       }
     })
@@ -238,7 +239,6 @@ export async function renderTaskDetail(main, id) {
           ${t.links.length ? html`<div class="chips" style="margin-top:12px">${t.links.map((l) => html`<a class="chip" href="${l.url}" target="_blank" rel="noopener noreferrer">${icon('evidence', 'xs')} ${l.label || l.url}</a>`)}</div>` : ''}
           ${t.sourceRequestId ? html`<p class="small muted" style="margin:12px 0 0">Created from <a href="#/requests">an approved suggestion</a>.</p>` : ''}
         </section>
-        <section class="card" id="exp-card" data-testid="expectations" aria-live="polite"><div class="loading">Loading what is expected…</div></section>
         ${sourceCard(wf)}
         <section class="card facts" aria-labelledby="facts-h"><h2 id="facts-h" class="sr">Details</h2>
           <dl class="fact-grid">
@@ -259,6 +259,7 @@ export async function renderTaskDetail(main, id) {
         </section>` : ''}
         ${deadlineCard(wf, t)}
         ${t.assigneeId ? html`<section class="card" id="ai-card" aria-live="polite">${raw('<div class="loading">Loading the contribution analysis…</div>')}</section>` : ''}
+        <section class="card" id="exp-card" data-testid="expectations" aria-live="polite"><div class="loading">Loading what is expected…</div></section>
         <section class="card" aria-labelledby="act-h"><div class="card-head"><h2 id="act-h"><span class="card-icon">${icon('message')}</span>Activity and comments</h2>${prov('fact', 'Recorded history')}</div>
           <form id="comment" class="comment-form"><label for="c-body" class="sr">Comment</label><textarea id="c-body" name="body" rows="2" required maxlength="4000" placeholder="Write a comment…"></textarea><button class="btn" type="submit">Comment</button></form>
           <ul class="timeline" style="margin-top:16px">${[...d.events].reverse().map((e) => html`<li><div><b>${e.actorName || 'System'}</b> ${eventText(e)}</div><div class="when">${dt(e.createdAt)}</div></li>`)}</ul>
