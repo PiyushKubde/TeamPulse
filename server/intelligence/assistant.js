@@ -97,8 +97,8 @@ function priorities(db, ctx, userId) {
     else if (d.overdue) out.push({ rank: 1, text: `Finish or re-plan "${t.title}"`, href: `#/tasks/${t.id}`, why: `${d.hoursOverdue}h past the deadline.` })
     else if (t.status === 'BLOCKED') out.push({ rank: 3, text: `Follow up on the blocker of "${t.title}"`, href: `#/tasks/${t.id}`, why: 'Blocked work waits on someone; escalate if it is outside your control.' })
     else if (d.hoursUntilDue !== null && d.hoursUntilDue <= 48) out.push({ rank: 2, text: `Move "${t.title}" forward`, href: `#/tasks/${t.id}`, why: `Due in ${d.hoursUntilDue}h at ${t.progress}%.` })
-    else if (t.status === 'ASSIGNED') out.push({ rank: 5, text: `Start "${t.title}"`, href: `#/tasks/${t.id}`, why: `${t.priority.toLowerCase()} priority, not started.` })
-    else out.push({ rank: 4 + ({ CRITICAL: 0, HIGH: 0.2, MEDIUM: 0.4, LOW: 0.6 })[t.priority], text: `Continue "${t.title}"`, href: `#/tasks/${t.id}`, why: `${t.priority.toLowerCase()} priority, ${t.progress}% done.` })
+    else if (t.status === 'ASSIGNED') out.push({ rank: 5, text: `Start "${t.title}"`, href: `#/tasks/${t.id}`, why: t.priority ? `${t.priority.toLowerCase()} priority, not started.` : 'Not started; priority not set yet.' })
+    else out.push({ rank: 4 + (({ CRITICAL: 0, HIGH: 0.2, MEDIUM: 0.4, LOW: 0.6 })[t.priority] ?? 0.8), text: `Continue "${t.title}"`, href: `#/tasks/${t.id}`, why: t.priority ? `${t.priority.toLowerCase()} priority, ${t.progress}% done.` : `${t.progress}% done; priority not set yet.` })
   }
   const pending = db.prepare(`SELECT COUNT(*) AS n FROM evidence_task_links l JOIN external_evidence x ON x.id = l.evidence_id WHERE x.org_id = ? AND (l.contributor_id = ? OR x.actor_user_id = ?) AND l.status = 'suggested'`).get(ctx.orgId, userId, userId).n
   if (pending && userId === ctx.user.id) out.push({ rank: 6, text: `Confirm ${pending} suggested evidence link(s)`, href: '#/evidence', why: 'Confirmed evidence makes your work visible in analyses.' })

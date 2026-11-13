@@ -16,6 +16,7 @@ import { renderAssistant, renderCopilot } from './views/assistant.js'
 import { renderContributions, renderJourney } from './views/journeys.js'
 import { renderReviews } from './views/reviews.js'
 import { renderSlackIntake } from './views/assignments.js'
+import { renderReviewQueue, renderAnalytics } from './views/expectations.js'
 import { BRAND, logoMark } from './brand.js'
 
 const LOGO = raw(logoMark(28))
@@ -41,6 +42,8 @@ const NAV = {
     { key: 'intelligence', label: 'Team Intelligence', href: '#/contribution', icon: 'intelligence', tab: 'Team' },
     { key: 'team-tasks', label: 'Tasks', href: '#/team-tasks', icon: 'tasks', tab: 'Tasks' },
     { key: 'slack-intake', label: 'Slack Intake', href: '#/slack-intake', icon: 'hash' },
+    { key: 'review', label: 'Review Queue', href: '#/review', icon: 'flag', count: 'review' },
+    { key: 'analytics', label: 'Work Analytics', href: '#/analytics', icon: 'trending' },
     { key: 'reviews', label: 'Contribution Reviews', href: '#/reviews', icon: 'reviews', count: 'reviews', tab: 'Reviews' },
     { key: 'copilot', label: 'Manager Copilot', href: '#/copilot', icon: 'copilot' },
     { key: 'contributions', label: 'Contribution Journeys', href: '#/contributions', icon: 'journeys' },
@@ -64,6 +67,7 @@ const NAV = {
     { key: 'settings', label: 'Profile', href: '#/settings/profile', icon: 'profile' },
     { section: 'More' },
     { key: 'requests', label: 'Task Requests', href: '#/requests', icon: 'requests', count: 'requests' },
+    { key: 'analytics', label: 'My Work Analytics', href: '#/analytics', icon: 'trending' },
     { key: 'impact', label: 'Outcomes', href: '#/impact', icon: 'award' }
   ]
 }
@@ -180,7 +184,8 @@ async function refreshCounts() {
   try {
     const [n, r] = await Promise.all([api('/api/notifications?unread=true'), app.isManager ? api('/api/requests?status=PENDING') : Promise.resolve([])])
     const sig = app.isManager ? await api('/api/signals?scope=team').catch(() => []) : []
-    app.counts = { unread: n.unread, requests: r.filter((x) => x.requestedBy !== app.me.id).length, reviews: sig.filter((x) => x.severity !== 'low').length }
+    const queue = app.isManager ? await api('/api/parameter-review').catch(() => []) : []
+    app.counts = { unread: n.unread, requests: r.filter((x) => x.requestedBy !== app.me.id).length, reviews: sig.filter((x) => x.severity !== 'low').length, review: queue.length }
     const items = [...navItems(), ...footItems()].filter((x) => x.count)
     document.querySelectorAll('#shell a[data-key]').forEach((a) => {
       const item = items.find((x) => x.key === a.dataset.key && a.closest('.nav, .foot-nav'))
@@ -209,6 +214,8 @@ const ROUTES = [
   [/^#\/contributions$/, 'contributions', () => renderContributions],
   [/^#\/journey\/([0-9a-f-]{36})$/, 'contributions', (m) => (main) => renderJourney(main, m[1])],
   [/^#\/reviews$/, 'reviews', () => renderReviews],
+  [/^#\/review$/, 'review', () => renderReviewQueue],
+  [/^#\/analytics$/, 'analytics', () => renderAnalytics],
   [/^#\/copilot$/, 'copilot', () => renderCopilot],
   [/^#\/contribution\/([0-9a-f-]{36})$/, 'contributions', (m) => (main, q) => renderPerson(main, m[1], q)],
   [/^#\/automations$/, 'automations', () => renderAutomations],

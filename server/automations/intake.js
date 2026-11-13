@@ -248,7 +248,7 @@ export function receiveIntakeEvent(db, id, bearer, body) {
   try {
     const out = createExternalRequest(db, r.org_id, {
       title: parsed.title.length >= 1 ? parsed.title : 'Request', description: parsed.description, requester: parsed.requester, externalRef: parsed.externalRef,
-      reason: `Arrived by ${r.app === 'gmail' ? `email (Gmail label “${r.target_label}”)` : `Slack (${r.target_label})`}.`, suggestedPriority: 'MEDIUM'
+      reason: `Arrived by ${r.app === 'gmail' ? `email (Gmail label “${r.target_label}”)` : `Slack (${r.target_label})`}.`, suggestedPriority: null
     }, { defaultTeamId: r.team_id })
     db.prepare('UPDATE automation_execution_logs SET subject_type = ?, subject_id = ? WHERE id = ?').run('intake', r.id, logId)
     finishLog(db, logId, null, { status: out.duplicate ? 'SKIPPED' : 'SUCCEEDED', summary: out.duplicate ? 'Already received: the existing request was kept.' : `Pending task request created: ${parsed.title.slice(0, 80)}` })

@@ -4,7 +4,7 @@ import { app } from '../app.js'
 
 const REPORTS = [['weekly', 'Weekly team summary'], ['workload', 'Team workload'], ['status', 'Task status distribution'], ['overdue', 'Overdue tasks'], ['blockers', 'Blocker history'], ['contributions', 'Employee contributions'], ['impact', 'Verified impact']]
 const LABELS = { person: 'Person', active: 'Active', assigned: 'Not started', inProgress: 'In progress', blocked: 'Blocked', inReview: 'In review', overdue: 'Overdue', atRisk: 'At risk', critical: 'Critical', status: 'Status', tasks: 'Tasks', task: 'Task', assignee: 'Owner', priority: 'Priority', dueAt: 'Due', hoursOverdue: 'Hours overdue', openBlockers: 'Open blockers', description: 'Description', dependency: 'Dependency', reportedAt: 'Reported', hoursOpen: 'Hours open', resolution: 'Resolution', verified: 'Verified', pending: 'Pending', rejected: 'Not verified', prevention: 'Prevention', learning: 'Learning', reusable: 'Reusable', quality: 'Quality', categories: 'Categories', title: 'Title', category: 'Category', outcomeType: 'Kind', result: 'Result', value: 'Value', unit: 'Unit', valueKind: 'Measured / estimate', verifiedAt: 'Verified' }
-const cell = (k, v) => (/At$/.test(k) && v ? d(v) : v ?? '')
+const cell = (k, v) => (/At$/.test(k) && v ? d(v) : k === 'priority' && !v ? 'Not set' : v ?? '')
 
 export async function renderReports(main, q) {
   const type = q.get('type') || 'weekly'

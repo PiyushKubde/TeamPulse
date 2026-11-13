@@ -40,7 +40,7 @@ export async function renderRequests(main, q) {
       <div class="field"><label for="r-d">Description</label><textarea id="r-d" name="description" maxlength="5000"></textarea></div>
       <div class="field"><label for="r-r">Reason for the task</label><textarea id="r-r" name="reason" required maxlength="2000"></textarea></div>
       <div class="field"><label for="r-o">Expected outcome</label><textarea id="r-o" name="expectedOutcome" maxlength="2000"></textarea></div>
-      <div class="fields"><div class="field"><label for="r-p">Suggested priority</label><select id="r-p" name="suggestedPriority">${['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((p) => html`<option ${p === 'MEDIUM' ? raw('selected') : ''} value="${p}">${p[0] + p.slice(1).toLowerCase()}</option>`)}</select></div>
+      <div class="fields"><div class="field"><label for="r-p">Suggested priority</label><select id="r-p" name="suggestedPriority"><option value="" selected>No suggestion</option>${['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((p) => html`<option value="${p}">${p[0] + p.slice(1).toLowerCase()}</option>`)}</select></div>
       <div class="field"><label for="r-due">Suggested deadline</label><input id="r-due" name="suggestedDueAt" type="datetime-local"></div></div>
       <div class="row end"><button class="btn ghost" data-close>Cancel</button><button class="btn" type="submit">Send for approval</button></div></form>`.toString(), (el, close) => {
       bindForm(el.querySelector('#f'), (b) => api('/api/requests', { method: 'POST', body: { ...b, suggestedDueAt: fromLocalInput(b.suggestedDueAt) } }), { onSuccess: () => { close(); toast('Suggestion sent.'); reload() } })
@@ -53,7 +53,7 @@ export async function renderRequests(main, q) {
     modal(html`<h2 id="modal-title">Approve: ${r.title}</h2><p class="muted">Approving creates an official task. Adjust anything before it is created.</p><form id="f"><div class="form-error"></div>
       <div class="fields">
         <div class="field"><label for="a-a">Assign to</label><select id="a-a" name="assigneeId"><option value="">(unassigned)</option>${people.map((p) => html`<option value="${p.userId}" ${p.userId === (r.suggestedAssigneeId || r.requestedBy) ? raw('selected') : ''}>${p.name}</option>`)}</select></div>
-        <div class="field"><label for="a-p">Priority</label><select id="a-p" name="priority">${['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((p) => html`<option value="${p}" ${p === r.suggestedPriority ? raw('selected') : ''}>${p[0] + p.slice(1).toLowerCase()}</option>`)}</select></div>
+        <div class="field"><label for="a-p">Priority</label><select id="a-p" name="priority"><option value="" ${r.suggestedPriority ? '' : raw('selected')}>Decide later</option>${['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((p) => html`<option value="${p}" ${p === r.suggestedPriority ? raw('selected') : ''}>${p[0] + p.slice(1).toLowerCase()}</option>`)}</select></div>
         <div class="field"><label for="a-d">Due</label><input id="a-d" name="dueAt" type="datetime-local" value="${toLocalInput(r.suggestedDueAt)}"></div>
       </div>
       <div class="field"><label for="a-n">Note to the requester (optional)</label><input id="a-n" name="note" type="text" maxlength="2000"></div>

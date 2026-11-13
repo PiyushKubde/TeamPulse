@@ -9,6 +9,7 @@ import * as v from '../validate.js'
 import { audit } from './audit.js'
 import { emit } from './events.js'
 import { recordEvent, pendingTransfer } from './tasks.js'
+import { suggestValues } from './task-parameters.js'
 
 const userName = (db, id) => (id ? db.prepare('SELECT name FROM users WHERE id = ?').get(id)?.name ?? null : null)
 const getTask = (db, id) => db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
@@ -19,16 +20,22 @@ const TRANSFERABLE = ['PENDING_ACCEPTANCE', 'ASSIGNED', 'IN_PROGRESS', 'BLOCKED'
  * intake owner as `creatorId` (the requester is recorded on the task, never made its owner).
  * One task per Slack message (unique slack_message_ref), so a repeated delivery cannot create a second one.
  */
-export function createIntakeTask(db, { orgId, creatorId, teamId, assigneeId, title, description, expectedOutcome = null, priority = 'MEDIUM', dueAt = null, slackRef, requester = {}, support = [], reviewers = [], extraction = null }) {
+export function createIntakeTask(db, { orgId, creatorId, teamId, assigneeId, title, description, expectedOutcome = null, priority = null, dueAt = null, priorityConfidence = null, deadlineConfidence = null, slackRef, requester = {}, support = [], reviewers = [], extraction = null }) {
   const ts = now()
   const id = uuid()
   const assignmentId = uuid()
   transaction(db, () => {
     db.prepare(`INSERT INTO tasks (id, org_id, team_id, title, description, expected_outcome, created_by, assignee_id, priority, status, progress, due_at, links, assigned_at,
                 acceptance_state, slack_message_ref, status_changed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_ACCEPTANCE', 0, ?, '[]', ?, 'pending', ?, ?, ?, ?)`)
-      .run(id, orgId, teamId, title, description, expectedOutcome, creatorId, assigneeId, priority, dueAt, ts, slackRef, ts, ts, ts)
+      .run(id, orgId, teamId, title, description, null, creatorId, assigneeId, null, null, ts, slackRef, ts, ts, ts)
+    db.prepare("UPDATE tasks SET origin = 'SLACK' WHERE id = ?").run(id)
     const t = getTask(db, id)
-    recordEvent(db, t, creatorId, 'created', { title, priority, fromSlack: true, requester: requester.name || null, extraction })
+    // What the message said about priority, deadline and outcome is a suggestion with its source and confidence, never a confirmed value:
+    // the columns stay empty until a manager confirms, so an unconfirmed deadline can never be overdue or raise a deadline alert.
+    const evidence = { slackRef, extractedAt: ts, extraction: extraction || 'deterministic' }
+    suggestValues(db, t, { priority, dueAt, expectedOutcome }, { source: 'SLACK_EXTRACTION', actorId: creatorId, confidence: null, evidence, reason: 'Read from the Slack message by fixed rules; not confirmed.' })
+    for (const [field, conf] of [['priority', priorityConfidence], ['deadline', deadlineConfidence]]) if (conf) db.prepare("UPDATE task_parameter_events SET confidence = ? WHERE task_id = ? AND field = ? AND status = 'SUGGESTED'").run(conf, id, field)
+    recordEvent(db, t, creatorId, 'created', { title, priority: null, fromSlack: true, requester: requester.name || null, extraction })
     recordEvent(db, t, creatorId, 'assigned', { to: assigneeId, toName: userName(db, assigneeId), via: 'slack_mention', awaitingAcceptance: true })
     db.prepare(`INSERT INTO task_assignments (id, org_id, task_id, user_id, source, state, assigned_by, assigned_at) VALUES (?, ?, ?, ?, 'SLACK_MENTION', 'PENDING', ?, ?)`)
       .run(assignmentId, orgId, id, assigneeId, creatorId, ts)
@@ -38,6 +45,7 @@ export function createIntakeTask(db, { orgId, creatorId, teamId, assigneeId, tit
     for (const u of reviewers) add(u, 'REVIEWER')
   })
   emit({ type: 'assignment.created', orgId, taskId: id, assigneeId, assignmentId, actorId: creatorId, via: 'slack' })
+  emit({ type: 'parameters.proposed', orgId, taskId: id, actorId: creatorId, source: 'SLACK_EXTRACTION' })
   return { taskId: id, assignmentId }
 }
 

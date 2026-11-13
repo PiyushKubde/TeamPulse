@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto'
 import { json } from '../db.js'
 import { usableLinks } from '../evidence/matching.js'
 import { deadlineContext } from '../services/deadline-explanations.js'
+import { getExpectations } from '../services/task-parameters.js'
 
 const APP_LABEL = { github: 'GitHub', slack: 'Slack', gmail: 'Gmail', 'google-calendar': 'Google Calendar', 'google-sheets': 'Google Sheets' }
 const MAX_CANDIDATES = 8
@@ -32,6 +33,32 @@ export function reportsQualityProblem(text) {
     if (!NEGATED.test(before)) return true
   }
   return false
+}
+
+/**
+ * What the manager expected of the task: the ORIGINAL values (the assessment baseline) beside the current ones, how many times each was
+ * changed, which values are still only suggested or proposed (not expectations), and the employee's change requests with their outcome.
+ */
+function expectationsContext(db, task) {
+  const events = db.prepare('SELECT field, kind, status, source, new_value, reason, created_at FROM task_parameter_events WHERE task_id = ? ORDER BY created_at, rowid').all(task.id)
+  const ex = getExpectations(db, task.id)
+  const confirmed = (f) => events.filter((e) => e.field === f && e.status === 'CONFIRMED')
+  const pair = (f, current) => {
+    const c = confirmed(f)
+    return { original: c.length ? json(c[0].new_value, null) : null, current: current ?? null, changes: Math.max(0, c.length - 1), confirmed: current !== null && current !== undefined }
+  }
+  const latest = new Map()
+  for (const e of events) latest.set(e.field, e)
+  const unconfirmed = [...latest.values()].filter((e) => e.status === 'SUGGESTED' || e.status === 'PROPOSED').map((e) => ({ field: e.field, state: e.status, source: e.source }))
+  const requests = db.prepare('SELECT kind, status, reason, proposed, decision_note, created_at FROM task_change_requests WHERE task_id = ? ORDER BY created_at').all(task.id)
+  return {
+    note: 'The manager\'s expectations. "original" is the baseline set first; "current" is what applies now. Assess the work against the original unless a change was approved. Priority is a label, not evidence of complexity or contribution. Values listed under "unconfirmed" were only suggested or proposed: they are not expectations.',
+    priority: pair('priority', task.priority), deadline: pair('deadline', task.due_at), expectedOutcome: pair('expected_outcome', task.expected_outcome),
+    complexityExpectation: ex?.complexity_expectation ?? null, workType: ex?.work_type ?? null, businessImpact: clip(ex?.business_impact, 600), successCriteria: clip(ex?.success_criteria, 800),
+    dependencies: clip(ex?.dependencies, 500), context: clip(ex?.context, 800),
+    unconfirmed,
+    changeRequests: requests.map((r) => ({ kind: r.kind, status: r.status, reason: clip(r.reason, 300), proposed: json(r.proposed, {}), decisionNote: clip(r.decision_note, 300), at: r.created_at }))
+  }
 }
 
 export function buildEvidencePack(db, task, subjectId) {
@@ -177,12 +204,13 @@ export function buildEvidencePack(db, task, subjectId) {
   const pack = {
     person: { role: role.role || null, title: role.title || null, team: role.team || null, note: 'The person is referred to as "the employee"; names are left out on purpose.' },
     task: {
-      ref: 'task', title: clip(task.title, 200), description: clip(task.description, 3000), expectedOutcome: clip(task.expected_outcome, 1500), priority: task.priority,
+      ref: 'task', title: clip(task.title, 200), description: clip(task.description, 3000), expectedOutcome: clip(task.expected_outcome, 1500), priority: task.priority, priorityConfirmed: task.priority !== null,
       status: task.status, dueAt: task.due_at, createdAt: task.created_at, createdBy: roleOf(task.created_by), assignedTo: task.assignee_id === subjectId ? 'employee' : 'someone else',
       note: 'Title and priority are labels set by people; they are not evidence of complexity.'
     },
     ownership,
     deadline,
+    expectations: expectationsContext(db, task),
     items,
     signals: {
       reviewApproved: signals.approved, changesRequested: signals.changesRequested, reopenedAfterCompletion: signals.reopened,

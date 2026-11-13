@@ -45,3 +45,53 @@ export function addDays({ year, month, day }, n) {
   const d = new Date(Date.UTC(year, month - 1, day + n))
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
 }
+
+// ---------- working calendar ----------
+export const DEFAULT_CALENDAR = { days: [1, 2, 3, 4, 5], start: '09:00', end: '18:00' }
+
+const hm = (s) => { const [h, m] = String(s).split(':').map(Number); return h * 60 + m }
+
+export function validCalendar(c) {
+  return Boolean(c) && Array.isArray(c.days) && c.days.length > 0 && c.days.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+    && /^([01]\d|2[0-3]):[0-5]\d$/.test(c.start || '') && /^([01]\d|2[0-3]):[0-5]\d$/.test(c.end || '') && hm(c.end) > hm(c.start)
+}
+
+export function orgCalendar(db, orgId) {
+  const c = json(db.prepare('SELECT settings FROM organizations WHERE id = ?').get(orgId)?.settings, {}).workingCalendar
+  return validCalendar(c) ? c : DEFAULT_CALENDAR
+}
+
+/** Start (ms) of the first working window at or after `ms` in `tz`, and the end (ms) of the window containing/after it. */
+function windowAt(ms, calendar, tz) {
+  let day = (() => { const p = zonedParts(ms, tz); return { year: p.year, month: p.month, day: p.day } })()
+  for (let i = 0; i < 400; i++) {
+    const weekday = new Date(Date.UTC(day.year, day.month - 1, day.day)).getUTCDay()
+    if (calendar.days.includes(weekday)) {
+      const [sh, sm] = calendar.start.split(':').map(Number)
+      const [eh, em] = calendar.end.split(':').map(Number)
+      const start = zonedTimeToMs({ ...day, hour: sh, minute: sm }, tz)
+      const end = zonedTimeToMs({ ...day, hour: eh, minute: em }, tz)
+      if (end > ms) return { start: Math.max(start, ms), end }
+    }
+    day = addDays(day, 1)
+  }
+  throw new Error('No working time found in the calendar.')
+}
+
+/**
+ * The moment `amount` of working time has passed since `startMs`, counting only the organization's working days and hours
+ * (a working day is the length of its working window). Used for suggested response targets, never for confirmed deadlines.
+ */
+export function addWorkingTime(startMs, amount, unit, calendar = DEFAULT_CALENDAR, tz = DEFAULT_TIMEZONE) {
+  const dayMs = (hm(calendar.end) - hm(calendar.start)) * 60000
+  let remaining = unit === 'working_days' ? amount * dayMs : amount * 3600000
+  let cursor = startMs
+  for (let guard = 0; guard < 2000 && remaining > 0; guard++) {
+    const w = windowAt(cursor, calendar, tz)
+    const take = Math.min(remaining, w.end - w.start)
+    cursor = w.start + take
+    remaining -= take
+    if (remaining > 0) cursor = w.end
+  }
+  return cursor
+}

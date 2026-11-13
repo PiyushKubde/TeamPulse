@@ -15,7 +15,7 @@ import { RATED, rubricFor } from './rubric.js'
 
 // Bump PROMPT_VERSION whenever the system prompt, the user message or the output schema changes; guardrail changes
 // bump GUARDRAIL_VERSION (guardrails.js). Both are part of the dedupe hash and stored with every run and assessment.
-export const PROMPT_VERSION = 'work-eval-2026-11-v4'
+export const PROMPT_VERSION = 'work-eval-2026-11-v5'
 const MAX_ATTEMPTS = 3
 const inflight = new Set()
 
@@ -45,6 +45,7 @@ export function systemPrompt(rubric) {
     '- Items of kind "candidate" are not linked to this task: never cite them. In evidence_matches say for each whether it seems to belong to this task.',
     '- "deadline" (when present) lists missed deadlines with their circumstances. A missed deadline is an operational signal, never a measure of the person or the work: do not lower any rating because of it alone. Weigh blockers outside the employee\'s control, changed deadlines, scope changes, and the employee\'s own explanation (a claim) with the manager\'s review of it.',
     '- "ownership" (when present) says how the task reached the employee. A Slack tag only proposed an owner; "employeeAcceptedOwnership" is acknowledged responsibility. Declining, asking for clarification or handing a task to a teammate is not a mark against the employee. Supporting contributors, reviewers and the requester did not own the task: credit them only with what the evidence shows they did.',
+    '- "expectations" (when present) holds the manager\'s ORIGINAL expectations (the baseline) beside the current ones. Judge the work against the original unless the pack shows an approved change. A deadline or priority changed by a manager or through an approved request is context, never a reason to lower a rating; priority is never evidence of complexity, quality or contribution. Values under "unconfirmed" were only suggested or proposed and are not expectations. An employee\'s change request is a normal part of working, not a signal about the person.',
     '- Write plainly for a busy manager. No praise or criticism that the evidence does not support.'
   ].join('\n')
 }

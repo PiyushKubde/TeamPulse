@@ -64,8 +64,12 @@ test('Slack message → task for the tagged person: requester, source, deadline,
     assert.equal(task.created_by, s.manager.id, 'the requester does not become the creator or owner')
     assert.equal(task.title, 'Investigate the payment failure issue and fix it')
     assert.equal(task.description, 'please investigate the payment failure issue and fix it by tomorrow', 'no stray punctuation where the tag was')
-    assert.equal(task.due_at, '2026-11-13T18:29:00.000Z', 'tomorrow, end of day in the organization timezone')
-    assert.equal(task.priority, 'MEDIUM', 'no priority stated → the default')
+    // What Slack said is a suggestion until a manager confirms it: the confirmed columns stay empty.
+    assert.equal(task.due_at, null, 'a deadline read from Slack is not a confirmed deadline'); assert.equal(task.priority, null, 'no priority stated → unresolved, never a silent MEDIUM'); assert.equal(task.origin, 'SLACK')
+    const sug = t.db.prepare("SELECT * FROM task_parameter_events WHERE task_id = ? AND field = 'deadline' AND status = 'SUGGESTED'").get(task.id)
+    assert.equal(JSON.parse(sug.new_value), '2026-11-13T18:29:00.000Z', 'tomorrow, end of day in the organization timezone'); assert.equal(sug.source, 'SLACK_EXTRACTION'); assert.equal(sug.confidence, 'MEDIUM')
+    assert.equal(JSON.parse(sug.evidence).slackRef, `slack:${CH}:${at()}`)
+    assert.equal(t.db.prepare("SELECT COUNT(*) AS n FROM task_parameter_events WHERE task_id = ? AND field = 'priority'").get(task.id).n, 0, 'nothing was said about priority, so nothing is invented')
     assert.equal(task.team_id, s.teamA)
     // The source is kept for audit and traceability.
     const item = t.db.prepare('SELECT * FROM slack_intake_items WHERE task_id = ?').get(task.id)
@@ -81,7 +85,7 @@ test('Slack message → task for the tagged person: requester, source, deadline,
     await t.settled()
     const n = t.db.prepare(`SELECT * FROM notifications WHERE user_id = ? AND task_id = ?`).get(s.employee.id, task.id)
     assert.equal(n.kind, 'task_assignment'); assert.equal(n.title, 'New task: Investigate the payment failure issue and fix it'); assert.equal(n.link, `#/tasks/${task.id}`)
-    assert.match(n.body, /Dana Director tagged Eve Employee in Slack/); assert.match(n.body, /Priority: medium/); assert.match(n.body, /23:59 \(Asia\/Kolkata\)/); assert.match(n.body, /Accept, decline or transfer/)
+    assert.match(n.body, /Dana Director tagged Eve Employee in Slack/); assert.match(n.body, /Priority: not set yet/); assert.match(n.body, /No confirmed deadline yet/); assert.match(n.body, /Accept, decline or transfer/)
     // They see it as awaiting their answer; nobody else does.
     const inbox = await t.call('/api/assignments/inbox', { as: s.employee })
     assert.equal(inbox.body.awaitingAcceptance.length, 1); assert.equal(inbox.body.awaitingAcceptance[0].requesterName, 'Dana Director')
@@ -189,7 +193,8 @@ test('duplicate Slack deliveries never create a second task; thread context supp
     assert.equal(reply.body.status, 'created')
     const task = taskOf(t, reply.body.taskId)
     assert.equal(task.title, 'Checkout page returns a 500 error since the last deploy'); assert.match(task.description, /Checkout page returns a 500/)
-    assert.equal(task.due_at, '2026-11-13T23:59:00.000Z', 'the deadline is relative to when the reply was posted')
+    assert.equal(task.due_at, null)
+    assert.equal(JSON.parse(t.db.prepare("SELECT new_value FROM task_parameter_events WHERE task_id = ? AND field = 'deadline' AND status = 'SUGGESTED'").get(task.id).new_value), '2026-11-13T23:59:00.000Z', 'the suggested deadline is relative to when the reply was posted')
     const item = t.db.prepare('SELECT thread_ts, extracted FROM slack_intake_items WHERE task_id = ?').get(task.id)
     assert.equal(item.thread_ts, at(10)); assert.equal(JSON.parse(item.extracted).usedThreadContext, true)
     // A thread reply is not read by an intake that only creates requests.

@@ -64,7 +64,7 @@ export function handleEvent(db, e) {
   switch (e.type) {
     case 'task.assigned':
       if (!task || e.assigneeId === e.actorId) return
-      raiseAlert(db, { orgId: e.orgId, rule: 'task_assigned', userIds: [e.assigneeId], taskId: task.id, title: `New task: ${task.title}`, body: `${nameOf(db, e.actorId)} assigned you a ${task.priority.toLowerCase()} priority task${task.due_at ? ` due ${task.due_at.slice(0, 16).replace('T', ' ')} UTC` : ''}.`, link: taskLink(task.id), anchor: task.assigned_at })
+      raiseAlert(db, { orgId: e.orgId, rule: 'task_assigned', userIds: [e.assigneeId], taskId: task.id, title: `New task: ${task.title}`, body: `${nameOf(db, e.actorId)} assigned you a ${task.priority ? `${task.priority.toLowerCase()} priority ` : ''}task${task.due_at ? ` due ${task.due_at.slice(0, 16).replace('T', ' ')} UTC` : ''}.`, link: taskLink(task.id), anchor: task.assigned_at })
       return
     case 'task.created_unassigned':
       return
@@ -73,7 +73,7 @@ export function handleEvent(db, e) {
       if (!task) return
       const requester = db.prepare('SELECT sender_name FROM slack_intake_items WHERE task_id = ?').get(task.id)?.sender_name
       const who = e.via === 'slack' ? `${requester || 'Someone'} tagged ${nameOf(db, e.assigneeId)} in Slack` : e.via === 'transfer' ? `${nameOf(db, e.actorId)} handed this over` : `${nameOf(db, e.actorId)} assigned ${nameOf(db, e.assigneeId)}`
-      const body = [`${who}.`, task.description ? task.description.slice(0, 280) : null, `Priority: ${task.priority.toLowerCase()}.`, task.due_at ? `Due ${dueText(task.due_at, db, task.org_id)}.` : 'No deadline set.', 'Accept, decline or transfer it in KONVO.'].filter(Boolean).join(' ')
+      const body = [`${who}.`, task.description ? task.description.slice(0, 280) : null, (task.priority ? `Priority: ${task.priority.toLowerCase()}.` : 'Priority: not set yet.'), task.due_at ? `Due ${dueText(task.due_at, db, task.org_id)}.` : 'No confirmed deadline yet.', 'Accept, decline or transfer it in KONVO.'].filter(Boolean).join(' ')
       raiseAlert(db, { orgId: e.orgId, rule: 'task_assignment', userIds: [e.assigneeId], taskId: task.id, title: `New task: ${task.title}`, body, link: taskLink(task.id), anchor: e.assignmentId })
       return
     }
@@ -100,7 +100,35 @@ export function handleEvent(db, e) {
       if (e.decision === 'CANCEL') { if (e.actorId !== e.toUserId) notice(e.toUserId, `Transfer withdrawn: ${task.title}`, 'You no longer need to answer it.') } else if (e.fromUserId !== e.actorId) notice(e.fromUserId, `Transfer ${verb}: ${task.title}`, e.decision === 'ACCEPT' ? `${nameOf(db, e.toUserId)} is now the owner.` : `${nameOf(db, e.toUserId)} declined, so it stays with you.${why}`)
       for (const m of managersForTask(db, task).filter((id) => id !== e.actorId && id !== e.fromUserId)) notice(m, `Transfer ${verb}: ${task.title}`, `${nameOf(db, e.fromUserId)} → ${nameOf(db, e.toUserId)}.${why}`)
       // A transfer is a new assignment: the new owner hears about it (LOW), and the previous owner's history stays.
-      if (e.decision === 'ACCEPT' && e.assignmentId) raiseAlert(db, { orgId: e.orgId, rule: 'task_assignment', userIds: [e.toUserId], taskId: task.id, title: `Task handed to you: ${task.title}`, body: `${nameOf(db, e.fromUserId)} transferred it to you and you accepted. ${task.due_at ? `Due ${dueText(task.due_at, db, task.org_id)}.` : 'No deadline set.'}`, link: taskLink(task.id), anchor: e.assignmentId })
+      if (e.decision === 'ACCEPT' && e.assignmentId) raiseAlert(db, { orgId: e.orgId, rule: 'task_assignment', userIds: [e.toUserId], taskId: task.id, title: `Task handed to you: ${task.title}`, body: `${nameOf(db, e.fromUserId)} transferred it to you and you accepted. ${task.due_at ? `Due ${dueText(task.due_at, db, task.org_id)}.` : 'No confirmed deadline yet.'}`, link: taskLink(task.id), anchor: e.assignmentId })
+      return
+    }
+    // ---- manager-led expectations ----
+    case 'parameters.proposed': {
+      if (!task) return
+      const bySlack = e.source === 'SLACK_EXTRACTION'
+      for (const m of managersForTask(db, task).filter((id) => id !== e.actorId || bySlack)) notifyInApp(db, { orgId: e.orgId, userId: m, kind: 'parameters_review', title: `Confirm priority and deadline: ${task.title}`, body: bySlack ? 'Taken from a Slack message. Nothing is confirmed until you confirm it.' : `${nameOf(db, e.actorId)} created this task. What they entered is a proposal until you confirm it.`, link: taskLink(task.id), taskId: task.id, dedupeKey: `params-review:${task.id}:${m}` })
+      return
+    }
+    case 'parameters.changed': {
+      if (!task || !task.assignee_id || task.assignee_id === e.actorId) return
+      const names = { priority: 'priority', deadline: 'deadline', expected_outcome: 'expected outcome', complexity: 'complexity expectation', business_impact: 'business impact', dependencies: 'dependencies', success_criteria: 'success criteria', context: 'context', work_type: 'work type', response_sla: 'response target', factors: 'priority factors', verified_incident: 'incident flag' }
+      const fields = (e.fields || []).filter((f) => !['factors', 'verified_incident'].includes(f))
+      if (!fields.length) return
+      notifyInApp(db, { orgId: e.orgId, userId: task.assignee_id, kind: 'task_expectations_changed', title: `Updated by ${nameOf(db, e.actorId)}: ${task.title}`, body: `Changed: ${fields.map((f) => names[f] || f).join(', ')}.`, link: taskLink(task.id), taskId: task.id, dedupeKey: `params-changed:${task.id}:${task.updated_at}` })
+      return
+    }
+    case 'change_request.created': {
+      if (!task) return
+      const label = { DEADLINE: 'a different deadline', PRIORITY: 'a different priority', SCOPE: 'a scope change', CLARIFICATION: 'clarification' }[e.kind] || 'a change'
+      for (const m of managersForTask(db, task).filter((id) => id !== e.actorId)) notifyInApp(db, { orgId: e.orgId, userId: m, kind: 'change_request', title: `${nameOf(db, e.actorId)} asks for ${label}: ${task.title}`, body: 'Approve, reject or answer it on the task. Nothing changes until you decide.', link: taskLink(task.id), taskId: task.id, dedupeKey: `change-request:${e.requestId}:${m}` })
+      return
+    }
+    case 'change_request.decided': {
+      if (!task || !e.requesterId) return
+      const verb = { APPROVE: 'approved', REJECT: 'not approved', ANSWER: 'answered' }[e.decision] || 'decided'
+      const note = db.prepare('SELECT decision_note FROM task_change_requests WHERE id = ?').get(e.requestId)?.decision_note
+      notifyInApp(db, { orgId: e.orgId, userId: e.requesterId, kind: 'change_request_decided', title: `Your request was ${verb}: ${task.title}`, body: note ? String(note).slice(0, 400) : null, link: taskLink(task.id), taskId: task.id, dedupeKey: `change-request-decided:${e.requestId}` })
       return
     }
     case 'deadline.explanation_submitted':

@@ -296,6 +296,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .prio.prio-HIGH { color: var(--warn-ink); }
 .prio.prio-MEDIUM { color: var(--text-2); }
 .prio.prio-LOW { color: var(--text-3); }
+.prio.prio-none { color: var(--text-3); font-weight: var(--fw-medium, 500); font-style: italic; }
 .badge.prio-CRITICAL { background: var(--bad-soft); color: var(--bad-ink); }
 .badge.prio-HIGH { background: var(--warn-soft); color: var(--warn-ink); }
 .badge.prio-MEDIUM { background: var(--info-soft); color: var(--info-ink); }
@@ -920,3 +921,22 @@ a.decision:not(.open) .d-value { font-size: var(--fs-base); color: var(--ok-ink)
 @media (max-width: 760px) { #map-form .fields { grid-template-columns: 1fr; } }
 /* Seven or more summary tiles wrap 4 + 4, not 6 + 2 */
 @media (min-width: 900px) { .stats:has(> :nth-child(7)) { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+/* ---------- manager-led expectations, review queue and analytics ---------- */
+.exp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
+.exp-row { border: 1px solid var(--border-subtle); border-radius: var(--r-md); padding: 10px 12px; background: var(--surface); min-width: 0; }
+.exp-row[data-state="UNRESOLVED"] { background: var(--surface-2); }
+.exp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.exp-value { overflow-wrap: anywhere; }
+.exp-suggestion { margin-top: 8px; padding: 8px 10px; border: 1px dashed var(--border-strong); border-radius: var(--r-md); background: var(--surface-2); }
+.exp-targets, .exp-reco, .exp-requests, .exp-history { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--border-subtle); }
+.exp-rec { margin-top: 10px; display: grid; gap: 8px; }
+.exp-rec table, .analytics-filters + div table { width: 100%; }
+.exp-rec th, .exp-rec td { text-align: left; vertical-align: top; padding: 4px 8px 4px 0; }
+.err-text { color: var(--bad-ink); }
+[aria-invalid="true"] { border-color: var(--bad-ink); }
+.analytics-filters .fields { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.tabs a.tab-link.active, .tabs a[aria-selected="true"] { color: var(--text); border-bottom-color: var(--text); }
+#an-body table { width: 100%; border-collapse: collapse; }
+#an-body td, #an-body th { padding: 5px 8px 5px 0; text-align: left; }
+@media (max-width: 760px) { .exp-grid { grid-template-columns: 1fr; } #an-body .grid.three { grid-template-columns: 1fr; } }

@@ -183,7 +183,7 @@ export function userContext(db, userId, orgId) {
 
 function taskMessage(db, task, appUrl, { forAssignee }) {
   const assignee = db.prepare('SELECT name, email FROM users WHERE id = ?').get(task.assignee_id)
-  const lines = [forAssignee ? `${assignee.name}, you have a new ${task.priority.toLowerCase()} priority task: ${task.title}` : `New ${task.priority.toLowerCase()} priority task for ${assignee.name}: ${task.title}`,
+  const lines = [forAssignee ? `${assignee.name}, you have a new ${task.priority ? `${task.priority.toLowerCase()} priority ` : ''}task: ${task.title}` : `New ${task.priority ? `${task.priority.toLowerCase()} priority ` : ''}task for ${assignee.name}: ${task.title}`,
     task.expected_outcome ? `Expected outcome: ${task.expected_outcome}` : null,
     task.due_at ? `Due: ${task.due_at.slice(0, 16).replace('T', ' ')} UTC` : null,
     appUrl ? `Open it: ${appUrl}/#/tasks/${task.id}` : null].filter(Boolean)

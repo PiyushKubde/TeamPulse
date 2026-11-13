@@ -169,7 +169,7 @@ export function interpretMessage(text, { tz = 'UTC', nowMs = Date.now(), context
   const enough = title.split(/\s+/).length >= 3 && title.length >= 8
   return {
     kind, isTask: kind === 'TASK_REQUEST' && enough, title, description: combined.slice(0, 4000), expectedOutcome: outcome, priority,
-    dueAt: deadline?.iso ?? null, dependencies: deps, possibleBlockers: blockers, context: context ? plainText(context).slice(0, 1000) : null, roles,
+    dueAt: deadline?.iso ?? null, dueConfidence: deadline ? (/\d{4}-\d{2}-\d{2}|\d{1,2}:\d{2}|\d{1,2}\s*(am|pm)|\d{1,2}(st|nd|rd|th)?\s+[a-z]{3}|[a-z]{3,9}\s+\d{1,2}/i.test(deadline.matched || '') ? 'HIGH' : 'MEDIUM') : null, priorityConfidence: priority ? 'HIGH' : null, dependencies: deps, possibleBlockers: blockers, context: context ? plainText(context).slice(0, 1000) : null, roles,
     reason: kind !== 'TASK_REQUEST' ? `Not a task request (${kind.toLowerCase().replace('_', ' ')}).` : enough ? null : 'Not enough detail to make a task.'
   }
 }
@@ -252,15 +252,15 @@ export function processSlackTask(db, sub, p, { nowMs = Date.now() } = {}) {
     if (assigneeId) {
       const teamId = db.prepare('SELECT team_id FROM memberships WHERE org_id = ? AND user_id = ?').get(orgId, assigneeId)?.team_id || sub.team_id || null
       const { taskId } = createIntakeTask(db, {
-        orgId, creatorId: sub.owner_id, teamId, assigneeId, title: x.title, description: x.description, expectedOutcome: x.expectedOutcome, priority: x.priority || 'MEDIUM',
-        dueAt: x.dueAt, slackRef: ref, requester: { userId: senderUserId, name: senderName }, support: trustedOf('SUPPORT'), reviewers: trustedOf('REVIEWER'), extraction: 'deterministic'
+        orgId, creatorId: sub.owner_id, teamId, assigneeId, title: x.title, description: x.description, expectedOutcome: x.expectedOutcome, priority: x.priority, priorityConfidence: x.priorityConfidence,
+        dueAt: x.dueAt, deadlineConfidence: x.dueConfidence, slackRef: ref, requester: { userId: senderUserId, name: senderName }, support: trustedOf('SUPPORT'), reviewers: trustedOf('REVIEWER'), extraction: 'deterministic'
       })
       save('TASK_CREATED', null, { extraction: 'deterministic', extracted: summary, taskId })
       return { status: 'created', taskId }
     }
     const req = createExternalRequest(db, orgId, {
       title: x.title, description: [x.description, `Tagged in Slack: ${(p.mentions || []).join(', ') || 'nobody'}`].join('\n\n').slice(0, 5000), requester: senderName, externalRef: ref,
-      reason: `Slack task message that needs a manager: ${problem}`, suggestedPriority: x.priority || 'MEDIUM', suggestedDueAt: x.dueAt
+      reason: `Slack task message that needs a manager: ${problem}`, suggestedPriority: x.priority || null, suggestedDueAt: x.dueAt
     }, { defaultTeamId: sub.team_id })
     save('NEEDS_MANAGER', problem, { extraction: 'deterministic', extracted: summary, requestId: req.id })
     return { status: 'needs_manager', requestId: req.id, reason: problem }

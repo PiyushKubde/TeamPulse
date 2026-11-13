@@ -4,6 +4,7 @@ import { eventText } from './dashboard.js'
 import { openContextBuilder } from './automations.js'
 import { renderAssessmentCard } from './contribution.js'
 import { renderTaskExternalEvidence } from './evidence.js'
+import { renderExpectations } from './expectations.js'
 import { renderInbox, workflowBanners, workflowActions, sourceCard, ownershipCard, deadlineCard } from './assignments.js'
 
 let assignableCache = null
@@ -105,22 +106,41 @@ export async function openTaskForm(existing = null, { defaultTeamId = null, defa
   // When editing, show all fields; when creating, use progressive disclosure.
   const moreOpen = existing || Boolean(t.expectedOutcome || t.priority || t.dueAt || (myTeams.length > 1 && preTeam) || preAssignee)
 
+  // Managers define what is expected; an employee creating directly only proposes priority and deadline.
+  const proposing = !existing && !isRequest && !app.isManager
+  const view = existing && app.isManager ? await api(`/api/tasks/${existing.id}/parameters`).catch(() => null) : null
+  const ex = view ? { complexityExpectation: view.complexityExpectation.value, workType: view.workType.value, businessImpact: view.businessImpact.value, dependencies: view.dependencies.value, successCriteria: view.successCriteria.value, context: view.context.value } : {}
+  const COMPLEXITY = [['NOT_ASSESSED', 'Not assessed'], ['L1', 'L1: simple, routine work'], ['L2', 'L2: some judgement or coordination'], ['L3', 'L3: complex, several moving parts'], ['L4', 'L4: very complex or high-risk']]
+  const managerFields = isRequest || proposing ? '' : html`
+    <div class="fields">
+      <div class="field"><label for="t-cx">Complexity expected</label><select id="t-cx" name="complexityExpectation" data-testid="f-complexity">${COMPLEXITY.map(([v, l]) => html`<option value="${v}" ${(ex.complexityExpectation || 'NOT_ASSESSED') === v ? raw('selected') : ''}>${l}</option>`)}</select>
+        <div class="hint">Your expectation before the work starts. The analysis of the actual work is separate.</div></div>
+      <div class="field"><label for="t-wt">Work type <span class="field-hint">optional</span></label><input id="t-wt" name="workType" type="text" maxlength="40" value="${ex.workType || ''}" placeholder="e.g. Incident, Feature, Research" data-testid="f-worktype"></div>
+    </div>
+    <div class="field"><label for="t-imp">Business impact <span class="field-hint">optional</span></label><textarea id="t-imp" name="businessImpact" maxlength="2000" rows="2" placeholder="Who or what is affected if this is done, late or not done?" data-testid="f-impact">${ex.businessImpact || ''}</textarea></div>
+    <div class="field"><label for="t-dep">Dependencies <span class="field-hint">optional</span></label><textarea id="t-dep" name="dependencies" maxlength="2000" rows="2" placeholder="People, systems or decisions this relies on">${ex.dependencies || ''}</textarea></div>
+    <div class="field"><label for="t-sc">Success criteria <span class="field-hint">optional</span></label><textarea id="t-sc" name="successCriteria" maxlength="3000" rows="2" placeholder="How will you know it is done well?" data-testid="f-criteria">${ex.successCriteria || ''}</textarea></div>
+    <div class="field"><label for="t-ctx">Supporting context <span class="field-hint">optional</span></label><textarea id="t-ctx" name="context" maxlength="4000" rows="2" placeholder="Background, links to discussions, constraints">${ex.context || ''}</textarea></div>`
+
   const detailFields = html`
     <div class="field"><label for="t-out">${isRequest ? 'What outcome do you expect?' : 'Expected outcome'} <span class="field-hint">optional</span></label><textarea id="t-out" name="expectedOutcome" maxlength="2000" rows="2" placeholder="What will be different when this is done? This helps the team assess impact later.">${t.expectedOutcome || ''}</textarea></div>
     <div class="fields">
-      <div class="field"><label for="t-prio">${isRequest ? 'Suggested priority' : 'Priority'}</label><select id="t-prio" name="priority">${['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((p) => html`<option value="${p}" ${(t.priority || 'MEDIUM') === p ? raw('selected') : ''}>${p[0] + p.slice(1).toLowerCase()}</option>`)}</select></div>
-      <div class="field"><label for="t-due">${isRequest ? 'Suggested deadline' : 'Due date'} <span class="field-hint">optional</span></label><input id="t-due" name="dueAt" type="datetime-local" value="${toLocalInput(t.dueAt)}"></div>
+      <div class="field"><label for="t-prio">${isRequest ? 'Suggested priority' : proposing ? 'Proposed priority' : 'Priority'}</label><select id="t-prio" name="priority" data-testid="f-priority">${t.priority ? '' : html`<option value="" selected>${isRequest ? 'No suggestion' : proposing ? 'No proposal' : 'Not decided yet'}</option>`}${['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((p) => html`<option value="${p}" ${t.priority === p ? raw('selected') : ''}>${p[0] + p.slice(1).toLowerCase()}</option>`)}</select>
+        <div class="hint" id="t-prio-hint">${t.priority ? 'Changes are kept in the task history with your reason.' : proposing || isRequest ? 'A manager confirms the priority; nothing is official until then.' : 'Left empty, the priority stays unresolved until you confirm it. Nothing is assumed.'}</div></div>
+      <div class="field"><label for="t-due">${isRequest ? 'Suggested deadline' : proposing ? 'Proposed deadline' : 'Deadline'} <span class="field-hint">optional</span></label><input id="t-due" name="dueAt" type="datetime-local" value="${toLocalInput(t.dueAt)}" data-testid="f-deadline"><div class="hint" id="t-due-hint">${proposing ? 'A manager confirms the deadline; until then it is not used for overdue alerts.' : 'Leave empty if there is no confirmed deadline yet.'}</div></div>
       ${isRequest ? '' : html`<div class="field"><label for="t-start">Start date <span class="field-hint">optional</span></label><input id="t-start" name="startDate" type="date" value="${t.startDate || ''}"></div>`}
       ${myTeams.length > 1 ? html`<div class="field"><label for="t-team">Team</label><select id="t-team" name="teamId"><option value="">(default)</option>${myTeams.map((x) => html`<option value="${x.id}" ${preTeam === x.id ? raw('selected') : ''}>${x.name}</option>`)}</select></div>` : (myTeams.length === 1 ? html`<input type="hidden" name="teamId" value="${myTeams[0].id}">` : '')}
       ${!existing ? html`<div class="field"><label for="t-assignee">${isRequest ? 'Suggested owner' : 'Assign to'} <span class="field-hint">optional</span></label><select id="t-assignee" name="assigneeId"><option value="">${isRequest ? '(let the manager decide)' : '(unassigned)'}</option>
         ${(isRequest ? [] : people).map((p) => html`<option value="${p.userId}" ${preAssignee === p.userId ? raw('selected') : ''}>${p.name}${p.userId === app.me.id ? ' (me)' : ''}</option>`)}</select>
         ${!isRequest && !people.length ? html`<div class="hint">You do not have permission to assign tasks.</div>` : ''}</div>` : ''}
     </div>
+    ${managerFields}
     ${isRequest ? '' : html`<div class="field"><label for="t-links">Supporting links <span class="field-hint">optional</span></label><textarea id="t-links" name="links" rows="2" placeholder="One link per line (https://…)">${(t.links || []).map((l) => l.url).join('\n')}</textarea></div>`}
     ${existing ? html`<div class="field"><label for="t-reason2">Reason for this change <span class="field-hint">kept in history</span></label><input id="t-reason2" name="reason" type="text" maxlength="500" placeholder="e.g. scope clarified, deadline moved"></div>` : ''}`
 
   const content = html`<h2 id="modal-title">${existing ? 'Edit task' : isRequest ? 'Suggest a task' : 'New task'}</h2>
     ${isRequest ? html`<div class="notice">Your manager approves suggestions before they become official tasks.</div>` : ''}
+    ${proposing ? html`<div class="notice" data-testid="proposal-note">You can create this task yourself. The priority and deadline you enter are a proposal until a manager confirms them.</div>` : ''}
     <form id="task-form"><div class="form-error"></div>
       <div class="field"><label for="t-title">Title</label><input id="t-title" name="title" type="text" required maxlength="200" value="${t.title || ''}" placeholder="What needs to get done?" autocomplete="off"></div>
       <div class="field"><label for="t-desc">Description <span class="field-hint">optional</span></label><textarea id="t-desc" name="description" maxlength="5000" rows="3" placeholder="More context — the problem, background, or approach.">${t.description || ''}</textarea></div>
@@ -141,8 +161,15 @@ export async function openTaskForm(existing = null, { defaultTeamId = null, defa
         if (details && !details.open) { e.preventDefault(); details.open = true; el.querySelector('#t-desc')?.focus() }
       }
     })
+    // Inline checks while typing; the server still validates everything.
+    const mark = (input, msg) => { if (!input) return; input.setAttribute('aria-invalid', msg ? 'true' : 'false'); const h = el.querySelector(`#${input.id}-hint`); if (h && msg) { h.dataset.keep ||= h.textContent; h.textContent = msg; h.classList.add('err-text') } else if (h?.dataset.keep) { h.textContent = h.dataset.keep; h.classList.remove('err-text') } }
+    el.querySelector('#t-title')?.addEventListener('input', (e) => { e.target.setAttribute('aria-invalid', e.target.value.trim() ? 'false' : 'true') })
+    el.querySelector('#t-due')?.addEventListener('input', (e) => mark(e.target, e.target.value && Date.parse(e.target.value) < Date.now() ? 'This deadline is already in the past.' : ''))
     bindForm(el.querySelector('#task-form'), async (d) => {
       const body = { ...d, dueAt: d.dueAt ? fromLocalInput(d.dueAt) : (existing ? null : undefined) }
+      // An empty priority sends nothing: it never becomes Medium and never clears a confirmed one.
+      if (!d.priority) delete body.priority
+      if (existing) for (const k of ['businessImpact', 'dependencies', 'successCriteria', 'context', 'workType']) if (view && !d[k]) body[k] = null
       if ('links' in d || existing) body.links = (d.links || '').split('\n').map((s) => s.trim()).filter(Boolean).map((url) => ({ url }))
       if (existing) {
         if (!d.startDate) body.startDate = null
@@ -211,6 +238,7 @@ export async function renderTaskDetail(main, id) {
           ${t.links.length ? html`<div class="chips" style="margin-top:12px">${t.links.map((l) => html`<a class="chip" href="${l.url}" target="_blank" rel="noopener noreferrer">${icon('evidence', 'xs')} ${l.label || l.url}</a>`)}</div>` : ''}
           ${t.sourceRequestId ? html`<p class="small muted" style="margin:12px 0 0">Created from <a href="#/requests">an approved suggestion</a>.</p>` : ''}
         </section>
+        <section class="card" id="exp-card" data-testid="expectations" aria-live="polite"><div class="loading">Loading what is expected…</div></section>
         ${sourceCard(wf)}
         <section class="card facts" aria-labelledby="facts-h"><h2 id="facts-h" class="sr">Details</h2>
           <dl class="fact-grid">
@@ -260,6 +288,8 @@ export async function renderTaskDetail(main, id) {
 
   const aiCard = main.querySelector('#ai-card')
   if (aiCard) renderAssessmentCard(aiCard, id)
+  const expCard = main.querySelector('#exp-card')
+  if (expCard) renderExpectations(expCard, t, () => renderTaskDetail(main, id).catch((e) => toast(errorText(e), { error: true })))
   const ext = main.querySelector('#ext-evidence')
   if (ext) renderTaskExternalEvidence(ext, id)
   const reload = () => renderTaskDetail(main, id).catch((e) => toast(errorText(e), { error: true }))

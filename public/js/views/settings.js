@@ -67,14 +67,19 @@ function renderSignInMethods(box) {
 
 async function organization(sb, reload) {
   const org = await api('/api/organization')
+  const cal = org.workingCalendar || { days: [1, 2, 3, 4, 5], start: '09:00', end: '18:00' }
   const zones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : []
   sb.innerHTML = html`<section class="card" style="max-width:640px">
     <form id="of"><div class="form-error"></div><div class="field"><label for="on">Organization name</label><input id="on" name="name" type="text" value="${org.name}" ${app.isAdmin ? '' : raw('disabled')} required minlength="2" maxlength="120"></div>
       <div class="field"><label for="otz">Timezone</label><input id="otz" name="timezone" type="text" list="tz-list" value="${org.timezone}" ${app.isAdmin ? '' : raw('disabled')} maxlength="64" placeholder="e.g. Asia/Kolkata" autocomplete="off"><datalist id="tz-list">${['UTC', ...zones.filter((z) => z !== 'UTC')].map((z) => html`<option value="${z}"></option>`)}</datalist>
-        <div class="hint">A deadline without a time (“by Friday”) ends at 23:59 in this timezone, and alert times are shown in it.</div></div>${app.isAdmin ? html`<button class="btn" type="submit">Save</button>` : ''}</form>
+        <div class="hint">A deadline without a time (“by Friday”) ends at 23:59 in this timezone, and alert times are shown in it.</div></div>
+      <fieldset class="field" style="border:0;padding:0" data-testid="calendar"><legend>Working calendar</legend>
+        <div class="row" role="group" aria-label="Working days">${[[1, 'Mon'], [2, 'Tue'], [3, 'Wed'], [4, 'Thu'], [5, 'Fri'], [6, 'Sat'], [0, 'Sun']].map(([n, l]) => html`<label class="check"><input type="checkbox" name="wd${n}" ${cal.days.includes(n) ? raw('checked') : ''} ${app.isAdmin ? '' : raw('disabled')}> ${l}</label>`)}</div>
+        <div class="fields"><div class="field"><label for="cal-s">Day starts</label><input id="cal-s" name="calStart" type="time" value="${cal.start}" ${app.isAdmin ? '' : raw('disabled')}></div><div class="field"><label for="cal-e">Day ends</label><input id="cal-e" name="calEnd" type="time" value="${cal.end}" ${app.isAdmin ? '' : raw('disabled')}></div></div>
+        <div class="hint">Used to suggest response targets in working time. A suggestion never becomes a deadline until a manager confirms it.</div></fieldset>${app.isAdmin ? html`<button class="btn" type="submit">Save</button>` : ''}</form>
     <h3 style="margin:18px 0 6px">Join code</h3><p class="small muted">People who sign in can ask to join with this code. Every request needs approval — the code alone grants nothing.</p>
     <div class="row"><input type="text" readonly value="${org.joinCode}" class="mono" style="max-width:220px" onclick="this.select()">${app.isAdmin ? html`<button class="btn small ghost" id="rot">Rotate code</button>` : ''}</div></section>`
-  if (app.isAdmin) bindForm(sb.querySelector('#of'), (d) => api('/api/organization', { method: 'PATCH', body: d }), { onSuccess: () => { toast('Saved.'); reloadSession() } })
+  if (app.isAdmin) bindForm(sb.querySelector('#of'), (d) => api('/api/organization', { method: 'PATCH', body: { name: d.name, timezone: d.timezone, workingCalendar: { days: [0, 1, 2, 3, 4, 5, 6].filter((n) => d[`wd${n}`]), start: d.calStart, end: d.calEnd } } }), { onSuccess: () => { toast('Saved.'); reloadSession() } })
   sb.querySelector('#rot')?.addEventListener('click', async () => { const r = await confirmDialog({ title: 'Rotate the join code?', body: 'The old code stops working.', confirm: 'Rotate', danger: true }); if (r?.ok) { await api('/api/organization/join-code', { method: 'POST' }); reload() } })
 }
 

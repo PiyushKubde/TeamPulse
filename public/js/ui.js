@@ -220,7 +220,10 @@ export function setThemePref(pref) {
 export const STATUS_LABEL = { SUGGESTED: 'Suggested', PENDING_ACCEPTANCE: 'Awaiting acceptance', ASSIGNED: 'Assigned', IN_PROGRESS: 'In progress', BLOCKED: 'Blocked', SUBMITTED_FOR_REVIEW: 'In review', COMPLETED: 'Completed', CANCELLED: 'Cancelled', DECLINED: 'Declined' }
 export const statusBadge = (s) => html`<span class="badge status s-${s}">${STATUS_LABEL[s] || s}</span>`
 const PRIO_LABEL = { CRITICAL: 'Critical', HIGH: 'High', MEDIUM: 'Medium', LOW: 'Low' }
-export const prioBadge = (p) => html`<span class="prio prio-${p}" title="Priority">${icon('flag', 'xs')}${PRIO_LABEL[p] || p}</span>`
+// No confirmed priority is a real state (a manager has not decided yet), shown neutrally and never as Medium.
+export const prioBadge = (p) => (p
+  ? html`<span class="prio prio-${p}" title="Priority" data-testid="prio-badge">${icon('flag', 'xs')}${PRIO_LABEL[p] || p}</span>`
+  : html`<span class="prio prio-none" title="A manager has not confirmed a priority yet" data-testid="prio-badge">${icon('flag', 'xs')}Priority not set</span>`)
 export function conditionBadges(t) {
   return html`${t.overdue ? html`<span class="badge bad">Overdue ${t.hoursOverdue}h</span>` : ''}${t.atRisk ? html`<span class="badge warn">At risk</span>` : ''}${t.unassigned ? html`<span class="badge warn">Unassigned</span>` : ''}${t.pendingTransfer ? html`<span class="badge info" title="Offered to ${t.pendingTransfer.toName}">Transfer pending</span>` : ''}${t.fromSlack ? html`<span class="badge outline">${icon('hash', 'xs')}From Slack</span>` : ''}`
 }

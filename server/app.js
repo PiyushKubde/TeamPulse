@@ -4,7 +4,10 @@ import { createReadStream } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AppError, forbidden } from './errors.js'
-import { assignableUserIds, loadContext, isAdmin, isManager, requireVisibleTask } from './access.js'
+import { assignableUserIds, loadContext, isAdmin, isManager, requireVisibleTask, canManageTask } from './access.js'
+import * as params from './services/task-parameters.js'
+import * as prio from './services/priority-model.js'
+import * as analytics from './services/analytics.js'
 import { COOKIE, cookieHeader, createSession, destroySession, readCookie, sessionUser } from './auth/sessions.js'
 import { finishGoogleLogin, googleTransport, startGoogleLogin, upsertGoogleUser } from './auth/google.js'
 import * as accounts from './auth/accounts.js'
@@ -326,6 +329,26 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   app.post('/api/tasks/:id/review', h((req) => tasks.reviewSubmission(db, member(req), req.params.id, req.body)))
   // ---------- acceptance workflow: accept / decline / transfer, missed-deadline explanations, Slack identities ----------
   app.get('/api/assignments/inbox', h((req) => assignments.myInbox(db, member(req))))
+  // ---------- manager-led expectations: confirmed values, suggestions, recommendations, change requests ----------
+  app.get('/api/tasks/:id/parameters', h((req) => {
+    const ctx = member(req)
+    const task = requireVisibleTask(db, ctx, req.params.id)
+    const manage = canManageTask(db, ctx, task)
+    return params.parametersView(db, ctx, task.id, manage ? { recommendations: prio.listRecommendations(db, task.id), targets: prio.suggestTargets(db, task, params.getExpectations(db, task.id)) } : {})
+  }))
+  app.post('/api/tasks/:id/parameters/:field/accept', h((req) => params.acceptSuggestion(db, member(req), req.params.id, req.params.field, req.body)))
+  app.post('/api/tasks/:id/parameters/:field/reject', h((req) => params.rejectSuggestion(db, member(req), req.params.id, req.params.field, req.body)))
+  app.post('/api/tasks/:id/priority-recommendation', h((req, res) => { const out = prio.recommendPriority(db, member(req), req.params.id); res.status(201); return out }))
+  app.post('/api/tasks/:id/priority-recommendation/:rid/decision', h((req) => prio.decideRecommendation(db, member(req), req.params.id, req.params.rid, req.body)))
+  // ---------- manager analytics (computed from authorised records only; no scores, no rankings) ----------
+  app.get('/api/analytics/team', h((req) => analytics.teamAnalytics(db, member(req), req.query)))
+  app.get('/api/analytics/person/:userId', h((req) => analytics.personAnalytics(db, member(req), req.params.userId, req.query)))
+  app.get('/api/analytics/task/:taskId', h((req) => analytics.taskAnalytics(db, member(req), req.params.taskId)))
+  app.get('/api/parameter-review', h((req) => params.reviewQueue(db, member(req))))
+  app.get('/api/change-requests', h((req) => params.listChangeRequests(db, member(req), req.query)))
+  app.post('/api/tasks/:id/change-requests', h((req, res) => { const out = params.createChangeRequest(db, member(req), req.params.id, req.body); res.status(201); return out }))
+  app.post('/api/change-requests/:id/decision', h((req) => params.decideChangeRequest(db, member(req), req.params.id, req.body)))
+  app.post('/api/change-requests/:id/withdraw', h((req) => params.withdrawChangeRequest(db, member(req), req.params.id)))
   app.get('/api/tasks/:id/workflow', h((req) => {
     const ctx = member(req)
     const task = requireVisibleTask(db, ctx, req.params.id)

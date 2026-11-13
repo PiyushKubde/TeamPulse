@@ -10,6 +10,7 @@ import { creationMode } from './permissions.js'
 import { createRequestRecord } from './requests.js'
 import { listEvidence } from './evidence.js'
 import { orgTimezone } from '../time.js'
+import { announceChange, applyConfirmed, readExpectations, suggestValues } from './task-parameters.js'
 
 const HOUR = 3600000
 const ACTIVE = ['ASSIGNED', 'IN_PROGRESS', 'BLOCKED']
@@ -72,7 +73,7 @@ export function presentTask(db, ctx, t) {
   const transfer = OPEN.includes(t.status) ? pendingTransfer(db, t.id) : null
   return {
     acceptanceState: t.acceptance_state, acceptedAt: t.accepted_at, declinedReason: t.declined_reason, slackMessageRef: t.slack_message_ref,
-    fromSlack: Boolean(t.slack_message_ref), lastMeaningfulAt: t.last_meaningful_at, pendingTransfer: transfer,
+    fromSlack: Boolean(t.slack_message_ref), origin: t.origin, lastMeaningfulAt: t.last_meaningful_at, pendingTransfer: transfer,
     id: t.id, title: t.title, description: t.description, expectedOutcome: t.expected_outcome, priority: t.priority, status: t.status,
     progress: t.progress, startDate: t.start_date, dueAt: t.due_at, links: json(t.links, []),
     teamId: t.team_id, teamName: t.team_id ? db.prepare('SELECT name FROM teams WHERE id = ?').get(t.team_id)?.name ?? null : null,
@@ -97,7 +98,7 @@ const getTaskRow = (db, id) => db.prepare('SELECT * FROM tasks WHERE id = ?').ge
 // ---------- list ----------
 const SORTS = {
   due: `CASE WHEN t.due_at IS NULL THEN 1 ELSE 0 END, t.due_at`,
-  priority: `CASE t.priority WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, t.due_at`,
+  priority: `CASE t.priority WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 3 ELSE 4 END, t.due_at`,
   updated: 't.updated_at DESC',
   created: 't.created_at DESC',
   title: 't.title COLLATE NOCASE'
@@ -114,7 +115,8 @@ export function listTasks(db, ctx, q = {}) {
   } else if (q.includeClosed !== 'true') {
     where.push(`t.status NOT IN ('CANCELLED')`)
   }
-  if (q.priority) { where.push('t.priority = ?'); params.push(v.oneOf(q.priority, 'Priority', v.PRIORITIES)) }
+  if (q.priority === 'UNRESOLVED') where.push('t.priority IS NULL')
+  else if (q.priority) { where.push('t.priority = ?'); params.push(v.oneOf(q.priority, 'Priority', v.PRIORITIES)) }
   if (q.assigneeId === 'none') where.push('t.assignee_id IS NULL')
   else if (q.assigneeId) { where.push('t.assignee_id = ?'); params.push(v.id(q.assigneeId, 'Assignee')) }
   if (q.teamId) { where.push('t.team_id = ?'); params.push(v.id(q.teamId, 'Team')) }
@@ -185,7 +187,9 @@ function readTaskFields(db, ctx, body, { partial = false } = {}) {
   if (!partial || has('title')) out.title = v.text(body?.title, 'Title', { required: true, max: 200 })
   if (!partial || has('description')) out.description = v.text(body?.description, 'Description', { max: 5000 })
   if (!partial || has('expectedOutcome')) out.expected_outcome = v.text(body?.expectedOutcome, 'Expected outcome', { max: 2000 })
-  if (!partial || has('priority')) out.priority = v.oneOf(body?.priority, 'Priority', v.PRIORITIES, { fallback: 'MEDIUM' })
+  // No priority is a real state (not yet confirmed by a manager), never a silent MEDIUM.
+  if (has('priority') && body.priority !== null && body.priority !== '') out.priority = v.oneOf(body.priority, 'Priority', v.PRIORITIES)
+  else if (!partial) out.priority = null
   if (!partial || has('startDate')) out.start_date = v.dateOnly(body?.startDate, 'Start date')
   if (!partial || has('dueAt')) out.due_at = v.dateTime(body?.dueAt, 'Due date', { tz: orgTimezone(db, ctx.orgId) })
   if (!partial || has('links')) out.links = JSON.stringify(v.links(body?.links))
@@ -218,7 +222,8 @@ export function checkAssignee(db, ctx, assigneeId) {
  * Managers/admins create official tasks. Employees create directly only with can_create_tasks + can_create_directly
  * and no approval requirement; otherwise the same input becomes a task request for approval.
  */
-export function createTask(db, ctx, body) {
+// `internal` is set only by server code (request approval); it is never read from the HTTP body, so a client cannot claim a provenance or a source request.
+export function createTask(db, ctx, body, internal = {}) {
   if (creationMode(ctx) === 'request') {
     const request = createRequestRecord(db, ctx, {
       title: body?.title, description: body?.description, reason: body?.reason || 'Created from the task form (approval required).',
@@ -228,20 +233,29 @@ export function createTask(db, ctx, body) {
   }
   if (ctx.role === 'employee' && !ctx.permissions.can_create_tasks) throw forbidden('You can suggest tasks, but not create them directly.')
   const f = readTaskFields(db, ctx, body)
+  const exp = readExpectations(db, ctx.orgId, body)
   const assigneeId = checkAssignee(db, ctx, body?.assigneeId)
   const id = uuid()
   const ts = now()
+  // Managers define the official expectations. An employee who may create tasks directly creates the task, but what they enter for
+  // priority, deadline and the other expectations stays a proposal until a manager confirms it.
+  const byManager = ctx.role !== 'employee'
+  const origin = internal.origin || (byManager ? 'MANAGER' : 'EMPLOYEE')
   const teamId = f.team_id || (assigneeId ? db.prepare('SELECT team_id FROM memberships WHERE user_id = ?').get(assigneeId)?.team_id : null) || (ctx.role === 'manager' ? ctx.managedTeamIds[0] : ctx.teamId) || null
   const task = transaction(db, () => {
     db.prepare(`INSERT INTO tasks (id, org_id, team_id, title, description, expected_outcome, created_by, assignee_id, priority, status, progress, start_date, due_at, links,
-                source_request_id, assigned_at, status_changed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ASSIGNED', 0, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, ctx.orgId, teamId, f.title, f.description, f.expected_outcome, ctx.user.id, assigneeId, f.priority, f.start_date, f.due_at, f.links,
-        body?._sourceRequestId ?? null, assigneeId ? ts : null, ts, ts, ts)
+                source_request_id, assigned_at, status_changed_at, created_at, updated_at, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ASSIGNED', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, ctx.orgId, teamId, f.title, f.description, null, ctx.user.id, assigneeId, null, f.start_date, null, f.links,
+        internal.sourceRequestId ?? null, assigneeId ? ts : null, ts, ts, ts, origin)
     const t = getTaskRow(db, id)
-    recordEvent(db, t, ctx.user.id, 'created', { title: f.title, priority: f.priority, fromRequest: body?._sourceRequestId ?? null })
+    // Priority, deadline and expected outcome go in through the one path that records who confirmed (or proposed) them, when and from where.
+    if (byManager) applyConfirmed(db, t, exp, { actorId: ctx.user.id, source: internal.confirmSource || 'MANAGER', reason: 'Set when the task was created.', quiet: true })
+    else suggestValues(db, t, exp, { source: 'EMPLOYEE', actorId: ctx.user.id, reason: 'Entered by the person who created the task; a manager has not confirmed it.' })
+    recordEvent(db, t, ctx.user.id, 'created', { title: f.title, priority: byManager ? (exp.priority ?? null) : null, fromRequest: internal.sourceRequestId ?? null })
     if (assigneeId) recordEvent(db, t, ctx.user.id, 'assigned', { to: assigneeId, toName: userName(db, assigneeId) })
-    return t
+    return getTaskRow(db, id)
   })
+  if (!byManager) emit({ type: 'parameters.proposed', orgId: ctx.orgId, taskId: id, actorId: ctx.user.id, source: 'EMPLOYEE' })
   if (assigneeId) emit({ type: 'task.assigned', orgId: ctx.orgId, taskId: id, assigneeId, actorId: ctx.user.id })
   else emit({ type: 'task.created_unassigned', orgId: ctx.orgId, taskId: id, actorId: ctx.user.id })
   return { mode: 'direct', task: presentTask(db, ctx, task) }
@@ -253,21 +267,25 @@ export function updateTask(db, ctx, id, body) {
   requireManageTask(db, ctx, t)
   if (['COMPLETED', 'CANCELLED'].includes(t.status)) throw conflict('Reopen or restore the task before editing it.', 'task_closed')
   const f = readTaskFields(db, ctx, body, { partial: true })
-  const deadlineMoved = f.due_at !== undefined && f.due_at !== t.due_at
-  if (!Object.keys(f).length) throw invalid('Nothing to change.')
+  const patch = readExpectations(db, ctx.orgId, body)
+  const rest = Object.fromEntries(Object.entries(f).filter(([k]) => !['priority', 'due_at', 'expected_outcome'].includes(k)))
+  if (!Object.keys(rest).length && !Object.keys(patch).length) throw invalid('Nothing to change.')
   const start = f.start_date !== undefined ? f.start_date : t.start_date
   const due = f.due_at !== undefined ? f.due_at : t.due_at
   if (start && due && due.slice(0, 10) < start) throw invalid('The due date cannot be before the start date.')
+  let changed = []
   transaction(db, () => {
-    const sets = Object.keys(f).map((k) => `${k} = ?`).join(', ')
-    db.prepare(`UPDATE tasks SET ${sets}, updated_at = ? WHERE id = ?`).run(...Object.values(f), now(), t.id)
-    if (f.due_at !== undefined && f.due_at !== t.due_at) recordEvent(db, t, ctx.user.id, 'deadline_changed', { from: t.due_at, to: f.due_at, reason: v.text(body?.reason, 'Reason', { max: 500 }) })
-    if (f.priority !== undefined && f.priority !== t.priority) recordEvent(db, t, ctx.user.id, 'priority_changed', { from: t.priority, to: f.priority, reason: v.text(body?.reason, 'Reason', { max: 500 }) })
-    const other = Object.keys(f).filter((k) => !['due_at', 'priority'].includes(k) && f[k] !== t[k])
-    if (other.length) recordEvent(db, t, ctx.user.id, 'edited', { fields: other })
+    if (Object.keys(rest).length) {
+      const sets = Object.keys(rest).map((k) => `${k} = ?`).join(', ')
+      db.prepare(`UPDATE tasks SET ${sets}, updated_at = ? WHERE id = ?`).run(...Object.values(rest), now(), t.id)
+      const other = Object.keys(rest).filter((k) => rest[k] !== t[k])
+      if (other.length) recordEvent(db, t, ctx.user.id, 'edited', { fields: other })
+    }
+    // Priority, deadline and the other expectations: old values stay in the history, with who changed them and why.
+    changed = applyConfirmed(db, t, patch, { actorId: ctx.user.id, reason: v.text(body?.reason, 'Reason', { max: 500 }) })
   })
   // The old deadline's alerts are closed; the new deadline is scanned afresh (alert keys carry the deadline).
-  if (deadlineMoved) emit({ type: 'task.deadline_changed', orgId: ctx.orgId, taskId: t.id, actorId: ctx.user.id })
+  announceChange(t, ctx.user.id, changed)
   return presentTask(db, ctx, getTaskRow(db, t.id))
 }
 

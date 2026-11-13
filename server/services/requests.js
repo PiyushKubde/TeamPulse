@@ -16,6 +16,8 @@ function readRequestFields(db, orgId, body) {
     description: v.text(body?.description, 'Description', { max: 5000 }),
     reason: v.text(body?.reason, 'Reason', { max: 2000 }),
     expected_outcome: v.text(body?.expectedOutcome, 'Expected outcome', { max: 2000 }),
+    // The column keeps a MEDIUM placeholder when the requester chose nothing; priority_stated says which it is.
+    priority_stated: body?.suggestedPriority !== undefined && body?.suggestedPriority !== null && body?.suggestedPriority !== '' ? 1 : 0,
     suggested_priority: v.oneOf(body?.suggestedPriority, 'Suggested priority', v.PRIORITIES, { fallback: 'MEDIUM' }),
     suggested_due_at: v.dateTime(body?.suggestedDueAt, 'Suggested deadline'),
     suggested_assignee_id: v.id(body?.suggestedAssigneeId, 'Suggested assignee')
@@ -32,9 +34,9 @@ export function createRequestRecord(db, ctx, body) {
   if (teamId && !db.prepare('SELECT 1 FROM teams WHERE id = ? AND org_id = ?').get(teamId, ctx.orgId)) throw notFound('Team')
   const id = uuid()
   const ts = now()
-  db.prepare(`INSERT INTO task_requests (id, org_id, team_id, requested_by, source, title, description, reason, expected_outcome, suggested_priority, suggested_due_at, suggested_assignee_id, status, created_at, updated_at)
-              VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`)
-    .run(id, ctx.orgId, teamId, ctx.user.id, f.title, f.description, f.reason, f.expected_outcome, f.suggested_priority, f.suggested_due_at, f.suggested_assignee_id, ts, ts)
+  db.prepare(`INSERT INTO task_requests (id, org_id, team_id, requested_by, source, title, description, reason, expected_outcome, suggested_priority, suggested_due_at, suggested_assignee_id, priority_stated, status, created_at, updated_at)
+              VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`)
+    .run(id, ctx.orgId, teamId, ctx.user.id, f.title, f.description, f.reason, f.expected_outcome, f.suggested_priority, f.suggested_due_at, f.suggested_assignee_id, f.priority_stated, ts, ts)
   emit({ type: 'request.created', orgId: ctx.orgId, requestId: id, actorId: ctx.user.id })
   return getRequest(db, ctx, id)
 }
@@ -51,9 +53,9 @@ export function createExternalRequest(db, orgId, body, { defaultTeamId = null } 
   const teamId = defaultTeamId && db.prepare('SELECT 1 FROM teams WHERE id = ? AND org_id = ?').get(defaultTeamId, orgId) ? defaultTeamId : null
   const id = uuid()
   const ts = now()
-  db.prepare(`INSERT INTO task_requests (id, org_id, team_id, requested_by, source, external_requester, external_ref, title, description, reason, expected_outcome, suggested_priority, suggested_due_at, status, created_at, updated_at)
-              VALUES (?, ?, ?, NULL, 'external', ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`)
-    .run(id, orgId, teamId, requester, externalRef, f.title, f.description, f.reason || 'External request', f.expected_outcome, f.suggested_priority, f.suggested_due_at, ts, ts)
+  db.prepare(`INSERT INTO task_requests (id, org_id, team_id, requested_by, source, external_requester, external_ref, title, description, reason, expected_outcome, suggested_priority, suggested_due_at, priority_stated, status, created_at, updated_at)
+              VALUES (?, ?, ?, NULL, 'external', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`)
+    .run(id, orgId, teamId, requester, externalRef, f.title, f.description, f.reason || 'External request', f.expected_outcome, f.suggested_priority, f.suggested_due_at, f.priority_stated, ts, ts)
   emit({ type: 'request.created', orgId, requestId: id, external: true })
   return { id, status: 'PENDING', duplicate: false }
 }
@@ -61,7 +63,7 @@ export function createExternalRequest(db, orgId, body, { defaultTeamId = null } 
 function present(db, r) {
   return {
     id: r.id, title: r.title, description: r.description, reason: r.reason, expectedOutcome: r.expected_outcome,
-    suggestedPriority: r.suggested_priority, suggestedDueAt: r.suggested_due_at, suggestedAssigneeId: r.suggested_assignee_id, suggestedAssigneeName: userName(db, r.suggested_assignee_id),
+    suggestedPriority: r.priority_stated ? r.suggested_priority : null, priorityStated: Boolean(r.priority_stated), suggestedDueAt: r.suggested_due_at, suggestedAssigneeId: r.suggested_assignee_id, suggestedAssigneeName: userName(db, r.suggested_assignee_id),
     teamId: r.team_id, teamName: r.team_id ? db.prepare('SELECT name FROM teams WHERE id = ?').get(r.team_id)?.name ?? null : null,
     source: r.source, externalRequester: r.external_requester, requestedBy: r.requested_by, requestedByName: userName(db, r.requested_by),
     status: r.status, decisionNote: r.decision_note, decidedByName: userName(db, r.decided_by), decidedAt: r.decided_at, taskId: r.task_id,
@@ -125,10 +127,10 @@ export function decideRequest(db, ctx, id, body) {
   const result = transaction(db, () => {
     const created = createTask(db, ctx, {
       title: r.title, description: r.description, expectedOutcome: r.expected_outcome,
-      priority: body?.priority ?? r.suggested_priority, dueAt: body?.dueAt !== undefined ? body.dueAt : r.suggested_due_at,
+      priority: body?.priority ?? (r.priority_stated ? r.suggested_priority : null), dueAt: body?.dueAt !== undefined ? body.dueAt : r.suggested_due_at,
       teamId: body?.teamId !== undefined ? body.teamId : (r.team_id && (isAdmin(ctx) || ctx.managedTeamIds.includes(r.team_id)) ? r.team_id : null),
-      assigneeId: body?.assigneeId !== undefined ? body.assigneeId : r.suggested_assignee_id, links: [], _sourceRequestId: r.id
-    })
+      assigneeId: body?.assigneeId !== undefined ? body.assigneeId : r.suggested_assignee_id, links: []
+    }, { sourceRequestId: r.id, origin: 'REQUEST', confirmSource: 'REQUEST_APPROVAL' })
     db.prepare(`UPDATE task_requests SET status = 'APPROVED', decision_note = ?, decided_by = ?, decided_at = ?, task_id = ?, updated_at = ? WHERE id = ?`).run(note, ctx.user.id, ts, created.task.id, ts, r.id)
     return created
   })
@@ -141,10 +143,10 @@ export function updateRequest(db, ctx, id, body) {
   const r = requireRequest(db, ctx, id)
   if (r.requested_by !== ctx.user.id) throw forbidden('Only the person who made this request can change it.')
   if (!['PENDING', 'CLARIFICATION_REQUESTED'].includes(r.status)) throw conflict('This request has already been decided.', 'request_decided')
-  const f = readRequestFields(db, ctx.orgId, { title: r.title, description: r.description, reason: r.reason, expectedOutcome: r.expected_outcome, suggestedPriority: r.suggested_priority, suggestedDueAt: r.suggested_due_at, suggestedAssigneeId: r.suggested_assignee_id, ...body })
+  const f = readRequestFields(db, ctx.orgId, { title: r.title, description: r.description, reason: r.reason, expectedOutcome: r.expected_outcome, suggestedPriority: r.priority_stated ? r.suggested_priority : null, suggestedDueAt: r.suggested_due_at, suggestedAssigneeId: r.suggested_assignee_id, ...body })
   const ts = now()
-  db.prepare(`UPDATE task_requests SET title = ?, description = ?, reason = ?, expected_outcome = ?, suggested_priority = ?, suggested_due_at = ?, suggested_assignee_id = ?, status = 'PENDING', updated_at = ? WHERE id = ?`)
-    .run(f.title, f.description, f.reason, f.expected_outcome, f.suggested_priority, f.suggested_due_at, f.suggested_assignee_id, ts, r.id)
+  db.prepare(`UPDATE task_requests SET title = ?, description = ?, reason = ?, expected_outcome = ?, suggested_priority = ?, priority_stated = ?, suggested_due_at = ?, suggested_assignee_id = ?, status = 'PENDING', updated_at = ? WHERE id = ?`)
+    .run(f.title, f.description, f.reason, f.expected_outcome, f.suggested_priority, f.priority_stated, f.suggested_due_at, f.suggested_assignee_id, ts, r.id)
   if (r.status === 'CLARIFICATION_REQUESTED' && r.decided_by) {
     notifyInApp(db, { orgId: ctx.orgId, userId: r.decided_by, kind: 'request_clarified', title: `${ctx.user.name} answered your question: ${f.title}`, link: '#/requests', dedupeKey: `request:${r.id}:clarified:${ts}` })
   }

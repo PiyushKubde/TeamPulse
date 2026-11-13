@@ -255,6 +255,17 @@ function period(q) {
   return { from, to }
 }
 
+/** The assignee's current analysed complexity ("L1".."L4") per task, for analytics filters; null when not assessed. Read-only. */
+export function observedComplexityByTask(db, orgId, taskIds) {
+  const out = new Map()
+  for (let i = 0; i < taskIds.length; i += 400) {
+    const c = taskIds.slice(i, i + 400)
+    const rows = db.prepare(`SELECT a.id, a.task_id FROM contribution_assessments a JOIN tasks t ON t.id = a.task_id AND t.assignee_id = a.user_id WHERE a.org_id = ? AND a.is_current = 1 AND a.task_id IN (${c.map(() => '?').join(',')})`).all(orgId, ...c)
+    for (const r of rows) { const e = effectiveRow(db, r.id, 'complexity'); out.set(r.task_id, e?.state === 'assessed' ? `L${e.level}` : null) }
+  }
+  return out
+}
+
 function verifiedOutcomes(db, orgId, userId, { from, to }) {
   return db.prepare(`SELECT * FROM impact_records WHERE org_id = ? AND verification_status = 'VERIFIED' AND COALESCE(verified_at, created_at) BETWEEN ? AND ? ORDER BY verified_at DESC`).all(orgId, from, to)
     .filter((r) => r.user_id === userId || json(r.contributors, []).includes(userId))
