@@ -460,7 +460,9 @@ dialog .row.end { margin-top: var(--sp-5); }
 .app-icon.tp { color: var(--brand-ink); background: var(--brand-soft); }
 .app-icon.sm svg { width: 15px; height: 15px; }
 .app-icon.github { color: var(--text); }
-:root[data-theme="dark"] :root[data-theme="dark"] #embed-box { height: 640px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); }
+/* The viaSocket embed fills its parent (the script sizes its wrapper at height:100%, min 320px, and the iframe at 100% of that), so the parent needs a
+   definite height: with none, the iframe falls back to the browser's 150px default and the wrapper's white background shows below it. */
+#embed-box { height: clamp(560px, calc(100vh - 200px), 960px); height: clamp(560px, calc(100dvh - 200px), 960px); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); overflow: hidden; }
 
 /* ---------------------------------------------------------------- contribution analysis */
 .dots { display: inline-flex; gap: 3px; vertical-align: middle; }
@@ -619,7 +621,7 @@ a.task-card:hover { text-decoration: none; border-color: var(--border-strong); b
   .kv dt { margin-top: 8px; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hide-sm { display: none; }
-  #embed-box { height: 560px; }
+  #embed-box { height: clamp(520px, calc(100vh - 160px), 820px); height: clamp(520px, calc(100dvh - 160px), 820px); }
   dialog { width: 100vw; max-width: 100vw; max-height: 92vh; margin: auto 0 0; border-radius: var(--r-xl) var(--r-xl) 0 0; border-bottom: 0; }
   dialog .modal-inner { padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); max-height: 92vh; }
   .task-cards { grid-template-columns: 1fr; }
