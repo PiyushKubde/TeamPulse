@@ -4,7 +4,7 @@
 // The employee's first explanation is never edited; later context and every review are new entries.
 import { now, transaction, uuid, json } from '../db.js'
 import { conflict, forbidden, notFound } from '../errors.js'
-import { canManageTask, isAdmin, isManager, requireVisibleTask, taskScopeSql } from '../access.js'
+import { canManageTask, isManager, requireVisibleTask, taskScopeSql } from '../access.js'
 import * as v from '../validate.js'
 import { audit } from './audit.js'
 import { emit } from './events.js'
@@ -108,7 +108,7 @@ export function addContext(db, ctx, id, body) {
 export function reviewExplanation(db, ctx, id, body) {
   const { x, t } = requireExplanation(db, ctx, id)
   if (!canManageTask(db, ctx, t)) throw forbidden('Only the task’s manager can review an explanation.')
-  if (x.user_id === ctx.user.id && !isAdmin(ctx)) throw forbidden('You cannot review your own explanation. Another manager or an admin must.')
+  if (x.user_id === ctx.user.id) throw forbidden('You cannot review your own explanation. Another manager must.')
   const status = v.oneOf(body?.status, 'Decision', REVIEW_STATUSES, { required: true })
   const comment = v.text(body?.comment, 'Comment', { required: ['NEEDS_CLARIFICATION', 'FOLLOW_UP_REQUIRED'].includes(status), min: ['NEEDS_CLARIFICATION', 'FOLLOW_UP_REQUIRED'].includes(status) ? 3 : 0, max: 2000 })
   const ts = now()

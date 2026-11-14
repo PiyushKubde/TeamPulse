@@ -223,9 +223,8 @@ test('the reviewer path (profile → assessment) is limited to the people a revi
     // The team's manager reviews their own team's people and tasks.
     assert.equal(await get(`/api/contribution/people/${s.employee.id}`, s.manager), 200)
     assert.equal(await get(`/api/tasks/${k.todo.id}/assessment`, s.manager), 200)
-    // An admin sees the whole organization; a manager of another team, another organization and a colleague see nothing of this person.
-    assert.equal(await get(`/api/contribution/people/${s.employee.id}`, s.admin), 200)
-    for (const who of [s.manager2, s.otherAdmin, s.employee2, s.outsider]) assert.equal(await get(`/api/contribution/people/${s.employee.id}`, who), 404, 'out of scope answers 404, not 403')
+    // An admin runs the organization but is not a manager of this team; a manager of another team, another organization and a colleague see nothing of this person either.
+    for (const who of [s.admin, s.manager2, s.otherAdmin, s.employee2, s.outsider]) assert.equal(await get(`/api/contribution/people/${s.employee.id}`, who), 404, 'out of scope answers 404, not 403')
     for (const who of [s.manager2, s.otherAdmin, s.employee2]) assert.equal(await get(`/api/tasks/${k.todo.id}/assessment`, who), 404)
     // A person sees their own profile (and so can correct it), but the team views are for managers.
     assert.equal(await get(`/api/contribution/people/${s.employee.id}`, s.employee), 200)

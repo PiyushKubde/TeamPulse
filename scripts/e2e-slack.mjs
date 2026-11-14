@@ -206,7 +206,7 @@ try {
   // ---- who may see what ---
   step = 'permissions'
   await p.goto(`${base}/#/slack-intake`)
-  await p.waitForSelector('h1:has-text("Slack Intake is for managers")')
+  await p.waitForSelector('h1:has-text("Work from Slack is for managers")')
   ok(!(await p.isVisible('#nav a[href="#/slack-intake"]')), 'no nav entry for employees')
   ok(await m.isVisible('#nav a[href="#/slack-intake"]'), 'nav entry for managers')
 

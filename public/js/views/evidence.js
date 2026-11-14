@@ -153,7 +153,7 @@ function openAddSource(catalog, conns, reload) {
       $('#sa-help').textContent = a.help
       const cs = connected(a.app)
       $('#sc').innerHTML = cs.length ? cs.map((c) => html`<option value="${c.id}">${c.label || a.label}${c.status === 'expired' ? ' (expired)' : ''}</option>`).join('') : ''
-      $('#sc-help').innerHTML = cs.length ? '' : html`No ${a.label} account connected. <a href="#/automations">Connect it in the Automation Center</a>, then come back.`.toString()
+      $('#sc-help').innerHTML = cs.length ? '' : html`No ${a.label} account connected. <a href="#/automations">Connect it in Connected apps</a>, then come back.`.toString()
       $('#kinds').innerHTML = a.kinds.map((k) => html`<label class="check"><input type="checkbox" name="kind" value="${k.kind}" ${k.default ? raw('checked') : ''}> ${k.label}</label>`).join('')
       loadScopes()
     }

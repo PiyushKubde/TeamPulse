@@ -8,7 +8,7 @@
 // assessment shown is the Phase 1 engine's, unchanged.
 import { json } from '../db.js'
 import { notFound } from '../errors.js'
-import { isAdmin, requireVisibleTask, scopeUserIds, taskScopeSql } from '../access.js'
+import { isManager, requireVisibleTask, scopeUserIds, taskScopeSql } from '../access.js'
 import { canSeeEvidence } from '../evidence/service.js'
 import { IN_ANALYSIS, taskRef } from '../evidence/matching.js'
 import * as v from '../validate.js'
@@ -39,7 +39,7 @@ function evidenceStage(e, task) {
 
 /** Can this context see a person's journeys? Themselves, admins, and managers with them in scope. */
 function canSeePerson(db, ctx, userId) {
-  return userId === ctx.user.id || isAdmin(ctx) || (ctx.role === 'manager' && scopeUserIds(db, ctx).includes(userId))
+  return userId === ctx.user.id || (isManager(ctx) && scopeUserIds(db, ctx).includes(userId))
 }
 
 /** The full journey of one task, from the viewer's point of view (only evidence they may see). */

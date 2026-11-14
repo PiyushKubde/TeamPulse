@@ -173,7 +173,7 @@ const COPILOT_QUESTIONS = [
   ['complex_solved', 'Which complex problems were solved?', 'intelligence'], ['verified', 'Which outcomes are verified?', 'shield'], ['delays', 'Where is work getting delayed?', 'clock']
 ]
 export async function renderCopilot(main) {
-  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('copilot', 'xs')}Manager Copilot</div><h1>Ask about your team</h1><p>Answers come from your team’s tasks, reviews, signals and linked evidence — each item links to its record. The Copilot never ranks or scores people.</p></div></div>
+  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('copilot', 'xs')}Ask</div><h1>Ask about your team</h1><p>Answers come from your team’s tasks, reviews, signals and linked evidence — each item links to its record. The Copilot never ranks or scores people.</p></div></div>
     <div class="assistant-layout copilot-layout"><section class="card"><div id="copilot"></div></section>
       <aside class="stack"><div class="principle">${icon('shield')}<span>Grounded in KONVO records only. If something is not recorded, the Copilot says so instead of guessing.</span></div>
         <section class="card"><div class="card-head"><h2><span class="card-icon brand">${icon('sparkles')}</span>Try asking</h2></div><div class="q-cards" id="q-cards">${COPILOT_QUESTIONS.map(([k, l, ic]) => html`<button type="button" class="q-card" data-intent="${k}"><span class="lead-icon">${icon(ic)}</span><span>${l}</span></button>`)}</div></section></aside></div>`.toString()
@@ -218,12 +218,12 @@ export async function renderAssistant(main, q) {
   main.innerHTML = loading().toString()
   const [sugg] = await Promise.all([api('/api/assistant/suggestions')])
   const yesterday = new Date(Date.now() + tz() * 60000 - 86400000).toISOString().slice(0, 10)
-  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('sparkles', 'xs')}Analyse my day</div><h1>AI Work Assistant</h1><p>Understand your work without writing reports: what you did, what mattered, what is missing and what to do next — from your tasks and the evidence you chose to collect.</p></div></div>
+  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('sparkles', 'xs')}Prepare my day</div><h1>Prepare my day</h1><p>Understand your work without writing reports: what you did, what mattered, what is missing and what to do next — from your tasks and the evidence you chose to collect.</p></div></div>
     <div class="assistant-layout">
       <div class="assistant-main">
         <section class="card"><form class="row day-form" id="day-form"><div class="segmented" role="group" aria-label="Quick pick"><button type="button" data-pick="${today()}" aria-pressed="${day === today()}">Today</button><button type="button" data-pick="${yesterday}" aria-pressed="${day === yesterday}">Yesterday</button></div>
           <div class="field" style="margin:0"><label for="day" class="sr">Day</label><input id="day" name="day" type="date" value="${day}" max="${today()}"></div>
-          <button class="btn" type="submit" id="analyse-day">${icon('sparkles')}Analyse my day</button><a class="btn subtle" href="#/evidence">${icon('evidence')}My Work Evidence</a></form></section>
+          <button class="btn" type="submit" id="analyse-day">${icon('sparkles')}Prepare my day</button><a class="btn subtle" href="#/evidence">${icon('evidence')}My Work Evidence</a></form></section>
         <div id="digest" style="margin-top:16px"></div>
       </div>
       <aside class="assistant-side" aria-label="Ask about your work">
@@ -256,6 +256,6 @@ export async function renderAssistant(main, q) {
   main.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => go(b.dataset.pick)))
   main.querySelector('#day-form').addEventListener('submit', (e) => { e.preventDefault(); go(e.target.day.value || today()) })
   if (q.get('day') || q.get('run')) show(day)
-  else main.querySelector('#digest').innerHTML = html`<section class="card digest-empty">${empty('See your day in one view', 'Press Analyse my day to see what you completed, delivered and moved forward, what mattered, what is missing and what to do next.', '', 'sparkles')}</section>`.toString()
+  else main.querySelector('#digest').innerHTML = html`<section class="card digest-empty">${empty('See your day in one view', 'Press Prepare my day to see what you completed, delivered and moved forward, what mattered, what is missing and what to do next.', '', 'sparkles')}</section>`.toString()
   void app; void avatar
 }

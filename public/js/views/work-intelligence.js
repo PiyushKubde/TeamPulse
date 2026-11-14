@@ -168,7 +168,7 @@ const card = (id, title, sub, body, extra = '') => html`<section class="card wi-
 // ---------- the Team tab: people and their work ----------
 const WORK_RANK = (r) => (r.overdue || r.status === 'BLOCKED' ? 0 : r.status === 'IN_PROGRESS' ? 1 : r.status === 'SUBMITTED_FOR_REVIEW' ? 2 : r.status === 'ASSIGNED' ? 3 : 4)
 const needsAttention = (r) => r.overdue || r.status === 'BLOCKED' || r.status === 'SUBMITTED_FOR_REVIEW'
-const profileHref = (id) => `#/contribution/${id}?from=analytics`
+const profileHref = (id, from = 'analytics') => (from ? `#/contribution/${id}?from=${from}` : `#/contribution/${id}`)
 const dayText = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 
 /** One task: title (a link to the existing task page), then status and confirmed-deadline context. Overdue and blocked are context, not a verdict on the person. */
@@ -178,7 +178,7 @@ function workLine(r, { detail = false } = {}) {
     <div class="wi-sub"><span>${STATUS_TEXT(r.status)}</span>${deadline}${r.priority ? prioBadge(r.priority) : ''}${detail && r.progress > 0 ? html`<span class="muted">Progress ${r.progress}%</span>` : ''}${r.status === 'BLOCKED' ? html`<span class="muted" title="A blocker is context for the manager, not a fault of the owner.">Blocker open</span>` : ''}</div></div>`
 }
 
-function peopleList(d) {
+export function peopleList(d, { from = 'analytics', contributions = false } = {}) {
   const open = (r) => r.health !== null
   const rows = d.people.map((p) => ({ id: p.userId, name: p.name, team: p.team, p, tasks: d.tasks.filter((r) => r.assigneeId === p.userId) }))
   const u = d.unassigned
@@ -188,35 +188,41 @@ function peopleList(d) {
     const cur = r.tasks.filter(open).sort((a, b) => WORK_RANK(a) - WORK_RANK(b) || String(a.deadline || '~').localeCompare(String(b.deadline || '~')))
     const flags = [cur.some((t) => t.status === 'IN_PROGRESS') && 'progress', r.p.completed > 0 && 'completed', cur.some(needsAttention) && 'attention'].filter(Boolean).join(' ')
     return html`<li class="wi-row" data-person-row data-flags="${flags}">
-      <div class="wi-c-who">${r.id ? html`<a class="wi-pname" href="${profileHref(r.id)}" data-person="${r.id}" title="Open ${r.name}’s contribution profile">${r.name}</a>` : html`<span class="wi-pname muted">${r.name}</span>`}${r.team ? html`<div class="small muted">${r.team}</div>` : ''}</div>
+      <div class="wi-c-who">${r.id ? html`<a class="wi-pname" href="${profileHref(r.id, from)}" data-person="${r.id}" title="Open ${r.name}’s contribution profile">${r.name}</a>` : html`<span class="wi-pname muted">${r.name}</span>`}${r.team ? html`<div class="small muted">${r.team}</div>` : ''}</div>
       <div class="wi-c-work" data-label="Current work">${cur.length ? html`${workLine(cur[0], { detail: true })}${cur.length > 1 ? html`<details class="wi-more"><summary>+${cur.length - 1} more task${cur.length > 2 ? 's' : ''}</summary>${cur.slice(1).map((t) => workLine(t))}</details>` : ''}` : html`<span class="muted">No open work</span>`}</div>
       <div class="wi-c-load small" data-label="Workload"><b>${n(r.p.open)}</b> active · <b>${n(r.p.completed)}</b> completed${r.p.blocked ? html` · <b>${n(r.p.blocked)}</b> blocked` : ''}</div>
       <div class="wi-c-act small" data-label="Latest meaningful activity">${r.id ? activity(r.p.lastMeaningfulAt) : html`<span class="muted">—</span>`}</div>
-      <div class="wi-c-assess small" data-label="Contribution assessment">${r.id ? html`<span data-assess="${r.id}" class="muted">Reading the assessments…</span><div class="wi-contribs" data-contribs="${r.id}"></div><a class="wi-profile-link" href="${profileHref(r.id)}">View contribution profile ${icon('arrowRight', 'xs')}</a>` : html`<span class="muted">Needs an owner</span>`}</div></li>`
+      <div class="wi-c-assess small" data-label="Contribution assessment">${r.id ? html`<span data-assess="${r.id}" class="muted">Reading the assessments…</span><div class="wi-contribs" data-contribs="${r.id}"></div><a class="wi-profile-link" href="${profileHref(r.id, from)}">View contribution profile ${icon('arrowRight', 'xs')}</a>` : html`<span class="muted">Needs an owner</span>`}</div></li>`
   }
   return html`<ul class="wi-people-list" data-testid="people-list" aria-label="People and their work, alphabetical">
-    <li class="wi-row wi-head" aria-hidden="true"><div>Employee</div><div>Current work</div><div>Workload</div><div>Latest meaningful activity</div><div>Contribution assessment</div></li>${rows.map(li)}</ul>
+    <li class="wi-row wi-head" aria-hidden="true"><div>Employee</div><div>Current work</div><div>Workload</div><div>Latest meaningful activity</div><div>${contributions ? 'Contributions' : 'Contribution assessment'}</div></li>${rows.map(li)}</ul>
     <p class="small muted wi-caption wi-empty-filter" hidden>No one matches this view.</p>`
 }
 
 /** The short assessment status per person, from the existing contribution overview. The detail (dimensions, evidence, corrections) lives in the profile. */
-async function fillAssessments(host, d) {
+export async function fillAssessments(host, d, { analysis = true } = {}) {
   const q = new URLSearchParams({ from: d.period.from, to: d.period.to })
   let team
   try { team = await api(`/api/contribution/team?${q}`) } catch { host.querySelectorAll('[data-assess]').forEach((el) => { el.textContent = 'Assessment status unavailable' }); return }
   if (!host.isConnected) return
+  const aiOff = app.session?.integrations?.ai === 'not_configured'
   for (const x of team.people) {
     const el = host.querySelector(`[data-assess="${x.userId}"]`)
     if (!el) continue
     const m = x.complexityMix || {}
     const levels = ['L4', 'L3', 'L2', 'L1'].filter((k) => m[k])
+    const bits = []
+    if (analysis && levels.length) bits.push(html`<span class="wi-lv">${levels.map((k) => html`<span class="badge ${k === 'L4' || k === 'L3' ? 'brand' : 'outline'}" title="Complexity assessed from the work and its evidence">${m[k]}× ${k}</span>`)}</span>`.toString())
+    if (x.awaitingYourReview) bits.push(html`<span class="badge warn" title="Meaningful contributions waiting for your decision">${x.awaitingYourReview} awaiting your review</span>`.toString())
+    if (x.approved) bits.push(html`<span class="badge ok" title="Assessments a manager approved or adjusted">${x.approved} approved</span>`.toString())
+    if (x.verifiedOutcomes) bits.push(html`<span class="badge ok" title="Outcomes a manager verified">${x.verifiedOutcomes} verified outcome${x.verifiedOutcomes === 1 ? '' : 's'}</span>`.toString())
+    if (x.disputes) bits.push(html`<span class="badge warn">${x.disputes} disputed by them</span>`.toString())
+    const quiet = analysis ? [x.routine && `${x.routine} routine`, x.notEnoughEvidence && `${x.notEnoughEvidence} without enough evidence`].filter(Boolean) : []
     el.className = ''
-    el.innerHTML = (levels.length
-      ? html`<span class="wi-lv">${levels.map((k) => html`<span class="badge ${k === 'L4' || k === 'L3' ? 'brand' : 'outline'}" title="Complexity assessed from the work and its evidence">${m[k]}× ${k}</span>`)}</span>${m.insufficient ? html` <span class="muted">${m.insufficient} without enough evidence</span>` : ''}`
-      : html`<span class="muted">Not enough evidence yet</span>`).toString()
-      + (x.awaitingYourReview ? html` <span class="badge warn">${x.awaitingYourReview} to review</span>`.toString() : '') + (x.disputes ? html` <span class="badge warn">${x.disputes} disputed</span>`.toString() : '')
+    el.innerHTML = (bits.length ? bits.join(' ') : html`<span class="muted">${aiOff && !x.analysed ? 'AI assessment is not switched on yet' : 'Not enough evidence yet'}</span>`.toString())
+      + (quiet.length ? html`<div class="muted">${quiet.join(' · ')}</div>`.toString() : '')
   }
-  host.querySelectorAll('[data-assess].muted').forEach((el) => { if (el.textContent.startsWith('Reading')) el.textContent = 'Not enough evidence yet' })
+  host.querySelectorAll('[data-assess].muted').forEach((el) => { if (el.textContent.startsWith('Reading')) el.textContent = aiOff ? 'AI assessment is not switched on yet' : 'Not enough evidence yet' })
   // Recorded contributions: the latest two per person with where each stands; how many still wait for a manager. A claim is never shown as verified.
   try {
     const list = await api(`/api/impact?${q}`)
@@ -243,25 +249,42 @@ function teamOutcomes(o) {
 function teamView(main, d) {
   const s = d.summary
   if (!s.tasks) return html`<div data-testid="analytics-empty">${empty('No tasks match these filters', 'Nothing was created, worked on or completed in this period for the people you manage. Try a longer date range or reset the filters.', html`<a class="btn small ghost" href="#/analytics">Reset filters</a>`, 'trending')}</div>`
-  const attention = d.attention ? Object.entries(d.attention.totals).filter(([k]) => k !== 'UNCONFIRMED').reduce((a, [, v]) => a + v, 0) : 0
-  const glance = [['progress', 'In progress', s.byStatus.IN_PROGRESS || 0, 'Tasks whose status is In progress.'], ['completed', 'Completed', s.completed, 'Tasks whose status is Completed.'], ['attention', 'Needs attention', attention, 'Overdue, blocked, or waiting for a review or decision. A deadline that is not confirmed is context and is not counted. Blocked work is not a fault of its owner.']]
   return html`<div class="wi-team">
-    <div class="wi-glance" data-testid="analytics-summary" data-tasks="${s.tasks}" role="group" aria-label="Team at a glance. Select one to show only the people it applies to.">${glance.map(([k, l, v, tip]) => html`<button type="button" class="wi-g ${k === 'attention' && v ? 'warn' : ''}" data-testid="stat-${k}" data-glance="${k}" title="${tip}" aria-pressed="false"><b class="value">${n(v)}</b> <span>${l}</span></button>`)}</div>
-    <section class="wi-sec" aria-labelledby="wi-ppl"><h2 id="wi-ppl">People and their work</h2>${peopleList(d)}</section>
-    <section class="wi-sec" aria-labelledby="wi-out"><h2 id="wi-out">Team outcomes</h2>${teamOutcomes(d.outcomeList)}</section></div>`
+    <p class="small muted wi-caption" data-testid="wi-people-link">Who is doing what, current tasks and progress, what is blocked and what awaits review are on <a href="#/contribution">People</a>. This page is about what the work involved and what the evidence says.</p>
+    <div id="wi-patterns" data-testid="wi-patterns"><div class="loading">Reading the assessments…</div></div>
+    <section class="wi-sec" aria-labelledby="wi-out"><h2 id="wi-out">What the evidence says: verified outcomes</h2>${teamOutcomes(d.outcomeList)}</section></div>`
 }
 
-function bindGlance(body) {
-  const btns = [...body.querySelectorAll('[data-glance]')]
-  const rows = [...body.querySelectorAll('[data-person-row]')]
-  const empty = body.querySelector('.wi-empty-filter')
-  btns.forEach((b) => b.addEventListener('click', () => {
-    const on = b.getAttribute('aria-pressed') !== 'true'
-    btns.forEach((x) => x.setAttribute('aria-pressed', String(x === b && on)))
-    let shown = 0
-    for (const r of rows) { const show = !on || r.dataset.flags.split(' ').includes(b.dataset.glance); r.hidden = !show; if (show) shown++ }
-    if (empty) empty.hidden = shown > 0
-  }))
+/** Pooled patterns of the team's assessments: complexity, assessed dimensions, change over time. Never per person, never a ranking. */
+async function fillPatterns(host, d) {
+  const box = host.querySelector('#wi-patterns')
+  if (!box) return
+  const q = new URLSearchParams({ from: d.period.from, to: d.period.to })
+  let t
+  try { t = await api(`/api/contribution/team?${q}`) } catch (e) { if (box.isConnected) box.innerHTML = html`<p class="muted">Could not load the assessments: ${errorText(e)}</p>`.toString(); return }
+  if (!box.isConnected) return
+  const pt = t.patterns
+  const aiOff = app.session?.integrations?.ai === 'not_configured'
+  if (!pt || !pt.assessments) {
+    box.innerHTML = html`<section class="wi-sec"><h2>What the work involved</h2><p class="muted" style="margin:10px 0 0">${aiOff ? 'AI assessment is not switched on yet, so nothing has been assessed and nothing is estimated.' : 'No assessments in this period yet. Submitted tasks are assessed automatically; work submitted earlier can be started from Reviews → Not yet assessed.'}</p></section>`.toString()
+    return
+  }
+  const mix = pt.complexityMix
+  const total = ['L1', 'L2', 'L3', 'L4'].reduce((a, k) => a + mix[k], 0)
+  const levelText = { L1: 'Simple', L2: 'Moderate', L3: 'Complex', L4: 'Very complex' }
+  const dimOrder = Object.entries(pt.dimensions)
+  const range = (w) => `${dayText(w.from)} – ${dayText(w.to)}`
+  box.innerHTML = html`
+    <section class="wi-sec" aria-labelledby="wi-cx" data-testid="wi-complexity"><h2 id="wi-cx">How complex the work was</h2>
+      <p class="small muted wi-caption">Assessed from the work and its evidence, pooled for the team in this period.${mix.insufficient ? ` ${n(mix.insufficient)} could not be judged (not enough evidence), which says nothing about the work.` : ''}</p>
+      ${distBars(mix, ['L4', 'L3', 'L2', 'L1'].map((k) => [k, `${k} · ${levelText[k]}`]), total)}</section>
+    <section class="wi-sec" aria-labelledby="wi-dim" data-testid="wi-dimensions"><h2 id="wi-dim">Assessment dimensions</h2>
+      <p class="small muted wi-caption">How the assessed work was rated on each dimension. Counts of assessments, not scores for people.</p>
+      <div class="wi-dims">${dimOrder.map(([, x]) => html`<div class="wi-dim"><h3 class="wi-h3">${x.label}</h3>${x.assessed ? distBars(x.levels, [5, 4, 3, 2, 1].map((l) => [l, `Level ${l}`]), x.assessed) : html`<p class="small muted">Nothing assessed on this yet.</p>`}${x.insufficient ? html`<p class="small muted">${n(x.insufficient)} without enough evidence</p>` : ''}</div>`)}</div></section>
+    <section class="wi-sec" aria-labelledby="wi-time" data-testid="wi-over-time"><h2 id="wi-time">How contribution changed over time</h2>
+      <p class="small muted wi-caption">Three equal periods ending now. “Meaningful” is the work that reached your review; routine work and work without enough evidence are recorded but not queued.</p>
+      <div class="table-wrap"><table class="wi-table"><thead><tr><th scope="col">Period</th><th scope="col">Assessed</th><th scope="col">Meaningful</th><th scope="col">Approved by a manager</th><th scope="col">Complex or very complex</th><th scope="col">Not enough evidence</th></tr></thead>
+        <tbody>${pt.overTime.map((w, i) => html`<tr${i === pt.overTime.length - 1 ? raw(' aria-current="true"') : ''}><th scope="row">${range(w)}${i === pt.overTime.length - 1 ? ' (this period)' : ''}</th><td>${n(w.assessments)}</td><td>${n(w.meaningful)}</td><td>${n(w.approved)}</td><td>${n(w.complexityMix.L3 + w.complexityMix.L4)}</td><td>${n(w.notEnoughEvidence)}</td></tr>`)}</tbody></table></div></section>`.toString()
 }
 
 function personView(main, d) {
@@ -332,7 +355,7 @@ export async function renderAnalytics(main, q) {
   const tabLink = (k, label) => html`<a href="${hashFor(q, { tab: k, taskId: k === 'task' ? q.get('taskId') : null })}" role="tab" data-testid="tab-${k}" class="tab-link" ${tab === k ? raw('aria-selected="true" aria-current="page"') : raw('aria-selected="false"')}>${label}</a>`
   const opt = (v, l, cur) => html`<option value="${v}" ${String(cur) === String(v) ? raw('selected') : ''}>${l}</option>`
 
-  main.innerHTML = html`<header class="page-head"><div><h1>Work Intelligence</h1><p class="muted">Understand your team’s work and contribution.</p></div></header>
+  main.innerHTML = html`<header class="page-head"><div><h1>${manager ? 'Work Intelligence' : 'My progress'}</h1><p class="muted">Understand your team’s work and contribution.</p></div></header>
     ${manager ? html`<div class="tabs" role="tablist" aria-label="Views">${tabLink('team', 'Team')}${tabLink('person', 'Person')}${tabLink('task', 'Task')}</div>` : ''}
     <form id="af" class="wi-controls" data-testid="analytics-filters" aria-label="Filters"><input type="hidden" name="tab" value="${tab}">
       <div class="wi-bar-row">
@@ -423,7 +446,7 @@ export async function renderAnalytics(main, q) {
     }
     if (data.view === 'task') { body.innerHTML = taskView(data).toString(); return }
     body.innerHTML = (data.view === 'team' ? teamView(main, data) : personView(main, data)).toString()
-    if (data.view === 'team') { bindGlance(body); fillAssessments(body, data) }
+    if (data.view === 'team') fillPatterns(body, data)
     const host = body.querySelector('[data-host=table]')
     if (host) {
       const showOwner = data.view === 'team'

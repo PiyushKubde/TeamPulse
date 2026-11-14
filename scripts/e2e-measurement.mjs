@@ -97,16 +97,17 @@ try {
 
   step = 'manager: team overview and profile'
   await m.goto(`${base}/#/contribution`)
-  await m.waitForSelector('h1:has-text("Team intelligence")')
+  await m.waitForSelector('h1:has-text("People")')
   ok(await m.isVisible('text=Not a ranking'), 'not-a-ranking note')
-  const names = await m.$$eval('table tbody tr td:first-child b', (els) => els.map((x) => x.textContent))
+  await m.waitForSelector('[data-testid=people-list] [data-person-row]')
+  const names = await m.$$eval('.wi-pname', (els) => els.map((x) => x.textContent).filter((x) => x !== 'Unassigned work'))
   ok(JSON.stringify(names) === JSON.stringify([...names].sort((a, b) => a.localeCompare(b))), `alphabetical: ${names.join(', ')}`)
   await shot(m, 'm3-team')
-  await m.click('table >> a:has-text("Priya Sharma")')
+  await m.click('.wi-pname:has-text("Priya Sharma")')
   await m.waitForSelector('h2:has-text("In short")')
   ok(await m.isVisible('text=1× L4'), 'complexity mix in profile')
   await shot(m, 'm4-profile')
-  await m.goto(`${base}/#/dashboard`)
+  await m.goto(`${base}/#/workboard`)
   await m.waitForSelector('.wb-col')
 
   step = 'employee sees own profile, not the team'

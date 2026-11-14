@@ -48,8 +48,8 @@ test('team analytics respect scope: other teams, other organizations and employe
   try {
     await make({ title: 'Platform work', priority: 'HIGH' })
     assert.equal((await team('', s.manager2)).body.summary.tasks, 0, 'another team’s manager sees none of it')
-    assert.equal((await team('', s.admin)).body.summary.tasks, 1, 'admins see the organization')
-    assert.equal((await team('', s.otherAdmin)).body.summary.tasks, 0, 'another organization sees none of it')
+    assert.equal((await team('', s.admin)).status, 403, 'an admin who manages no team has no team analytics: admin is not manager')
+    assert.equal((await team('', s.otherAdmin)).status, 403, 'another organization’s admin sees none of it')
     assert.equal((await team('', s.employee)).status, 403, 'employees have no team analytics')
     assert.equal((await team(`?userId=${s.employee.id}`, s.manager2)).status, 404, 'cannot ask about people outside the scope')
   } finally { await t.close() }

@@ -2,7 +2,7 @@
 // ceiling, number checks, impact basis) and the supervised live-AI validation mode.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { startApp, seedOrg } from './helpers.js'
+import { startApp, seedOrg, adminManages } from './helpers.js'
 import { measurementSettled } from '../server/measurement/engine.js'
 import { reportsQualityProblem } from '../server/measurement/evidence-pack.js'
 import { aiMode } from '../server/measurement/assessments.js'
@@ -94,6 +94,7 @@ test('supervised mode: default for a real provider; admin only; selected task wi
   try {
     const s = seedOrg(t.db)
     const id = await work(t, s)
+    adminManages(t.db, s.admin, s.teamA) // the supervised run is an admin's, and an admin sees work only in a team they manage
     assert.equal(ai.calls, 0, 'no automatic analysis on submission')
     assert.equal((await t.call(`/api/tasks/${id}/assessment/analyse`, { method: 'POST', as: s.admin })).body.error.code, 'ai_supervised', 'not selected')
     const view = (await t.call(`/api/tasks/${id}/assessment`, { as: s.admin })).body
@@ -102,7 +103,7 @@ test('supervised mode: default for a real provider; admin only; selected task wi
     t.app.locals.aiMode.tasks.set(id, 'someone.else@example.com')
     assert.equal((await t.call(`/api/tasks/${id}/assessment/analyse`, { method: 'POST', as: s.admin })).body.error.code, 'supervised_owner_mismatch')
     t.app.locals.aiMode.tasks.set(id, s.employee.email)
-    assert.equal((await t.call(`/api/tasks/${id}/assessment/analyse`, { method: 'POST', as: s.manager })).status, 403, 'admins only')
+    assert.equal((await t.call(`/api/tasks/${id}/assessment/analyse`, { method: 'POST', as: s.manager })).status, 404, 'the former manager of the team is out of scope')
     assert.equal((await t.call(`/api/tasks/${id}/assessment/analyse`, { method: 'POST', as: s.employee })).status, 403)
     assert.equal(ai.calls, 0)
     // Preview: exactly what would be sent; nothing written, nothing fetched.
@@ -131,6 +132,7 @@ test('supervised mode: default for a real provider; admin only; selected task wi
   try {
     const s = seedOrg(off.db)
     const id = await work(off, s)
+    adminManages(off.db, s.admin, s.teamA)
     assert.equal((await off.call(`/api/tasks/${id}/assessment/analyse`, { method: 'POST', as: s.admin })).body.error.code, 'ai_off')
   } finally { await off.close() }
 })

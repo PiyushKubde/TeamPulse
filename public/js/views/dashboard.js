@@ -1,8 +1,10 @@
 import { dt } from '../ui.js'
+import { app } from '../app.js'
 import { renderWorkboard } from './workboard.js'
+import { renderTeamOverview } from './overview.js'
 
-// Overview is the team workboard (see workboard.js). The task-history wording below is shared with the task page.
-export const renderDashboard = renderWorkboard
+// The home page: Team Overview for managers (overview.js), My Workspace (the board, workboard.js) for employees. The task-history wording below is shared with the task page.
+export const renderDashboard = (main, q) => (app.isManager ? renderTeamOverview(main) : renderWorkboard(main, q))
 export const EVENT_TEXT = {
   created: () => 'created the task',
   assigned: (d) => `assigned it to ${d.toName || 'someone'}`,

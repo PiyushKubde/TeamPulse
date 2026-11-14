@@ -3,7 +3,7 @@
 // with either of them in scope. Another organization never sees it (404). Activity is never counted per person.
 import { json, now, transaction, uuid } from '../db.js'
 import { AppError, forbidden, invalid, notFound } from '../errors.js'
-import { canManageTask, isAdmin, isManager, managersForTask, requireVisibleTask, scopeUserIds } from '../access.js'
+import { canManageTask, isManager, managersForTask, requireVisibleTask, scopeUserIds } from '../access.js'
 import { audit } from '../services/audit.js'
 import { raiseAlert } from '../services/alerts.js'
 import { collectorFor } from './collectors.js'
@@ -11,7 +11,7 @@ import { IN_ANALYSIS, taskRef } from './matching.js'
 import * as v from '../validate.js'
 
 const userName = (db, id) => (id ? db.prepare('SELECT name FROM users WHERE id = ?').get(id)?.name ?? null : null)
-const inScope = (db, ctx, uid) => Boolean(uid) && (uid === ctx.user.id || isAdmin(ctx) || (ctx.role === 'manager' && scopeUserIds(db, ctx).includes(uid)))
+const inScope = (db, ctx, uid) => Boolean(uid) && (uid === ctx.user.id || (isManager(ctx) && scopeUserIds(db, ctx).includes(uid)))
 export const canSeeEvidence = (db, ctx, e) => e.org_id === ctx.orgId && (inScope(db, ctx, e.collector_id) || inScope(db, ctx, e.actor_user_id))
 
 const VERIFICATION_TEXT = { system_recorded: 'Recorded by the app (observed fact)', self_reported: 'Written by a person (their account, not proof)', reported_figure: 'A reported figure (not independently verified)' }
@@ -121,7 +121,7 @@ export function resolveAttribution(db, ctx, id, body) {
   const e = requireEvidence(db, ctx, id)
   const to = body?.external === true ? null : v.id(body?.userId, 'Person', { required: true })
   if (to && !inScope(db, ctx, to)) throw notFound('Person')
-  if (to === ctx.user.id && !isAdmin(ctx)) throw forbidden('You cannot attribute evidence to yourself.')
+  if (to === ctx.user.id) throw forbidden('You cannot attribute evidence to yourself.')
   const attribution = !to ? 'external' : to === e.collector_id ? 'self' : 'member'
   transaction(db, () => {
     db.prepare('UPDATE external_evidence SET actor_user_id = ?, attribution = ?, updated_at = ? WHERE id = ?').run(to, attribution, now(), e.id)

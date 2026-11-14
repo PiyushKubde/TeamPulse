@@ -1,7 +1,7 @@
 // Tests for: invitation acceptance flow, admin+manager permissions, AI employee management tools
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { startApp, makeUser, seedOrg, addTeam, addMember } from './helpers.js'
+import { startApp, makeUser, seedOrg, addTeam, addMember, adminManages } from './helpers.js'
 import { createOrganization } from '../server/services/orgs.js'
 import { randomToken } from '../server/auth/sessions.js'
 
@@ -179,13 +179,13 @@ test('admin set as team manager_id gets managedTeamIds populated', async () => {
   } finally { await t.close() }
 })
 
-test('admin can access manager-only contribution intelligence endpoint', async () => {
+test('admin is not a manager: manager-only contribution intelligence needs an assigned team', async () => {
   const t = await startApp()
   try {
     const s = seedOrg(t.db)
-    // Admin can access manager-only team intelligence
-    const r = await t.call('/api/contribution/team', { as: s.admin })
-    assert.equal(r.status, 200, 'admin can access manager contribution/team endpoint')
+    assert.equal((await t.call('/api/contribution/team', { as: s.admin })).status, 403, 'an admin who manages no team does not get team contribution intelligence')
+    adminManages(t.db, s.admin, s.teamA) // explicit, authorized assignment
+    assert.equal((await t.call('/api/contribution/team', { as: s.admin })).status, 200)
   } finally { await t.close() }
 })
 

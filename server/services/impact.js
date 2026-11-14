@@ -2,7 +2,7 @@
 // No scores: contributions are shown by category, evidence and verification status.
 import { now, transaction, uuid, json } from '../db.js'
 import { conflict, forbidden, invalid, notFound } from '../errors.js'
-import { isAdmin, isManager, requireManager, requireVisibleTask, scopeUserIds } from '../access.js'
+import { isManager, requireManager, requireVisibleTask, scopeUserIds } from '../access.js'
 import * as v from '../validate.js'
 import { listEvidence, setImpactVisibility } from './evidence.js'
 import { notifyInApp } from './notify.js'
@@ -14,7 +14,7 @@ export const CATEGORY_LABELS = {
   COST_REDUCTION: 'Cost reduction', OPERATIONAL_EFFICIENCY: 'Operational efficiency', KNOWLEDGE_INNOVATION: 'Knowledge sharing and innovation'
 }
 
-const visibleTo = (db, ctx, r) => r.org_id === ctx.orgId && (r.user_id === ctx.user.id || isAdmin(ctx) || (ctx.role === 'manager' && scopeUserIds(db, ctx).includes(r.user_id)))
+const visibleTo = (db, ctx, r) => r.org_id === ctx.orgId && (r.user_id === ctx.user.id || (isManager(ctx) && scopeUserIds(db, ctx).includes(r.user_id)))
 setImpactVisibility(visibleTo)
 
 function readFields(db, ctx, body, current = {}) {
@@ -166,7 +166,7 @@ export function listImpact(db, ctx, q = {}) {
   const params = [ctx.orgId]
   if (q.userId) {
     const uid = v.id(q.userId, 'Person')
-    if (uid !== ctx.user.id && !(isAdmin(ctx) || (ctx.role === 'manager' && scopeUserIds(db, ctx).includes(uid)))) throw notFound('Person')
+    if (uid !== ctx.user.id && !((isManager(ctx) && scopeUserIds(db, ctx).includes(uid)))) throw notFound('Person')
     where.push('r.user_id = ?'); params.push(uid)
   } else if (q.view === 'mine' || ctx.role === 'employee') {
     where.push('r.user_id = ?'); params.push(ctx.user.id)

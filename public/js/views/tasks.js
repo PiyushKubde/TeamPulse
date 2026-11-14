@@ -394,7 +394,7 @@ async function shareToSlack(t) {
   try { conns = await api('/api/viasocket/connections') } catch (e) { toast(errorText(e), { error: true }); return }
   const slack = conns.connections.filter((c) => c.app === 'slack' && c.status !== 'missing')
   if (!conns.configured) return modal(html`<h2 id="modal-title">Share to Slack</h2><div class="notice warn">ViaSocket is not configured on this server, so Slack is unavailable.</div><div class="row end"><button class="btn ghost" data-close>Close</button></div>`.toString())
-  if (!slack.length) return modal(html`<h2 id="modal-title">Share to Slack</h2><p>Connect your Slack first in the Automation Center.</p><div class="row end"><button class="btn ghost" data-close>Close</button><a class="btn" href="#/automations">Connect Slack</a></div>`.toString(), (el, close) => el.querySelector('a').addEventListener('click', () => close()))
+  if (!slack.length) return modal(html`<h2 id="modal-title">Share to Slack</h2><p>Connect your Slack first in Connected apps.</p><div class="row end"><button class="btn ghost" data-close>Close</button><a class="btn" href="#/automations">Connect Slack</a></div>`.toString(), (el, close) => el.querySelector('a').addEventListener('click', () => close()))
   modal(html`<h2 id="modal-title">Share to Slack</h2><form id="f"><div class="form-error"></div>
     <div class="field"><label for="s-c">Slack account</label><select id="s-c" name="connectionId">${slack.map((c) => html`<option value="${c.id}">${c.label || 'Slack'}</option>`)}</select></div>
     <div class="field"><label for="s-ch">Channel</label><select id="s-ch" name="slackChannelId" required><option value="">Loading channels…</option></select></div>

@@ -82,7 +82,7 @@ try {
 
   step = 'employee: evidence workspace'
   const e = await session('priya@demo.teampulse')
-  await e.click('nav >> text=My Work Evidence')
+  await e.click('nav >> text=My Profile'); await e.click('nav >> text=My work evidence')
   await e.waitForSelector('h1:has-text("My work evidence")')
   ok(await e.isVisible('text=Collecting'), 'source status shown')
   ok(await e.isVisible(`text=${ref} Cache catalog lookups`), 'PR suggested for confirmation')
@@ -106,8 +106,8 @@ try {
 
   step = 'manager: team intelligence and evidence review'
   const m = await session('manager@demo.teampulse')
-  await m.click('nav >> text=Team Intelligence')
-  await m.waitForSelector('h1:has-text("Team intelligence")')
+  await m.click('nav >> text=People')
+  await m.waitForSelector('h1:has-text("People")')
   ok(await m.isVisible('h2:has-text("Open blockers")'), 'blockers section'); ok(await m.isVisible('text=outside their control'), 'external blocker marked')
   await shot(m, 'ev4-intelligence')
   await m.click('a:has-text("Evidence to review")')
@@ -119,9 +119,9 @@ try {
   await m.waitForSelector('text=Saved.')
   await shot(m, 'ev5-review')
 
-  step = 'employee: AI Work Assistant'
-  await e.click('nav >> text=Analyse My Day')
-  await e.waitForSelector('h1:has-text("AI Work Assistant")')
+  step = 'employee: Prepare my day'
+  await e.click('nav >> text=My Workspace'); await e.click('nav >> text=Prepare my day')
+  await e.waitForSelector('h1:has-text("Prepare my day")')
   await e.click('#analyse-day')
   await e.waitForSelector('h2:has-text("Your day")')
   ok(await e.isVisible('.digest-summary'), 'day summary')
@@ -138,8 +138,8 @@ try {
   await shot(e, 'ev7-assistant')
 
   step = 'employee: contribution journey'
-  await e.click('nav >> text=Contribution Journeys')
-  await e.waitForSelector('h1:has-text("My contributions")')
+  await e.click('nav >> text=My Contributions'); await e.click('nav >> text=Journeys')
+  await e.waitForSelector('h1:has-text("My journeys")')
   await e.click('a.journey-card:has-text("Cut checkout API p95")')
   await e.waitForSelector('.stage-strip')
   ok(await e.isVisible('ol.journey >> text=GitHub: PR #77'), 'GitHub step in the timeline')
@@ -148,21 +148,21 @@ try {
   await shot(e, 'ev8-journey')
 
   step = 'manager: copilot, reviews, signals'
-  await m.click('nav >> text=Team Intelligence')
-  await m.waitForSelector('#copilot button.chip')
-  await m.click('#copilot button.chip:has-text("Who is blocked and why?")')
-  await m.waitForSelector('.answer >> text=Dev Patel: Migrate billing DB')
+  await m.click('nav >> text=Ask about your team')
+  await m.waitForSelector('.q-card')
+  await m.click('.q-card:has-text("What work is currently blocked?")')
+  await m.waitForSelector('.answer >> text=Waiting for the vendor')
   ok(await m.isVisible('.answer >> text=outside their control'), 'external blocker explained')
   await shot(m, 'ev9-copilot')
-  await m.click('nav >> text=Contribution Reviews')
-  await m.waitForSelector('h1:has-text("Contribution reviews")')
+  await m.click('nav >> text=Reviews'); await m.click('nav >> text=Assessments to confirm')
+  await m.waitForSelector('h1:has-text("Assessments to confirm")')
   await m.waitForSelector('#team-signals >> text=Unresolved blocker')
   await m.click('#team-signals li:has-text("Unresolved blocker") >> button:has-text("Dismiss")')
   await m.fill('#cf-reason', 'Vendor ticket escalated by me this morning.')
   await m.click('#cf-ok')
   await m.waitForSelector('text=Dismissed.')
   await shot(m, 'ev10-reviews')
-  await m.click('nav >> text=Overview')
+  await m.click('nav >> text=Workboard')
   await m.waitForSelector('.wb-col')
 
   step = 'phone width'
@@ -171,9 +171,9 @@ try {
   ok(await overflow(p) <= 1, `evidence page fits a phone (${await overflow(p)}px)`)
   await shot(p, 'ev6-phone')
   const pm = await session('manager@demo.teampulse', { width: 390, height: 844 })
-  await pm.goto(`${base}/#/contribution`); await pm.waitForSelector('h1:has-text("Team intelligence")')
+  await pm.goto(`${base}/#/contribution`); await pm.waitForSelector('h1:has-text("People")')
   ok(await overflow(pm) <= 1, `team intelligence fits a phone (${await overflow(pm)}px)`)
-  for (const [page, url, sel] of [[p, '#/assistant?run=1', 'h2:has-text("Your day")'], [p, `#/journey/${task}`, '.stage-strip'], [p, '#/contributions', 'h1:has-text("My contributions")'], [p, '#/my-tasks', 'h1:has-text("My tasks")'], [p, '#/evidence', 'h1:has-text("My work evidence")'], [p, `#/tasks/${task}`, '.task-head'], [pm, '#/reviews', 'h1:has-text("Contribution reviews")'], [pm, '#/dashboard', '.wb-col']]) {
+  for (const [page, url, sel] of [[p, '#/assistant?run=1', 'h2:has-text("Your day")'], [p, `#/journey/${task}`, '.stage-strip'], [p, '#/contributions', 'h1:has-text("My journeys")'], [p, '#/my-tasks', 'h1:has-text("My tasks")'], [p, '#/evidence', 'h1:has-text("My work evidence")'], [p, `#/tasks/${task}`, '.task-head'], [pm, '#/reviews', 'h1:has-text("Assessments to confirm")'], [pm, '#/workboard', '.wb-col']]) {
     await page.goto(`${base}/${url}`); await page.waitForSelector(sel)
     ok(await overflow(page) <= 1, `${url} fits a phone (${await overflow(page)}px)`)
   }

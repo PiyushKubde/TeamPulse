@@ -48,7 +48,7 @@ try {
 
   step = 'employee records a short contribution'
   await e.goto(`${base}/#/impact`); await e.waitForSelector('#new-impact')
-  ok((await e.locator('#new-impact').textContent()) === 'Record a contribution', 'the button says Record a contribution')
+  ok((await e.locator('#new-impact').textContent()) === 'Record an exceptional contribution', 'the button says Record an exceptional contribution (finished tasks are assessed for you)')
   await e.click('#new-impact'); await e.waitForSelector('#imp')
   ok(await e.locator('#i-p[required], #i-w[required], #i-r[required]').count() === 0, 'the three descriptions are optional: a short record is fine')
   ok(await e.getByText('Records are not points').count() === 1, 'the form says records are not points')

@@ -2,7 +2,7 @@
 // External requests (from automations) always land here as PENDING; they are never auto-assigned.
 import { now, transaction, uuid } from '../db.js'
 import { conflict, forbidden, invalid, notFound } from '../errors.js'
-import { isActiveMember, isAdmin, isManager, requireManager, scopeUserIds } from '../access.js'
+import { isActiveMember, isManager, requireManager, scopeUserIds } from '../access.js'
 import * as v from '../validate.js'
 import { emit } from './events.js'
 import { createTask } from './tasks.js'
@@ -71,10 +71,9 @@ function present(db, r) {
   }
 }
 
-/** Requests this context may see: own; managers their teams' (and their people's); admins all. */
+/** Requests this context may see: own; managers (and admins assigned to manage a team) those of their teams and people. */
 function requestScope(db, ctx) {
-  if (isAdmin(ctx)) return { sql: 'r.org_id = ?', params: [ctx.orgId] }
-  if (ctx.role === 'manager') {
+  if (isManager(ctx)) {
     const people = scopeUserIds(db, ctx)
     const teams = ctx.managedTeamIds
     return {
@@ -111,7 +110,7 @@ export function decideRequest(db, ctx, id, body) {
   requireManager(ctx)
   const r = requireRequest(db, ctx, id)
   if (!['PENDING', 'CLARIFICATION_REQUESTED'].includes(r.status)) throw conflict(`This request is already ${r.status.toLowerCase()}.`, 'request_decided')
-  if (r.requested_by === ctx.user.id && !isAdmin(ctx)) throw forbidden('You cannot approve your own request.')
+  if (r.requested_by === ctx.user.id) throw forbidden('You cannot approve your own request.')
   const decision = v.oneOf(body?.decision, 'Decision', ['APPROVE', 'REJECT', 'CLARIFY'], { required: true })
   const note = v.text(body?.note, decision === 'REJECT' ? 'Rejection reason' : decision === 'CLARIFY' ? 'Question' : 'Note', { max: 2000, required: decision !== 'APPROVE' })
   const ts = now()
@@ -128,7 +127,7 @@ export function decideRequest(db, ctx, id, body) {
     const created = createTask(db, ctx, {
       title: r.title, description: r.description, expectedOutcome: r.expected_outcome,
       priority: body?.priority ?? (r.priority_stated ? r.suggested_priority : null), dueAt: body?.dueAt !== undefined ? body.dueAt : r.suggested_due_at,
-      teamId: body?.teamId !== undefined ? body.teamId : (r.team_id && (isAdmin(ctx) || ctx.managedTeamIds.includes(r.team_id)) ? r.team_id : null),
+      teamId: body?.teamId !== undefined ? body.teamId : (r.team_id && ctx.managedTeamIds.includes(r.team_id) ? r.team_id : null),
       assigneeId: body?.assigneeId !== undefined ? body.assigneeId : r.suggested_assignee_id, links: []
     }, { sourceRequestId: r.id, origin: 'REQUEST', confirmSource: 'REQUEST_APPROVAL' })
     db.prepare(`UPDATE task_requests SET status = 'APPROVED', decision_note = ?, decided_by = ?, decided_at = ?, task_id = ?, updated_at = ? WHERE id = ?`).run(note, ctx.user.id, ts, created.task.id, ts, r.id)
@@ -161,4 +160,4 @@ export function withdrawRequest(db, ctx, id) {
   return getRequest(db, ctx, r.id)
 }
 
-export const pendingRequestCount = (db, ctx) => (isManager(ctx) ? listRequests(db, ctx, { status: 'PENDING' }).filter((r) => r.requestedBy !== ctx.user.id || isAdmin(ctx)).length : 0)
+export const pendingRequestCount = (db, ctx) => (isManager(ctx) ? listRequests(db, ctx, { status: 'PENDING' }).filter((r) => r.requestedBy !== ctx.user.id).length : 0)

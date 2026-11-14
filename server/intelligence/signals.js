@@ -4,10 +4,11 @@
 // updated on every run) and a signal whose condition is gone resolves itself.
 import { json, now, uuid } from '../db.js'
 import { forbidden, invalid, notFound } from '../errors.js'
-import { isAdmin, isManager, managersForTask, scopeUserIds } from '../access.js'
+import { isManager, managersForTask, scopeUserIds } from '../access.js'
 import { orgSettings } from '../services/orgs.js'
 import { raiseAlert } from '../services/alerts.js'
 import { audit } from '../services/audit.js'
+import { waitsForManager } from '../measurement/lifecycle.js'
 import * as v from '../validate.js'
 
 const HOUR = 3600000
@@ -79,7 +80,8 @@ export function detectSignals(db, orgId) {
     add({ kind: 'unlinked_work', severity: 'low', subject: e.actor_user_id, task: null, key: `unlinked_work:${e.id}`, audience: 'person', related: e.id,
       reason: `${e.kind === 'pr_merged' ? 'A merged pull request' : 'A release'} (“${String(e.title).slice(0, 100)}”) is not linked to any task.`, evidence: [{ label: e.title, href: e.source_url || '#/evidence' }], action: 'Link it to the task it belongs to, so it counts as part of that work.' })
   }
-  for (const a of db.prepare(`SELECT a.*, t.title FROM contribution_assessments a JOIN tasks t ON t.id = a.task_id WHERE a.org_id = ? AND a.is_current = 1 AND a.manager_status = 'PENDING' AND a.provider != 'rules' AND a.created_at < ?`).all(orgId, new Date(at - 2 * DAY).toISOString())) {
+  for (const a of db.prepare(`SELECT a.*, t.title FROM contribution_assessments a JOIN tasks t ON t.id = a.task_id WHERE a.org_id = ? AND a.is_current = 1 AND a.manager_status = 'PENDING' AND (a.provider != 'rules' OR a.employee_status IN ('CORRECTION_PROPOSED','DISPUTED')) AND a.created_at < ?`).all(orgId, new Date(at - 2 * DAY).toISOString())) {
+    if (!waitsForManager(db, a)) continue // routine work is not a decision waiting on a manager
     add({ kind: 'awaiting_review', severity: a.employee_status === 'DISPUTED' ? 'high' : 'low', subject: a.user_id, task: { id: a.task_id, title: a.title }, key: `awaiting_review:${a.id}`, audience: 'managers', related: a.id,
       reason: `The analysis of “${String(a.title).slice(0, 100)}” has waited ${Math.floor((at - Date.parse(a.created_at)) / DAY)} days for your review${a.employee_status === 'DISPUTED' ? ' and the employee disputes it' : ''}.`, evidence: [{ label: 'Task', href: `#/tasks/${a.task_id}` }], action: 'Approve, adjust or dispute it.' })
   }
@@ -143,7 +145,7 @@ function freshen(db, orgId) {
 const visible = (db, ctx, s) => {
   if (s.org_id !== ctx.orgId) return false
   const mine = s.subject_user_id === ctx.user.id
-  const asManager = isAdmin(ctx) || (ctx.role === 'manager' && (s.subject_user_id ? scopeUserIds(db, ctx).includes(s.subject_user_id) && s.subject_user_id !== ctx.user.id : true))
+  const asManager = (isManager(ctx) && (s.subject_user_id ? scopeUserIds(db, ctx).includes(s.subject_user_id) && s.subject_user_id !== ctx.user.id : true))
   if (s.audience === 'person') return mine
   if (s.audience === 'managers') return asManager && (s.kind !== 'duplicate_effort' || isManager(ctx))
   return mine || asManager

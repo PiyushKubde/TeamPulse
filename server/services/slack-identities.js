@@ -3,7 +3,7 @@
 // only when a manager confirmed the mapping (mapped_by). Display names are never used to find a person.
 import { now, uuid, json } from '../db.js'
 import { conflict, forbidden, invalid, notFound } from '../errors.js'
-import { isActiveMember, isAdmin, isManager, scopeUserIds } from '../access.js'
+import { isActiveMember, isAdmin, isStaff, scopeUserIds } from '../access.js'
 import * as v from '../validate.js'
 import { audit } from './audit.js'
 
@@ -21,7 +21,7 @@ export function resolveSlackUser(db, orgId, slackUserId, workspaceId = null) {
 }
 
 function requireMapper(ctx) {
-  if (!isManager(ctx)) throw forbidden('Only managers and admins can map Slack identities.')
+  if (!isStaff(ctx)) throw forbidden('Only managers and admins can map Slack identities.')
 }
 
 const present = (r) => ({ id: r.id, userId: r.user_id, name: r.name, email: r.email, slackUserId: r.identity, workspaceId: r.workspace_id, confirmed: Boolean(r.mapped_by), confirmedByName: r.mapper_name ?? null, source: r.source, createdAt: r.created_at })

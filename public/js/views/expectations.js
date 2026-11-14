@@ -206,7 +206,7 @@ export async function renderReviewQueue(main) {
   if (!app.isManager) { main.innerHTML = empty('The review queue is for managers', 'Priority and deadline confirmations and change requests are decided by managers.').toString(); return }
   const [queue, requests] = await Promise.all([api('/api/parameter-review'), api('/api/change-requests?status=PENDING')])
   const paint = () => {
-    main.innerHTML = html`<header class="page-head"><div><h1>Review queue</h1><p class="muted">Priorities and deadlines that are not confirmed yet, and changes people have asked for. Nothing here is official until you decide.</p></div></header>
+    main.innerHTML = html`<header class="page-head"><div><h1>Priorities and deadlines</h1><p class="muted">Priorities and deadlines that are not confirmed yet, and changes people have asked for. Nothing here is official until you decide.</p></div></header>
       <section class="card" data-testid="review-queue" aria-labelledby="rq-h"><div class="card-head"><h2 id="rq-h"><span class="card-icon">${icon('flag')}</span>Waiting for confirmation (${queue.length})</h2></div>
         ${queue.length ? html`<ul class="list">${queue.map((q) => html`<li data-testid="review-item" data-task="${q.taskId}"><div class="grow">
           <a href="#/tasks/${q.taskId}"><b>${q.title}</b></a> <span class="small muted">${q.assigneeName ? `· ${q.assigneeName}` : '· unassigned'} · ${q.origin === 'SLACK' ? 'from Slack' : q.origin === 'EMPLOYEE' ? 'created by an employee' : q.origin === 'REQUEST' ? 'from a request' : ''}</span>

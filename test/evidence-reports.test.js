@@ -48,8 +48,10 @@ test('reports: filters, CSV export with formula-injection guard, manager scope',
     const filtered = await t.call(`/api/reports/workload?userId=${s.employee.id}`, { as: s.manager })
     assert.equal(filtered.body.rows.length, 1)
     assert.equal((await t.call(`/api/reports/workload?userId=${s.outsider.id}`, { as: s.manager })).status, 400)
-    for (const type of ['status', 'blockers', 'contributions', 'impact', 'weekly']) assert.equal((await t.call(`/api/reports/${type}?from=2026-01-01`, { as: s.admin })).status, 200, type)
-    assert.equal((await t.call('/api/reports/nope', { as: s.admin })).status, 400)
+    for (const type of ['status', 'blockers', 'contributions', 'impact', 'weekly']) assert.equal((await t.call(`/api/reports/${type}?from=2026-01-01`, { as: s.manager })).status, 200, type)
+    assert.equal((await t.call('/api/reports/nope', { as: s.manager })).status, 400)
+    // An admin has no authority over people's work unless assigned to manage a team: reports are manager-only.
+    assert.equal((await t.call('/api/reports/status?from=2026-01-01', { as: s.admin })).status, 403)
   } finally { await t.close() }
 })
 

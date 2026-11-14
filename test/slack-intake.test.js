@@ -425,7 +425,8 @@ test('the manager’s Slack dashboard: sources, owners, filters, nothing ranked'
     assert.equal((await get(`?teamId=${s.teamB}`)).tasks.length, 0)
     assert.equal((await t.call('/api/slack-intake/overview', { as: s.employee })).status, 403)
     assert.equal((await get('', s.manager2)).tasks.length, 0, 'another team’s manager sees none of it')
-    assert.equal((await get('', s.otherAdmin)).tasks.length, 0, 'another organization sees none of it')
+    assert.equal((await t.call('/api/slack-intake/overview', { as: s.otherAdmin })).status, 403, 'another organization’s admin (no team to manage) sees none of it')
+    assert.equal((await t.call('/api/slack-intake/overview', { as: s.admin })).status, 403, 'an admin who manages no team is not a manager')
     assert.ok(!Object.keys(all).some((k) => /rank|leader|score/i.test(k)))
   } finally { await t.close() }
 })

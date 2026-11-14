@@ -6,7 +6,7 @@
 // a missed deadline is shown with its context (approved changes, blockers) and not as a penalty, and task counts are never "productivity".
 import { json } from '../db.js'
 import { forbidden, invalid, notFound } from '../errors.js'
-import { canManageTask, isAdmin, requireManager, requireVisibleTask, scopeUserIds, taskScopeSql } from '../access.js'
+import { canManageTask, requireManager, requireVisibleTask, scopeUserIds, taskScopeSql } from '../access.js'
 import * as v from '../validate.js'
 import { deriveConditions } from './tasks.js'
 import { openSuggestions } from './task-parameters.js'
@@ -257,7 +257,7 @@ export function personAnalytics(db, ctx, userId, q = {}) {
 export function teamAnalytics(db, ctx, q = {}) {
   requireManager(ctx)
   const f = readFilters(db, ctx, q)
-  if (f.userId && !isAdmin(ctx) && !scopeUserIds(db, ctx).includes(f.userId)) throw notFound('Person')
+  if (f.userId && !scopeUserIds(db, ctx).includes(f.userId)) throw notFound('Person')
   const rows = collect(db, ctx, f)
   const overview = teamOverview(db, ctx, { from: f.from, to: f.to })
   const people = overview.people.map((p) => {

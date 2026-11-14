@@ -15,8 +15,8 @@ export async function renderContributions(main, q) {
   main.innerHTML = loading().toString()
   const r = await api(`/api/journeys?userId=${encodeURIComponent(userId)}&from=${encodeURIComponent(new Date(Date.now() - days * 86400000).toISOString())}`)
   const mine = userId === app.me.id
-  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('journeys', 'xs')}Contribution journeys</div><h1>${mine ? 'My contributions' : `${r.name}’s contributions`}</h1><p>Each piece of work as one journey — from request to outcome — with the evidence behind it. ${r.note}</p></div>
-      <div class="row"><a class="btn ghost" href="#/contribution/${userId}">${icon('intelligence')}Assessments</a><a class="btn ghost" href="#/impact${mine && !app.isManager ? '?view=mine' : ''}">${icon('award')}Outcomes</a></div></div>
+  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('journeys', 'xs')}Journeys</div><h1>${mine ? 'My journeys' : `${r.name}’s journeys`}</h1><p>Each piece of work as one journey — from request to outcome — with the evidence behind it. ${r.note}</p></div>
+      <div class="row"><a class="btn ghost" href="#/contribution/${userId}">${icon('intelligence')}Assessments</a><a class="btn ghost" href="#/impact${mine && !app.isManager ? '?view=mine' : ''}">${icon('award')}Contributions</a></div></div>
     <div class="segmented" role="group" aria-label="Period">${[[30, 'Last 30 days'], [90, 'Last 90 days']].map(([n, l]) => html`<a href="#/contributions?userId=${userId}&days=${n}" ${n === days ? raw('aria-current="page"') : ''}>${l}</a>`)}</div>
     ${r.journeys.length ? html`<div class="journey-list" style="margin-top:16px">${r.journeys.map((j) => html`<a class="card journey-card" href="#/journey/${j.taskId}">
       <div class="row between nowrap" style="gap:8px;align-items:flex-start"><b>${j.title}</b></div>
@@ -25,7 +25,7 @@ export async function renderContributions(main, q) {
       <div class="small">Now: <b>${j.stage}</b>${j.shared ? html` · with ${j.contributors.filter((c) => c !== j.ownerName).join(', ')}` : ''}</div>
       <div class="meta">${j.sources.map((s) => html`<span class="row nowrap" style="gap:4px">${sourceTile(s, 'xs')}${SRC[s] || s}</span>`)}${j.missing ? html`<span class="sep"></span><span>${j.missing} missing link(s)</span>` : ''}</div>
       <div class="small muted">Last activity ${ago(j.lastActivityAt)}</div></a>`)}</div>`
-      : empty('No contributions in this period', mine ? 'Work on a task, collect evidence from your apps, or ask Analyse My Day to read yours.' : 'Nothing recorded for this person in this period.', mine ? html`<a class="btn small ghost" href="#/assistant">${icon('sparkles')}Analyse My Day</a>` : '', 'journeys')}`.toString()
+      : empty('No contributions in this period', mine ? 'Work on a task, collect evidence from your apps, or ask Prepare my day to read yours.' : 'Nothing recorded for this person in this period.', mine ? html`<a class="btn small ghost" href="#/assistant">${icon('sparkles')}Analyse My Day</a>` : '', 'journeys')}`.toString()
 }
 
 const stepProvenance = (s) => {

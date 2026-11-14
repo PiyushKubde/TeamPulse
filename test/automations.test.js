@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { readFileSync } from 'node:fs'
-import { startApp, seedOrg } from './helpers.js'
+import { startApp, seedOrg, adminManages } from './helpers.js'
 import { migrate } from '../server/db.js'
 
 const SERVICE = { slack: 'rowbu58rc', gmail: 'rowo0bqrhj5g', github: 'rowcqz5hd8o5', 'google-calendar': 'rowkhibv5efp', 'google-sheets': 'rowqm5xi2' }
@@ -164,6 +164,7 @@ test('B: one report per manager (their teams) and per admin (whole org), deliver
   const t = await startApp({ vs })
   try {
     const s = seedOrg(t.db)
+    adminManages(t.db, s.admin, s.leadershipTeam) // an admin gets a team report only for a team they are assigned to manage
     const g = await connect(t, vs, s.manager, 'gmail')
     await t.call('/api/automations/weekly_team_report', { method: 'PUT', as: s.manager, body: { channel: 'gmail', connectionId: g.id, target: 'recipients', emailTo: 'leads@example.com' } })
     const sl = await connect(t, vs, s.admin, 'slack')
@@ -176,10 +177,10 @@ test('B: one report per manager (their teams) and per admin (whole org), deliver
     assert.match(vs.runs.find((x) => x.key === 'Send_Message').input.markdown_content, /Verified outcomes/)
     await t.call('/tasks/weekly-report', { headers: { Authorization: 'Bearer test-cron-secret' } })
     assert.equal(vs.runs.length, 2, 'not sent twice')
-    // In-app report for every manager and admin, once: admin, manager, manager2 (Acme) + other org admin.
-    assert.equal(t.db.prepare('SELECT COUNT(*) AS n FROM weekly_reports').get().n, 4)
+    // In-app report once for every person who manages a team: admin (assigned to Leadership), manager, manager2. Another organization's admin manages none.
+    assert.equal(t.db.prepare('SELECT COUNT(*) AS n FROM weekly_reports').get().n, 3)
     const scopes = t.db.prepare(`SELECT summary FROM weekly_reports`).all().map((x) => JSON.parse(x.summary).scope).sort()
-    assert.deepEqual(scopes, ['organization', 'organization', 'team', 'team'])
+    assert.deepEqual(scopes, ['team', 'team', 'team'])
   } finally { await t.close() }
 })
 

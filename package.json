@@ -25,7 +25,9 @@
     "test:e2e:navigation": "node --disable-warning=ExperimentalWarning scripts/e2e-navigation.mjs",
     "test:e2e:workboard": "node --disable-warning=ExperimentalWarning scripts/e2e-workboard.mjs",
     "test:e2e:intelligence": "node --disable-warning=ExperimentalWarning scripts/e2e-work-intelligence.mjs",
-    "test:e2e:contributions": "node --disable-warning=ExperimentalWarning scripts/e2e-contributions.mjs"
+    "test:e2e:contributions": "node --disable-warning=ExperimentalWarning scripts/e2e-contributions.mjs",
+    "test:e2e:nav": "node --disable-warning=ExperimentalWarning scripts/e2e-nav-structure.mjs",
+    "test:e2e:roles": "node --disable-warning=ExperimentalWarning scripts/e2e-roles.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.3.0",

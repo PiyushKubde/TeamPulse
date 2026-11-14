@@ -108,7 +108,7 @@ try {
   await m.waitForFunction(() => [...document.querySelectorAll('[data-assess]')].every((e) => !e.textContent.startsWith('Reading')))
   const row = m.locator('[data-person-row]', { hasText: 'Priya Sharma' })
   const rt = await row.textContent()
-  ok(rt.includes('L4') && rt.includes('to review'), 'complexity level and the number waiting for the manager’s review')
+  ok(rt.includes('L4') && rt.includes('awaiting your review'), 'complexity level and the number waiting for the manager’s review')
   ok(!/Ownership|Problem-solving|Quality|Collaboration|Impact/.test(rt), 'the dimensions are not repeated on the Team tab')
   ok(!rt.match(/\bscore\b/i), 'no score')
   await shot(m, 'wi2-desktop-team')

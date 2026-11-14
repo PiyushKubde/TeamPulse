@@ -6,26 +6,27 @@ import { renderEvidenceReview } from './evidence.js'
 import { renderSignals } from './assistant.js'
 import { renderAssessmentCard } from './contribution.js'
 
-const TABS = [['overview', 'Overview', 'home'], ['analyses', 'AI assessments', 'intelligence'], ['submissions', 'Submissions', 'reviews'], ['outcomes', 'Outcomes', 'shield'], ['evidence', 'Evidence', 'evidence'], ['signals', 'Signals', 'target']]
+const TABS = [['overview', 'Overview', 'home'], ['analyses', 'AI assessments', 'intelligence'], ['submissions', 'Submissions', 'reviews'], ['outcomes', 'Outcomes', 'shield'], ['evidence', 'Evidence', 'evidence'], ['backlog', 'Not yet assessed', 'clock'], ['signals', 'Signals', 'target']]
 const taskIdOf = (href) => href.match(/#\/tasks\/([0-9a-f-]{36})/)?.[1]
 const whoWhat = (text) => { const m = text.match(/^[^:]+: (.+?) — (.+)$/); return m ? { who: m[1], what: m[2] } : { who: '', what: text.replace(/^[^:]+: /, '') } }
 
 export async function renderReviews(main, q) {
   if (!app.isManager) { location.replace('#/dashboard'); return }
   main.innerHTML = loading().toString()
-  let review, signals, evidence
+  let review, signals, evidence, backlog
   try {
-    [review, signals, evidence] = await Promise.all([
+    [review, signals, evidence, backlog] = await Promise.all([
       api('/api/assistant/ask', { method: 'POST', body: { team: true, intent: 'review' } }),
       api('/api/signals?scope=team').catch(() => []),
-      api('/api/work-evidence?view=review').catch(() => [])
+      api('/api/work-evidence?view=review').catch(() => []),
+      api('/api/assessments/backlog').catch(() => ({ total: 0, tasks: [], ai: { ready: false, reason: null } }))
     ])
   } catch (e) { main.innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString(); return }
   const by = (prefix) => review.items.filter((i) => i.text.startsWith(prefix))
-  const data = { analyses: by('Analysis'), submissions: by('Submission'), outcomes: by('Outcome'), evidence: { length: evidence.length }, signals }
+  const data = { analyses: by('Analysis'), submissions: by('Submission'), outcomes: by('Outcome'), evidence: { length: evidence.length }, backlog: { length: backlog.total }, signals }
   data.overview = { length: 0 }
   const tab = TABS.some(([k]) => k === q.get('tab')) ? q.get('tab') : 'overview'
-  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('reviews', 'xs')}Contribution reviews</div><h1>Contribution reviews</h1><p>The decisions only you can make: judging analyses, approving work, verifying outcomes and deciding whose work it is. Everything else KONVO handles.</p></div></div>
+  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('reviews', 'xs')}Reviews</div><h1>Assessments to confirm</h1><p>The decisions only you can make: judging analyses, approving work, verifying outcomes and deciding whose work it is. KONVO assesses every submitted task; complex or high-impact work is sent here, while routine work and work without enough evidence are recorded without waiting for you.</p></div></div>
     <div class="principle" style="margin-bottom:16px">${icon('shield')}<span><b>The AI suggests; you decide.</b> Every assessment keeps the AI’s original, the employee’s own account and your decision — with your reasons — side by side. Nothing becomes final without you.</span></div>
     <nav class="tabs review-tabs" aria-label="Review queues">${TABS.map(([k, l, ic]) => html`<a href="#/reviews?tab=${k}" ${k === tab ? raw('aria-current="page"') : ''}>${icon(ic, 'sm')}${l}${data[k].length ? html`<span class="count-pill">${data[k].length}</span>` : ''}</a>`)}</nav>
     <div id="review-body"></div>`.toString()
@@ -42,7 +43,7 @@ export async function renderReviews(main, q) {
       <section class="card" id="team-signals"></section>`.toString()
     renderSignals(body.querySelector('#team-signals'), { scope: 'team', limit: 8, title: 'Signals in your teams', subtitle: 'Detected from records by fixed rules — each with a recommended next step.' })
   } else if (tab === 'analyses') {
-    body.innerHTML = (data.analyses.length ? queue(data.analyses, 'analyses') : html`<div class="card">${empty('No assessments waiting', 'AI assessments of your people’s work appear here until you approve, adjust or dispute them.', '', 'checkCircle')}</div>`).toString()
+    body.innerHTML = (data.analyses.length ? queue(data.analyses, 'analyses') : html`<div class="card">${empty('No assessments waiting', 'Complex or high-impact work that KONVO assessed appears here until you approve, adjust or dispute it. Routine work and work without enough evidence are recorded without waiting for you.', '', 'checkCircle')}</div>`).toString()
     body.querySelectorAll('[data-open-assessment]').forEach((b) => b.addEventListener('click', () => {
       const card = b.closest('.review-item'); const slot = card.querySelector('.assessment-slot')
       if (!slot.hidden) { slot.hidden = true; b.lastChild.textContent = 'Inspect'; return }
@@ -57,8 +58,32 @@ export async function renderReviews(main, q) {
   } else if (tab === 'evidence') {
     body.innerHTML = html`<section class="card"><div class="card-head"><div><h2><span class="card-icon teal">${icon('evidence')}</span>Evidence: whose work is it?</h2><p>Disputed or unknown authorship and shared links. Nothing is credited until you decide.</p></div></div><div id="ev-review">${loading()}</div></section>`.toString()
     renderEvidenceReview(body.querySelector('#ev-review'))
+  } else if (tab === 'backlog') {
+    renderBacklog(body, backlog, () => renderReviews(main, q))
   } else {
     body.innerHTML = html`<div class="segmented" role="group" aria-label="Signal state" style="margin-bottom:16px">${[['OPEN', 'Open'], ['DISMISSED', 'Dismissed'], ['RESOLVED', 'Resolved']].map(([k, l]) => html`<a href="#/reviews?tab=signals&state=${k}" ${(q.get('state') || 'OPEN') === k ? raw('aria-current="page"') : ''}>${l}</a>`)}</div><section id="team-signals"></section>`.toString()
     renderSignals(body.querySelector('#team-signals'), { scope: 'team', limit: 50, status: q.get('state') || 'OPEN', detail: true })
   }
+}
+
+// Work that was submitted before assessments existed (or while AI was off): listed, never assessed on its own. A manager starts it, in a bounded batch, when AI is on.
+function renderBacklog(body, b, reload) {
+  const ai = b.ai || {}
+  body.innerHTML = html`<section class="card" data-testid="backlog">
+    <div class="card-head"><div><h2><span class="card-icon teal">${icon('clock')}</span>Not yet assessed</h2>
+      <p>Submitted tasks of your teams that have no assessment, usually because they were submitted before AI was on. Nothing here is assessed by itself, and tasks that already have an assessment are never listed or re-run.</p></div></div>
+    ${b.total ? html`<p class="small muted" style="margin:0 0 8px"><b>${b.total}</b> task${b.total === 1 ? '' : 's'}${b.total > b.batchLimit ? html`. Each start assesses up to ${b.batchLimit}; you can start again for the rest.` : ''}</p>
+      <ul class="ov-list">${b.tasks.map((t) => html`<li class="ov-row"><div class="grow"><a class="ov-ttl" href="#/tasks/${t.taskId}">${t.title}</a><div class="small muted">${t.assignee}${t.team ? ` · ${t.team}` : ''}${t.previousAttemptFailed ? ' · an earlier attempt failed' : ''}</div></div></li>`)}</ul>
+      ${ai.ready ? html`<div class="row" style="margin-top:12px"><button class="btn" id="bl-start" data-testid="bl-start">${icon('intelligence', 'sm')}Assess ${Math.min(b.total, b.batchLimit)} task${Math.min(b.total, b.batchLimit) === 1 ? '' : 's'}</button><span class="small muted">${ai.state === 'simulated' ? 'Simulated assessment (development).' : 'Sent to the configured AI provider.'} Tasks with too little evidence are answered by rules, with nothing sent.</span></div>`
+        : html`<div class="notice" style="margin-top:12px" data-testid="bl-unavailable"><b>Cannot start yet.</b> ${ai.reason || 'AI is not available.'}</div>`}`
+      : empty('Everything submitted has been assessed', 'Tasks that are submitted are assessed when they are submitted. Older ones appear here if they were never assessed.')}
+  </section>`.toString()
+  body.querySelector('#bl-start')?.addEventListener('click', async (e) => {
+    e.currentTarget.disabled = true
+    try {
+      const r = await api('/api/assessments/backlog/start', { method: 'POST', body: {} })
+      toast(`Started ${r.started.length} assessment${r.started.length === 1 ? '' : 's'}${r.skipped.length ? `, skipped ${r.skipped.length}` : ''}${r.remaining ? `; ${r.remaining} remain` : ''}.`)
+      setTimeout(reload, 1200)
+    } catch (err) { toast(errorText(err), { error: true }); e.currentTarget.disabled = false }
+  })
 }

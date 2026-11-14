@@ -1,21 +1,21 @@
 // Per-employee task permissions, set by their manager (or an admin). Every change is audited.
 import { now } from '../db.js'
 import { forbidden, invalid, notFound } from '../errors.js'
-import { PERMISSION_KEYS, employeePermissions, isAdmin, requireManager, scopeUserIds } from '../access.js'
+import { PERMISSION_KEYS, employeePermissions, isAdmin, requireStaff, scopeUserIds } from '../access.js'
 import * as v from '../validate.js'
 import { audit } from './audit.js'
 
 export function listPermissions(db, ctx) {
-  requireManager(ctx)
-  const scope = new Set(scopeUserIds(db, ctx))
+  requireStaff(ctx)
+  const scope = isAdmin(ctx) ? null : new Set(scopeUserIds(db, ctx)) // an admin sets permissions for everyone; a manager for their teams
   return db.prepare(`SELECT m.user_id, u.name, u.email, t.name AS team_name FROM memberships m JOIN users u ON u.id = m.user_id LEFT JOIN teams t ON t.id = m.team_id
                      WHERE m.org_id = ? AND m.role = 'employee' AND m.status = 'active' ORDER BY u.name`).all(ctx.orgId)
-    .filter((r) => scope.has(r.user_id))
+    .filter((r) => !scope || scope.has(r.user_id))
     .map((r) => ({ userId: r.user_id, name: r.name, email: r.email, teamName: r.team_name, permissions: employeePermissions(db, ctx.orgId, r.user_id) }))
 }
 
 export function updatePermissions(db, ctx, userId, body) {
-  requireManager(ctx)
+  requireStaff(ctx)
   v.id(userId, 'Employee', { required: true })
   const m = db.prepare(`SELECT * FROM memberships WHERE org_id = ? AND user_id = ? AND status = 'active'`).get(ctx.orgId, userId)
   if (!m) throw notFound('Employee')

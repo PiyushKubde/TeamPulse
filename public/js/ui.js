@@ -53,7 +53,12 @@ export function toast(message, { error = false } = {}) {
   toastTimer = setTimeout(() => { el.hidden = true }, error ? 6000 : 3500)
 }
 
-export const errorText = (e) => (e?.message || 'Something went wrong.')
+export const errorText = (e) => {
+  const m = e?.message || ''
+  if (/No such API route/i.test(m)) return 'This part of KONVO is not available yet. Refresh the page; if it still fails, the app may need to be updated.'
+  if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'KONVO could not be reached. Check your connection and try again.'
+  return m || 'Something went wrong. Please try again.'
+}
 
 /** Opens a modal with the given HTML; `onMount(el, close)` wires it. Resolves with whatever close() is given. */
 export function modal(content, onMount) {
@@ -207,9 +212,9 @@ const APP_TILE = { github: ['github', 'GitHub'], slack: ['hash', 'Slack'], gmail
 export const appTile = (slug, size = '') => html`<span class="app-icon ${slug} ${size}" title="${(APP_TILE[slug] || [])[1] || slug}">${icon((APP_TILE[slug] || ['dot'])[0])}</span>`
 
 // ---------- theme (light | dark | system), stored per browser; applied before first paint by index.html ----------
-export function themePref() { return document.documentElement.dataset.themePref || 'light' }
+export function themePref() { return document.documentElement.dataset.themePref || 'dark' }
 export function setThemePref(pref) {
-  const p = ['light', 'dark', 'system'].includes(pref) ? pref : 'light'
+  const p = ['light', 'dark', 'system'].includes(pref) ? pref : 'dark'
   try { localStorage.setItem('tp-theme', p) } catch { /* private mode: still applies for this page */ }
   const root = document.documentElement
   root.dataset.themePref = p
@@ -252,6 +257,18 @@ export const STAGE = {
   VERIFIED: ['Verified', 'ok', 'A manager confirmed the result.']
 }
 export const stageBadge = (r) => html`<span class="badge ${STAGE[r.stage][1]}" title="${STAGE[r.stage][2]}">${STAGE[r.stage][0]}</span>`
+// Where a submitted task stands in the contribution lifecycle (decided on the server from records; see server/measurement/lifecycle.js).
+export const LIFECYCLE = {
+  PENDING: ['Not assessed yet', 'info', 'No assessment has run for this task yet. KONVO assesses a task when it is submitted; if this one came earlier, open it to run the assessment.'],
+  UNAVAILABLE: ['Assessment unavailable', 'outline', 'AI assessment is not switched on yet, so nothing was assessed. The task itself was submitted and reviewed as usual.'],
+  NOT_ENOUGH_EVIDENCE: ['Not enough evidence', 'outline', 'There is too little evidence to judge this work. Nothing was invented, and nothing waits for a manager.'],
+  ROUTINE: ['Routine work', 'outline', 'Assessed as routine work. It is recorded and needs no review.'],
+  SUBMITTED_FOR_REVIEW: ['Awaiting manager review', 'warn', 'A meaningful contribution, waiting for a manager to approve, adjust or dispute it.'],
+  APPROVED: ['Approved', 'ok', 'A manager approved this assessment.'],
+  ADJUSTED: ['Adjusted by manager', 'brand', 'A manager approved it with changes and gave a reason.'],
+  DISPUTED: ['Disputed by manager', 'warn', 'A manager disagreed with the assessment and gave a reason.']
+}
+export const lifecycleBadge = (key) => (LIFECYCLE[key] ? html`<span class="badge ${LIFECYCLE[key][1]}" title="${LIFECYCLE[key][2]}">${LIFECYCLE[key][0]}</span>` : '')
 export const verifyBadge = (s) => html`<span class="badge ${({ PENDING: 'info', VERIFIED: 'ok', REJECTED: 'bad' })[s]}">${({ PENDING: 'Pending verification', VERIFIED: 'Verified', REJECTED: 'Not verified' })[s]}</span>`
 /**
  * Provenance label — where a statement comes from. The same visual language everywhere:

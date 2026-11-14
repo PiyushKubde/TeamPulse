@@ -54,6 +54,11 @@ export function seedOrg(db) {
   return { org, leadershipTeam, admin, manager, manager2, teamA, teamB, employee, employee2, outsider, otherAdmin, otherOrg }
 }
 
+/** An admin acts as a manager only for a team they are explicitly assigned to manage: this does that assignment. */
+export function adminManages(db, admin, teamId) {
+  db.prepare('UPDATE teams SET manager_id = ? WHERE id = ?').run(admin.id, teamId)
+}
+
 export async function startApp({ vs = { configured: false }, m91 = createM91Transport({}), cfgOverrides = {}, google, mailer, ai } = {}) {
   const db = openDatabase(':memory:')
   const cfg = loadConfig({ dataDir: mkdtempSync(join(tmpdir(), 'teampulse-test-')), cronSecret: 'test-cron-secret', devLogin: false, appUrl: 'https://teampulse.test', ...cfgOverrides })

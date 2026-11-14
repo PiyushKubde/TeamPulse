@@ -2,7 +2,7 @@
 // OVERDUE and AT RISK are derived from dates and progress, never stored as statuses.
 import { now, transaction, uuid, json } from '../db.js'
 import { AppError, conflict, forbidden, invalid, notFound } from '../errors.js'
-import { assignableUserIds, canManageTask, isActiveMember, isAdmin, isManager, managersForTask, requireManageTask, requireVisibleTask, scopeUserIds, taskScopeSql } from '../access.js'
+import { assignableUserIds, canManageTask, isActiveMember, isManager, managersForTask, requireManageTask, requireVisibleTask, scopeUserIds, taskScopeSql } from '../access.js'
 import * as v from '../validate.js'
 import { audit } from './audit.js'
 import { emit } from './events.js'
@@ -545,7 +545,7 @@ export function submitForReview(db, ctx, taskId, body) {
 export function reviewSubmission(db, ctx, taskId, body) {
   const t = requireVisibleTask(db, ctx, v.id(taskId, 'Task', { required: true }))
   requireManageTask(db, ctx, t)
-  if (t.assignee_id === ctx.user.id && !isAdmin(ctx)) throw forbidden('You cannot review your own work. Another manager or an admin must review it.')
+  if (t.assignee_id === ctx.user.id) throw forbidden('You cannot review your own work. Another manager must review it.')
   if (t.status !== 'SUBMITTED_FOR_REVIEW') throw conflict('This task is not waiting for review.', 'not_in_review')
   const sub = db.prepare(`SELECT * FROM completion_submissions WHERE task_id = ? AND status = 'PENDING' ORDER BY created_at DESC LIMIT 1`).get(t.id)
   if (!sub) throw conflict('No pending submission to review.', 'no_submission')

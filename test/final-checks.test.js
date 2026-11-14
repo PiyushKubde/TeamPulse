@@ -7,7 +7,7 @@ import { createAiProvider, BACKUP_ON } from '../server/ai/provider.js'
 import { OUTPUT_SCHEMA, validateOutput } from '../server/measurement/schema.js'
 import { measurementSettled, startRun } from '../server/measurement/engine.js'
 import { aiMode } from '../server/measurement/assessments.js'
-import { startApp, seedOrg } from './helpers.js'
+import { startApp, seedOrg, adminManages } from './helpers.js'
 
 const ANTHROPIC_KEY = 'sk-ant-api03-TESTKEY-not-real-0123456789abcdef'
 const VS_SECRET = 'vs-embed-secret-TESTVALUE-0123456789abcdef'
@@ -56,7 +56,8 @@ test('1a. backup only for provider failures, timeouts, malformed answers and val
     }
     for (const [name, answer] of Object.entries(goes)) {
       const before = api.seen.length
-      const r = await gen(provider(stubVs(answer), api, { timeoutMs: 150 }))
+      // Only the 'timeout' case needs a short timeout; a tight one for the others made this fail under CPU load (a slow loopback call counted as a timeout).
+      const r = await gen(provider(stubVs(answer), api, { timeoutMs: name === 'timeout' ? 150 : 5000 }))
       assert.equal(r.provider, 'anthropic', name); assert.equal(api.seen.length, before + 1, name)
     }
     const stays = {
@@ -81,22 +82,23 @@ test('1b. KONVO authorization, permission and business-rule refusals call no pro
   try {
     const s = seedOrg(t.db)
     const id = await submitted(t, s)
+    adminManages(t.db, s.admin, s.teamA) // the supervised run is an admin's, and an admin sees work only in a team they manage
     const codes = []
     codes.push((await analyse(t, s.admin, id)).body.error.code) // not selected
     t.app.locals.aiMode.tasks.set(id, 'someone.else@example.com')
     codes.push((await analyse(t, s.admin, id)).body.error.code) // wrong owner
     t.app.locals.aiMode.tasks.set(id, s.employee.email)
-    codes.push((await analyse(t, s.manager, id)).status) // not an admin
+    codes.push((await analyse(t, s.manager, id)).status) // the team's former manager: no longer responsible, out of scope
     codes.push((await analyse(t, s.employee, id)).status)
     codes.push((await analyse(t, s.otherAdmin, id)).status) // another organization
     codes.push((await analyse(t, s.outsider, id)).status) // out of scope
-    assert.deepEqual(codes, ['ai_supervised', 'supervised_owner_mismatch', 403, 403, 404, 404])
+    assert.deepEqual(codes, ['ai_supervised', 'supervised_owner_mismatch', 404, 403, 404, 404])
     assert.equal(vs.calls.length, 0); assert.equal(api.seen.length, 0)
     // Manager-reviewed analysis: the employee cannot replace it; nothing is sent.
     t.app.locals.aiMode.mode = 'on'
     await analyse(t, s.employee, id)
     const sent = vs.calls.length
-    await t.call(`/api/tasks/${id}/assessment/review`, { method: 'POST', as: s.manager, body: { action: 'APPROVE' } })
+    await t.call(`/api/tasks/${id}/assessment/review`, { method: 'POST', as: s.admin, body: { action: 'APPROVE' } })
     await t.call(`/api/tasks/${id}/comments`, { method: 'POST', as: s.employee, body: { body: 'Added the pagination example for cursors.' } })
     assert.equal((await analyse(t, s.employee, id)).body.error.code, 'assessment_reviewed')
     assert.equal(vs.calls.length, sent); assert.equal(api.seen.length, 0)
@@ -173,11 +175,11 @@ test('3. keys never reach logs, API responses, the AI conversation, or the datab
     const id2 = await submitted(t, s) // viaSocket 500 → Anthropic OK
     await submitted(t, s) // viaSocket OK
     const id4 = await submitted(t, s) // viaSocket 400 whose detail echoes both keys → no backup, run fails with a redacted message
-    assert.match((await view(t, s.admin, id4)).run.error, /rejected key \[redacted\] and \[redacted\]/)
+    assert.match((await view(t, s.manager, id4)).run.error, /rejected key \[redacted\] and \[redacted\]/)
     const responses = await Promise.all([
-      t.call('/api/session', { as: s.admin }), t.call('/api/health'), t.call(`/api/tasks/${id}/assessment`, { as: s.admin }),
-      t.call(`/api/tasks/${id2}/assessment`, { as: s.admin }), t.call(`/api/tasks/${id2}/assessment/preview`, { as: s.admin }),
-      t.call(`/api/contribution/people/${s.employee.id}`, { as: s.admin })
+      t.call('/api/session', { as: s.manager }), t.call('/api/health'), t.call(`/api/tasks/${id}/assessment`, { as: s.manager }),
+      t.call(`/api/tasks/${id2}/assessment`, { as: s.manager }), t.call(`/api/tasks/${id2}/assessment/preview`, { as: s.manager }),
+      t.call(`/api/contribution/people/${s.employee.id}`, { as: s.manager })
     ])
     const tables = t.db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all().map((r) => r.name)
     const dbDump = tables.map((n) => JSON.stringify(t.db.prepare(`SELECT * FROM ${n}`).all())).join('\n')
@@ -186,7 +188,7 @@ test('3. keys never reach logs, API responses, the AI conversation, or the datab
       for (const secret of [ANTHROPIC_KEY, VS_SECRET, 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0']) assert.ok(!text.includes(secret), `${where} contains a credential`)
     }
     assert.ok(dbDump.includes('[redacted]'), 'the echoed values were redacted, not just absent')
-    assert.equal((await view(t, s.admin, id)).run.status, 'FAILED')
+    assert.equal((await view(t, s.manager, id)).run.status, 'FAILED')
   } finally { Object.assign(console, orig); await t.close(); await api.close() }
 })
 
@@ -198,10 +200,10 @@ test('4. every assessment records the primary provider, who answered, the model,
   const t = await startApp({ ai: provider(vs, api, { mode: 'on' }) })
   try {
     const s = seedOrg(t.db)
-    const direct = (await view(t, s.admin, await submitted(t, s))).assessment.aiMeta
+    const direct = (await view(t, s.manager, await submitted(t, s))).assessment.aiMeta
     assert.deepEqual(direct, { primaryProvider: 'viasocket', requestedModel: 'anthropic/claude-sonnet-5-5', answeredBy: 'viasocket', answeredModel: 'anthropic/claude-sonnet-5-5', modelConfirmed: false, fallbackUsed: false, fallbackKind: null, fallbackReason: null, requestId: 'vs-msg-1' })
     mode = 'fail'
-    const backup = (await view(t, s.admin, await submitted(t, s))).assessment.aiMeta
+    const backup = (await view(t, s.manager, await submitted(t, s))).assessment.aiMeta
     assert.equal(backup.primaryProvider, 'viasocket'); assert.equal(backup.answeredBy, 'anthropic'); assert.equal(backup.answeredModel, 'claude-opus-5-5')
     assert.equal(backup.modelConfirmed, true); assert.equal(backup.fallbackUsed, true); assert.equal(backup.fallbackKind, 'provider_backup')
     assert.match(backup.fallbackReason, /provider_error: viaSocket AI failed \(503\)/)
@@ -210,7 +212,7 @@ test('4. every assessment records the primary provider, who answered, the model,
     await t.call(`/api/tasks/${c.body.task.id}/status`, { method: 'POST', as: s.employee, body: { status: 'IN_PROGRESS' } })
     await t.call(`/api/tasks/${c.body.task.id}/submit`, { method: 'POST', as: s.employee, body: { summary: 'Done.', outcome: 'Done.' } })
     await t.settled(); await measurementSettled(); await t.settled()
-    const rules = (await view(t, s.admin, c.body.task.id)).assessment.aiMeta
+    const rules = (await view(t, s.manager, c.body.task.id)).assessment.aiMeta
     assert.equal(rules.answeredBy, 'rules'); assert.equal(rules.fallbackUsed, false); assert.equal(rules.answeredModel, null)
     // Every stored assessment has the metadata; runs and audit carry it too.
     for (const a of t.db.prepare('SELECT context_json FROM contribution_assessments').all()) assert.ok(JSON.parse(a.context_json).ai?.answeredBy)
@@ -228,7 +230,7 @@ test('5. the same rule-breaking answer is corrected identically whether viaSocke
     const t = await startApp({ ai: provider(vs, api, { mode: 'on' }) })
     try {
       const s = seedOrg(t.db)
-      const a = (await view(t, s.admin, await submitted(t, s))).assessment
+      const a = (await view(t, s.manager, await submitted(t, s))).assessment
       assert.equal(a.aiMeta.answeredBy, path === 'backup' ? 'anthropic' : 'viasocket')
       results[path] = { complexity: a.complexity.levelText, quality: a.dimensions.find((d) => d.key === 'quality').state, estimated: a.impact.estimated.length, notes: a.guardrails.length }
     } finally { await t.close(); await api.close() }

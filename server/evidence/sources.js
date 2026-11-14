@@ -7,7 +7,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { json, now, transaction, uuid } from '../db.js'
 import { AppError, conflict, forbidden, invalid, notFound } from '../errors.js'
-import { isAdmin, scopeUserIds } from '../access.js'
+import { isAdmin, isManager, scopeUserIds } from '../access.js'
 import { audit } from '../services/audit.js'
 import { requireActiveConnection, pickOptions } from '../integrations/actions.js'
 import { requireViasocket, viasocketError } from '../integrations/errors.js'
@@ -53,7 +53,7 @@ function present(db, s) {
 
 export function listSources(db, ctx, { userId } = {}) {
   const uid = userId || ctx.user.id
-  if (uid !== ctx.user.id && !(isAdmin(ctx) || (ctx.role === 'manager' && scopeUserIds(db, ctx).includes(uid)))) throw notFound('Person')
+  if (uid !== ctx.user.id && !((isManager(ctx) && scopeUserIds(db, ctx).includes(uid)))) throw notFound('Person')
   return db.prepare(`SELECT * FROM evidence_sources WHERE org_id = ? AND owner_id = ? AND status != 'DELETED' ORDER BY created_at DESC`).all(ctx.orgId, uid).map((s) => present(db, s))
 }
 
@@ -205,7 +205,7 @@ function identityFromConnection(db, ctx, app, label) {
 }
 
 export function listIdentities(db, ctx, userId = ctx.user.id) {
-  if (userId !== ctx.user.id && !(isAdmin(ctx) || (ctx.role === 'manager' && scopeUserIds(db, ctx).includes(userId)))) throw notFound('Person')
+  if (userId !== ctx.user.id && !((isManager(ctx) && scopeUserIds(db, ctx).includes(userId)))) throw notFound('Person')
   return db.prepare('SELECT id, app, identity, source, created_at FROM external_identities WHERE org_id = ? AND user_id = ? ORDER BY app').all(ctx.orgId, userId)
     .map((r) => ({ id: r.id, app: r.app, identity: r.identity, source: r.source, createdAt: r.created_at }))
 }

@@ -17,10 +17,10 @@
   <meta name="theme-color" content="#FAFAFA" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0A0A0A" media="(prefers-color-scheme: dark)">
   <script>
-    // Theme before first paint, so the page never flashes the wrong theme. Light is the default; 'system' follows the OS live.
+    // Theme before first paint, so the page never flashes the wrong theme. Dark is the default; 'system' follows the OS live.
     (function () {
       var pref = 'light'
-      try { pref = localStorage.getItem('tp-theme') || 'light' } catch (e) {}
+      try { pref = localStorage.getItem('tp-theme') || 'dark' } catch (e) {}
       var mq = window.matchMedia('(prefers-color-scheme: dark)')
       function apply() {
         var p = document.documentElement.dataset.themePref || pref

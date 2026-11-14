@@ -33,11 +33,22 @@ export function loadContext(db, user) {
   return ctx
 }
 
+// Three roles, three kinds of authority:
+//  - employee: their own work.
+//  - manager: authority over the work of the people in the teams they manage (tasks, reviews, assessments, verification, reports).
+//  - admin: running the organization (people, roles, permissions, integrations, system settings, audit). It carries NO authority over people's work by itself.
+// An admin acts as a manager only for teams they have been explicitly assigned to manage (the team's manager is set in Teams & members, by an admin),
+// and then only for those teams. Nothing here lets an admin read or review work outside them.
 export const isAdmin = (ctx) => ctx.role === 'admin'
-export const isManager = (ctx) => ctx.role === 'manager' || ctx.role === 'admin'
+export const isManager = (ctx) => ctx.role === 'manager' || (ctx.role === 'admin' && (ctx.managedTeamIds?.length ?? 0) > 0)
+/** Organization staff, for set-up screens (people, invitations, permissions): an admin, or a manager for their own teams. Not authority over work. */
+export const isStaff = (ctx) => ctx.role === 'admin' || ctx.role === 'manager'
 
 export function requireManager(ctx) {
-  if (!isManager(ctx)) throw forbidden('Only managers and admins can do that.')
+  if (!isManager(ctx)) throw forbidden('Only a manager of the team can do that. An admin acts as a manager only for teams they are assigned to manage.')
+}
+export function requireStaff(ctx) {
+  if (!isStaff(ctx)) throw forbidden('Only managers and admins can do that.')
 }
 export function requireAdmin(ctx) {
   if (!isAdmin(ctx)) throw forbidden('Only organization admins can do that.')
@@ -45,8 +56,7 @@ export function requireAdmin(ctx) {
 
 /** User ids this context may see as people: admin → whole org; manager → their teams' members + self; employee → self. */
 export function scopeUserIds(db, ctx) {
-  if (isAdmin(ctx)) return db.prepare(`SELECT user_id FROM memberships WHERE org_id = ?`).all(ctx.orgId).map((r) => r.user_id)
-  if (ctx.role === 'manager') {
+  if (ctx.role === 'manager' || ctx.role === 'admin') { // an admin only for the teams they are assigned to manage
     const ids = new Set([ctx.user.id])
     if (ctx.managedTeamIds.length) {
       const ph = ctx.managedTeamIds.map(() => '?').join(',')
@@ -76,11 +86,10 @@ export function isActiveMember(db, orgId, userId) {
 
 /** SQL (alias t) restricting tasks to what this context may see. */
 export function taskScopeSql(ctx, alias = 't') {
-  if (isAdmin(ctx)) return { sql: `${alias}.org_id = ?`, params: [ctx.orgId] }
   // Whoever proposed or was proposed a transfer of a task can see that task (so the proposed owner can decide).
   const transfer = ` OR EXISTS (SELECT 1 FROM task_transfers x WHERE x.task_id = ${alias}.id AND x.org_id = ? AND (x.to_user_id = ? OR x.from_user_id = ?))`
   const transferParams = [ctx.orgId, ctx.user.id, ctx.user.id]
-  if (ctx.role === 'manager') {
+  if (ctx.role === 'manager' || ctx.role === 'admin') { // an admin sees work only in the teams they are assigned to manage
     const ph = ctx.managedTeamIds.map(() => '?').join(',')
     const teamClause = ctx.managedTeamIds.length
       ? ` OR ${alias}.team_id IN (${ph}) OR ${alias}.assignee_id IN (SELECT user_id FROM memberships WHERE org_id = ? AND team_id IN (${ph}))`
@@ -104,8 +113,7 @@ export function requireVisibleTask(db, ctx, taskId) {
 /** Managers manage tasks in their scope; admins manage every task of the org. */
 export function canManageTask(db, ctx, task) {
   if (task.org_id !== ctx.orgId) return false
-  if (isAdmin(ctx)) return true
-  if (ctx.role !== 'manager') return false
+  if (!isManager(ctx)) return false
   if (task.created_by === ctx.user.id) return true
   if (task.team_id && ctx.managedTeamIds.includes(task.team_id)) return true
   if (task.assignee_id && scopeUserIds(db, ctx).includes(task.assignee_id) && task.assignee_id !== ctx.user.id) return true

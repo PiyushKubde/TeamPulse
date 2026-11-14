@@ -41,14 +41,16 @@ try {
   // ---- Manager ----
   step = 'manager dashboard'
   const { page: m } = await session('manager@demo.teampulse')
-  await m.waitForSelector('.wb-col')
-  ok(await m.isVisible('h1:has-text("Team Workboard")'), 'workboard title')
+  await m.waitForSelector('[data-testid=overview-glance]')
+  ok(await m.isVisible('h1:has-text("Team Overview")'), 'Team Overview is the manager’s home')
+  await m.goto(`${base}/#/workboard`); await m.waitForSelector('.wb-col')
+  ok(await m.isVisible('h1:has-text("Workboard")'), 'workboard title')
   ok((await m.locator('.wb-col').count()) === 5, 'five status columns')
   ok((await m.locator('.wb-metric').count()) === 4, 'four summary metrics')
   await shot(m, '01-manager-dashboard')
 
   step = 'team tasks + filters'
-  await m.click('nav >> text="Tasks"')
+  await m.goto(`${base}/#/team-tasks`)
   await m.waitForSelector('h1:has-text("Team tasks")')
   await m.waitForSelector('a:has-text("Migrate billing DB")')
   await m.selectOption('#f-condition', 'overdue')
@@ -71,7 +73,7 @@ try {
   const newTaskUrl = m.url()
 
   step = 'review submission'
-  await m.click('nav >> text="Tasks"')
+  await m.goto(`${base}/#/team-tasks`)
   await m.click('text=Automate weekly invoice reconciliation')
   await m.click('[data-act=review]')
   await m.fill('#r-c', 'Great work — ship it')
@@ -81,7 +83,7 @@ try {
   await shot(m, '03-task-detail-completed')
 
   step = 'approve request'
-  await m.click('nav >> text=Task Requests')
+  await m.goto(`${base}/#/requests`)
   await m.waitForSelector('text=Add canary deploys')
   await m.click('[data-approve]')
   await m.selectOption('#a-a', { label: 'Dev Patel' })
@@ -89,7 +91,7 @@ try {
   await m.waitForSelector('h1:has-text("Add canary deploys")')
 
   step = 'verify impact'
-  await m.click('nav >> text=Contribution Journeys'); await m.click('a.btn:has-text("Outcomes")')
+  await m.click('nav >> text=People'); await m.click('nav >> text=Journeys'); await m.click('a.btn:has-text("Contributions")')
   await m.waitForSelector('text=Contributions by person')
   await m.click('text=Prevented a disk-full outage')
   await m.click('#verify')
@@ -128,7 +130,7 @@ try {
   await shot(m, '07-automations')
   const inbound = await fetch(`${base}/api/inbound/task-requests`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'E2E external: export broken', requester: 'customer@example.com', externalRef: 'e2e-1' }) })
   ok(inbound.status === 201, 'external request accepted')
-  await m.click('nav >> text=Task Requests')
+  await m.goto(`${base}/#/requests`)
   await m.waitForSelector('text=E2E external: export broken')
 
   step = 'alerts settings'
@@ -169,7 +171,7 @@ try {
   await e.waitForSelector('text=It is not complete until a manager approves it')
 
   step = 'employee suggests a task'
-  await e.click('nav >> text=Task Requests')
+  await e.goto(`${base}/#/requests`)
   await e.click('#suggest')
   await e.fill('#r-t', 'E2E suggestion: dashboards for queue depth')
   await e.fill('#r-r', 'We found the disk issue late')
@@ -177,7 +179,7 @@ try {
   await e.waitForSelector('text=E2E suggestion: dashboards for queue depth')
 
   step = 'employee records impact'
-  await e.click('nav >> text=Contribution Journeys'); await e.click('a.btn:has-text("Outcomes")')
+  await e.click('nav >> text=My Contributions'); await e.click('nav >> text=Journeys'); await e.click('a.btn:has-text("Contributions")')
   await e.click('#new-impact')
   await e.fill('#i-t', 'E2E: rate limiter blocked credential stuffing')
   await e.selectOption('#i-c', 'RELIABILITY')
@@ -197,13 +199,15 @@ try {
   // ---- Responsive ----
   step = 'mobile layout'
   const { page: p } = await session('manager@demo.teampulse', { width: 390, height: 844 })
-  await p.waitForSelector('.wb-col')
+  await p.waitForSelector('[data-testid=overview-glance]')
   const overflow = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   ok(overflow <= 1, `no horizontal page scroll on phone (overflow ${overflow}px)`)
   ok(await p.isVisible('#nav-toggle'), 'menu button on phone')
   await shot(p, '09-mobile-dashboard')
   await p.click('#nav-toggle')
-  await p.click('nav >> text="Tasks"')
+  await p.click('nav >> text="Workboard"'); await p.waitForSelector('.wb-col')
+  await p.click('#nav-toggle')
+  await p.click('nav >> text="Team tasks"')
   await p.waitForSelector('h1:has-text("Team tasks")')
   const overflow2 = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   ok(overflow2 <= 1, `team tasks fits the phone width (overflow ${overflow2}px)`)

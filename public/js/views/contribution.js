@@ -3,6 +3,7 @@
 import { api, html, raw, modal, bindForm, toast, errorText, ago, d, empty, loading, icon, avatar, prov, statusBadge, due, progressBar, appTile, stageBadge } from '../ui.js'
 import { app } from '../app.js'
 import { openImpactForm } from './impact.js'
+import { peopleList, fillAssessments } from './work-intelligence.js'
 import { renderEvidenceReview } from './evidence.js'
 import { questionBox } from './assistant.js'
 
@@ -193,17 +194,17 @@ export async function renderContribution(main, q) {
   const awaiting = t.people.reduce((n, x) => n + x.awaitingYourReview, 0)
   const outside = t.blockers.filter((b) => b.outsideControl).length
   const shared = t.significant.filter((x) => x.sharedWithOthers)
-  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon('intelligence', 'xs')}Team intelligence</div><h1>Team intelligence</h1><p>What your people's work involved and achieved — complexity, quality, ownership, problem-solving, collaboration, verified impact and the evidence behind them. ${t.note}</p></div>
-      <div class="row"><a class="btn ghost" href="#/copilot">${icon('copilot')}Manager Copilot</a><a class="btn ghost" href="#/reviews">${icon('reviews')}Contribution reviews</a></div></div>
+  main.innerHTML = html`<div class="page-head"><div><div class="eyebrow">${icon(tab === 'review' ? 'flag' : 'team', 'xs')}${tab === 'review' ? 'Reviews' : 'People'}</div><h1>${tab === 'review' ? 'Evidence to resolve' : 'People'}</h1><p>What your people's work involved and achieved — complexity, quality, ownership, problem-solving, collaboration, verified impact and the evidence behind them. ${t.note}</p></div>
+      <div class="row"><a class="btn ghost" href="#/copilot">${icon('copilot')}Ask about your team</a><a class="btn ghost" href="#/reviews">${icon('reviews')}Reviews</a></div></div>
     <div class="row between" style="margin-bottom:16px;gap:12px"><div class="segmented" role="group" aria-label="Period">${[[30, 'Last 30 days'], [90, 'Last 90 days'], [180, 'Last 6 months']].map(([n, l]) => html`<a href="#/contribution?days=${n}${tab === 'review' ? '&tab=review' : ''}" ${days === n ? raw('aria-current="page"') : ''}>${l}</a>`)}</div>
       <div class="segmented" role="group" aria-label="View"><a href="#/contribution?days=${days}" ${tab === 'team' ? raw('aria-current="page"') : ''}>Team</a><a href="#/contribution?days=${days}&tab=review" ${tab === 'review' ? raw('aria-current="page"') : ''}>Evidence to review${toReview ? html` <span class="count-pill">${toReview}</span>` : ''}</a></div></div>
+    ${tab === 'team' ? html`<section class="wi-sec" aria-labelledby="ppl-h"><h2 id="ppl-h">People and their work</h2><div id="ppl-body"><div class="loading">Reading the team’s work…</div></div></section><h2 class="sec-h" style="margin:26px 0 12px">More about the team’s work</h2>` : ''}
     ${tab === 'team' ? html`<nav class="decisions" aria-label="Team at a glance">
       <a class="decision" href="#/contribution"><span class="lead-icon brand">${icon('award')}</span><span class="d-body"><span class="d-label">Significant contributions</span><span class="d-value">${t.significant.length || 'None yet'}</span></span></a>
       <a class="decision ${t.blockers.length ? 'open' : ''}" href="#blockers"><span class="lead-icon ${t.blockers.length ? 'bad' : ''}">${icon('blocked')}</span><span class="d-body"><span class="d-label">Open blockers${outside ? ` · ${outside} outside their control` : ''}</span><span class="d-value">${t.blockers.length || 'None'}</span></span></a>
       <a class="decision ${unverified.length ? 'open' : ''}" href="#/impact?view=team&status=PENDING"><span class="lead-icon ${unverified.length ? 'warn' : ''}">${icon('shield')}</span><span class="d-body"><span class="d-label">Unverified outcomes</span><span class="d-value">${unverified.length || 'None'}</span></span></a>
       <a class="decision ${awaiting ? 'open' : ''}" href="#/reviews"><span class="lead-icon ${awaiting ? 'warn' : ''}">${icon('reviews')}</span><span class="d-body"><span class="d-label">Analyses awaiting you</span><span class="d-value">${awaiting || 'None'}</span></span></a>
       <a class="decision" href="#/contribution?days=${days}&tab=review"><span class="lead-icon teal">${icon('team')}</span><span class="d-body"><span class="d-label">Shared work to resolve</span><span class="d-value">${rv.sharedPending || 'None'}</span></span></a></nav>` : ''}
-    ${tab === 'team' ? html`<section class="card copilot" style="margin-bottom:16px"><div class="card-head"><div><h2><span class="card-icon brand">${icon('copilot')}</span>Ask about your team</h2><p>Manager Copilot — answers from your team’s records, each linked to the task, contribution or evidence behind it.</p></div></div><div id="copilot"></div></section>` : ''}
     ${tab === 'review' ? html`<section class="card"><div class="card-head"><div><h2><span class="card-icon teal">${icon('evidence')}</span>Evidence to review</h2><p>${rv.disputed} disputed · ${rv.unknownAuthor} with an unknown author · ${rv.sharedPending} shared links. Decide whose work it is; nothing is credited until then.</p></div></div><div id="review-box">${loading()}</div></section>` : html`
     <div class="grid two">
       <section class="card"><div class="card-head"><div><h2><span class="card-icon brand">${icon('award')}</span>Significant contributions</h2><p>Complex (L3+) work or verified outcomes, most recent first — with the reason. Not a ranking.</p></div></div>
@@ -217,18 +218,20 @@ export async function renderContribution(main, q) {
       <section class="card"><div class="card-head"><div><h2><span class="card-icon teal">${icon('team')}</span>Shared ownership</h2><p>Several people, one outcome — counted once; each person’s part stays theirs.</p></div></div>
         ${shared.length || rv.sharedPending ? html`<ul class="mini-list">${shared.slice(0, 5).map((x) => html`<li><div class="grow"><a class="ttl" href="#/tasks/${x.taskId}">${x.taskTitle}</a><div class="small muted">${x.name} and others</div></div></li>`)}${rv.sharedPending ? html`<li><span class="lead-icon teal">${icon('evidence')}</span><div class="grow"><a class="ttl" href="#/contribution?days=${days}&tab=review">${rv.sharedPending} shared link(s) to resolve</a><div class="small muted">Decide whose work it is.</div></div></li>` : ''}</ul>` : empty('No shared work', 'Shared ownership appears here when people contribute to one outcome.', '', 'team')}</section>
     </div>
-    <section class="card" style="margin-top:16px"><div class="card-head"><div><h2><span class="card-icon">${icon('team')}</span>Your people</h2><p>Alphabetical. Open a person to see their tasks, evidence, journeys and the reasons behind each assessment.</p></div><span class="badge ok" title="${t.team.note}">${t.team.verifiedOutcomes} verified team outcome(s)</span></div>
-      ${t.people.length ? html`<div class="table-wrap"><table><thead><tr><th>Person</th><th>Analysed work (complexity)</th><th class="num">Verified outcomes</th><th class="num hide-sm">Blocked by others</th><th class="num">Awaiting your review</th><th class="num">Disputes</th></tr></thead><tbody>
-        ${t.people.map((p) => html`<tr class="clickable" data-href="#/contribution/${p.userId}"><td><div class="row nowrap" style="gap:10px">${avatar(p.name, null, 'sm')}<div><a href="#/contribution/${p.userId}"><b>${p.name}</b></a><div class="small muted">${p.title || p.role}${p.team ? ` · ${p.team}` : ''}</div></div></div></td>
-          <td>${mix(p.complexityMix)}</td><td class="num">${p.verifiedOutcomes}${p.sharedOutcomes ? html` <span class="small muted">(${p.sharedOutcomes} shared)</span>` : ''}</td>
-          <td class="num hide-sm">${p.blockedByOthers || 0}</td><td class="num">${p.awaitingYourReview ? html`<span class="badge warn">${p.awaitingYourReview}</span>` : 0}</td><td class="num">${p.disputes ? html`<span class="badge warn">${p.disputes}</span>` : 0}</td></tr>`)}
-      </tbody></table></div>` : empty('Nobody to show yet', 'People in the teams you manage appear here once their work has been analysed.', '', 'team')}
-    </section>`}`.toString()
+`}`.toString()
   main.querySelectorAll('tr.clickable').forEach((tr) => tr.addEventListener('click', (e) => { if (!e.target.closest('a')) location.hash = tr.dataset.href }))
   const cp = main.querySelector('#copilot')
   if (cp) api('/api/assistant/suggestions').then((sg) => questionBox(cp, { team: true, suggestions: sg.team })).catch(() => cp.remove())
   const rb = main.querySelector('#review-box')
   if (rb) renderEvidenceReview(rb)
+  const ppl = main.querySelector('#ppl-body')
+  if (ppl) {
+    api(`/api/analytics/team?${new URLSearchParams({ from, to: new Date().toISOString() })}`).then((d) => {
+      if (!ppl.isConnected) return
+      ppl.innerHTML = peopleList(d, { from: null, contributions: true }).toString()
+      fillAssessments(ppl, d, { analysis: false }) // People is operational: complexity and dimensions are Work Intelligence
+    }).catch((e) => { ppl.innerHTML = html`<p class="muted">Could not load the team’s work: ${errorText(e)}</p>`.toString() })
+  }
 }
 
 export async function renderPerson(main, userId, q) {
@@ -236,11 +239,11 @@ export async function renderPerson(main, userId, q) {
   main.innerHTML = loading().toString()
   const p = await api(`/api/contribution/people/${userId}?from=${encodeURIComponent(from)}`)
   const me = userId === app.me.id
-  const origin = ['dashboard', 'analytics'].includes(q?.get('from')) ? q.get('from') : '' // opened from the Workboard or Work Intelligence: the way back is there
+  const origin = ['dashboard', 'workboard', 'analytics'].includes(q?.get('from')) ? q.get('from') : '' // opened from the Workboard or Work Intelligence: the way back is there
   const dimCard = ([, s]) => html`<div class="dim-card"><div class="row between"><b>${s.label}</b><span class="small muted">${s.assessed} assessed${s.insufficient ? ` · ${s.insufficient} not enough evidence` : ''}${s.notApplicable ? ` · ${s.notApplicable} n/a` : ''}</span></div>
     <div class="row" style="gap:4px;margin:6px 0">${[5, 4, 3, 2, 1].filter((l) => s.levels[l]).map((l) => html`<span class="badge ${l >= 4 ? 'ok' : l === 3 ? 'info' : 'warn'}">${s.levels[l]}× level ${l}</span>`)}</div>
     ${s.highlights.length ? html`<ul class="plain small">${s.highlights.map((h) => html`<li><a href="#/tasks/${h.taskId}">${h.taskTitle}</a>${h.complexity ? html` <span class="badge outline">L${h.complexity}</span>` : ''} — ${h.level}/5${h.source === 'manager' ? ' (manager)' : ''}: ${h.reason}</li>`)}</ul>` : ''}</div>`
-  main.innerHTML = html`<div class="crumbs">${origin === 'analytics' ? html`<a href="#/analytics">Work Intelligence</a>` : app.isManager && origin !== 'dashboard' ? html`<a href="#/contribution">Team intelligence</a>` : html`<a href="#/dashboard">Overview</a>`}${icon('chevronRight', 'xs')}<span>${me ? 'My contribution' : p.person.name}</span></div>
+  main.innerHTML = html`<div class="crumbs">${origin === 'analytics' ? html`<a href="#/analytics">Work Intelligence</a>` : origin === 'workboard' ? html`<a href="#/workboard">Workboard</a>` : app.isManager && origin !== 'dashboard' ? html`<a href="#/contribution">People</a>` : html`<a href="#/dashboard">${app.isManager ? 'Team Overview' : 'My Workspace'}</a>`}${icon('chevronRight', 'xs')}<span>${me ? 'My contribution' : p.person.name}</span></div>
     <div class="page-head person-head"><div class="row nowrap" style="gap:14px;align-items:center">${avatar(p.person.name, null, 'lg')}<div style="min-width:0;white-space:normal"><h1>${me ? 'My contribution' : p.person.name}</h1><p style="margin:2px 0 0">${[p.person.role[0].toUpperCase() + p.person.role.slice(1), p.person.title, p.person.team].filter(Boolean).join(' · ')}</p>${me ? '' : html`<p class="small muted" style="margin:3px 0 0">Responsibilities are read from the tasks assigned to them, below. No separate list is recorded.</p>`}</div></div>
       <div class="row"><a class="btn ghost" href="#/contributions?userId=${userId}">${icon('journeys')}Journeys</a>${app.isManager && !me ? html`<a class="btn ghost" href="#/team-tasks?assigneeId=${userId}">${icon('tasks')}Their tasks</a>` : ''}</div></div>
     <div class="segmented" role="group" aria-label="Period" style="margin-bottom:16px">${[[30, 'Last 30 days'], [90, 'Last 90 days'], [180, 'Last 6 months']].map(([n, l]) => html`<a href="#/contribution/${userId}?days=${n}${origin ? `&from=${origin}` : ''}" ${days === n ? raw('aria-current="page"') : ''}>${l}</a>`)}</div>
@@ -250,7 +253,7 @@ export async function renderPerson(main, userId, q) {
       <div class="row" style="margin-top:8px">${mix(p.complexityMix)}${p.reviews.awaitingManager && !me ? html`<span class="badge warn">${p.reviews.awaitingManager} awaiting review</span>` : ''}${p.reviews.awaitingEmployee && me ? html`<span class="badge info">${p.reviews.awaitingEmployee} waiting for your confirmation</span>` : ''}</div></section>
     ${me ? '' : html`<div class="grid two" style="margin-top:16px"><section class="card" id="p-tasks"><div class="card-head"><h2><span class="card-icon">${icon('tasks')}</span>Assigned tasks</h2><a class="btn small subtle" href="#/team-tasks?assigneeId=${userId}">All${icon('arrowRight', 'sm')}</a></div>${loading()}</section>
       <section class="card" id="p-evidence"><div class="card-head"><h2><span class="card-icon teal">${icon('evidence')}</span>Recent evidence</h2></div>${loading()}</section></div>`}
-    <section class="card" id="p-contrib" style="margin-top:16px"><div class="card-head"><div><h2><span class="card-icon brand">${icon('award')}</span>Contributions</h2><p>${me ? 'What you say you contributed: the problem, what changed and where it stands.' : 'What this person says they contributed: the problem, what changed and where each stands.'} A claim is not verified until a manager confirms it.</p></div>${me ? html`<button class="btn small" id="p-record">${icon('plus')}Record a contribution</button>` : ''}</div>${loading()}</section>
+    <section class="card" id="p-contrib" style="margin-top:16px"><div class="card-head"><div><h2><span class="card-icon brand">${icon('award')}</span>Contributions</h2><p>${me ? 'What you say you contributed: the problem, what changed and where it stands.' : 'What this person says they contributed: the problem, what changed and where each stands.'} A claim is not verified until a manager confirms it.</p></div>${me ? html`<button class="btn small" id="p-record">${icon('plus')}Record an exceptional contribution</button>` : ''}</div>${loading()}</section>
     <h2 class="sec-h">Assessment</h2><p class="small muted" style="margin:2px 0 0">How the work was judged: levels per task, each with its reason and evidence. Nothing is guessed, and levels are never added into a score.</p>
     ${(() => { const all = Object.entries(p.dimensions); const rated = all.filter(([, s]) => s.assessed); const rest = all.filter(([, s]) => !s.assessed); return html`${rated.length ? html`<div class="grid two" style="margin-top:16px">${rated.map(dimCard)}</div>` : ''}${rest.length ? html`<p class="small muted" style="margin:12px 0 0">Not enough evidence to rate yet: ${rest.map(([, x]) => x.label).join(', ')}. Nothing is guessed.</p>` : ''}` })()}
     <div class="grid two" style="margin-top:16px">

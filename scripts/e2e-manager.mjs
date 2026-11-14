@@ -77,21 +77,21 @@ try {
     step = `manager dashboard (${theme})`
     const m = await session('manager@demo.teampulse', { theme })
     ok(await themeOf(m) === theme, `theme is ${theme}`)
-    await m.waitForSelector('.wb-col')
+    await m.waitForSelector('[data-testid=overview-glance]')
+    ok((await m.locator('main h1').first().textContent()) === 'Team Overview', 'Team Overview')
+    await m.goto(`${base}/#/workboard`); await m.waitForSelector('.wb-col')
     ok((await m.locator('.wb-col h2').allTextContents()).join('|') === 'To do|In progress|Blocked|In review|Done', 'workboard columns')
     ok((await m.locator('.wb-metric').count()) === 4, 'four summary metrics')
     ok(!(await m.locator('nav[aria-label="Decisions waiting for you"], .intervene').count()), 'the old overview panels are gone')
     ok(await overflow(m) <= 1, `dashboard fits (${await overflow(m)}px)`)
 
     step = `team intelligence (${theme})`
-    await m.click('nav >> text=Team Intelligence')
-    await m.waitForSelector('h1:has-text("Team intelligence")')
-    for (const h of ['Significant contributions', 'Open blockers', 'Unverified outcomes', 'Shared ownership', 'Your people']) ok(await m.isVisible(`h2:has-text("${h}")`), `intelligence section ${h}`)
-    await m.click('#copilot button.chip:has-text("Who is blocked and why?")')
-    await m.waitForSelector('.answer h3')
-
+    await m.click('nav >> text=People')
+    await m.waitForSelector('h1:has-text("People")')
+    for (const h of ['Significant contributions', 'Open blockers', 'Unverified outcomes', 'Shared ownership', 'People and their work']) ok(await m.isVisible(`h2:has-text("${h}")`), `intelligence section ${h}`)
     step = `contribution person view (${theme})`
-    await m.click('table >> a:has-text("Priya Sharma")')
+    await m.waitForSelector('[data-testid=people-list] [data-person-row]')
+    await m.click('.wi-pname:has-text("Priya Sharma")')
     await m.waitForSelector('h2:has-text("In short")')
     await m.waitForSelector('#p-tasks a.ttl')
     ok(await m.isVisible('#p-evidence'), 'person evidence card')
@@ -101,20 +101,15 @@ try {
       const r = await m.evaluate(async (id) => (await fetch(`/api/tasks/${id}/assessment/analyse`, { method: 'POST', headers: { 'X-Requested-With': 'TeamPulse' } })).status, task)
       ok(r === 200 || r === 202, `analysis started (${r})`)
     }
-    await m.click('nav >> text=Contribution Reviews')
-    await m.waitForSelector('h1:has-text("Contribution reviews")')
+    await m.click('nav >> text=Reviews'); await m.click('nav >> text=Assessments to confirm')
+    await m.waitForSelector('h1:has-text("Assessments to confirm")')
     ok(await m.isVisible('text=The AI suggests; you decide.'), 'AI vs manager principle')
     await m.waitForSelector('#team-signals >> text=Unresolved blocker')
     if (theme === 'light') {
       await m.click('.review-tabs a:has-text("AI assessments")')
-      await m.waitForSelector('.review-item:has-text("Cut checkout API")', { timeout: 20000 })
-      // A single waiting assessment opens by itself; otherwise Inspect opens it.
-      await m.waitForTimeout(600)
-      if (!(await m.isVisible('.assessment-slot table.dims'))) await m.click('.review-item:has-text("Cut checkout API") >> button[data-open-assessment]')
-      await m.waitForSelector('.assessment-slot table.dims', { timeout: 20000 })
-      ok(await m.isVisible('.assessment-slot .decision-box.manager >> text=The AI only suggests'), 'AI suggestion vs manager decision')
-      ok(await m.isVisible('.assessment-slot >> text=AI suggestion') || await m.isVisible('.assessment-slot >> text=Simulated'), 'dimension provenance labelled')
-      ok(await m.isVisible('.assessment-slot button[data-mgr="APPROVE"]'), 'manager can approve inside the workspace')
+      // Routine work is recorded, not queued: the analysis of this task is routine, so nothing waits here (a meaningful one is covered by the roles journey).
+      await m.waitForSelector('text=No assessments waiting', { timeout: 20000 })
+      ok(!(await m.locator('.review-item:has-text("Cut checkout API")').count()), 'routine work is not queued for review')
     }
     await m.click('.review-tabs a:has-text("Submissions")')
     await m.waitForSelector('.review-item >> text=Automate weekly invoice reconciliation')
@@ -123,7 +118,7 @@ try {
     ok(await m.isVisible('.signal >> text=Recommended:'), 'recommended action shown')
 
     step = `copilot (${theme})`
-    await m.click('nav >> text=Manager Copilot')
+    await m.click('nav >> text=Ask about your team')
     await m.waitForSelector('h1:has-text("Ask about your team")')
     for (const qn of ['Who needs my attention today?', 'What work is currently blocked?', 'Which contributions need review?', 'What has moved forward this week?', 'Where can I help the team?']) ok(await m.isVisible(`.q-card:has-text("${qn}")`), `suggested: ${qn}`)
     await m.click('.q-card:has-text("Where can I help the team?")')
@@ -132,7 +127,7 @@ try {
     ok(await m.isVisible('.answer >> text=From records'), 'answer labelled as from records')
 
     step = `requests (${theme})`
-    await m.click('nav >> text=Task Requests')
+    await m.goto(`${base}/#/requests`)
     await m.waitForSelector('h1:has-text("Task requests")')
     ok(await m.isVisible('h2:has-text("To decide")'), 'to decide group')
     await m.goto(`${base}/#/team-tasks`); await m.waitForSelector('table.task-table')
@@ -153,7 +148,7 @@ try {
   step = 'phone layouts'
   for (const theme of ['light', 'dark']) {
     const p = await session('manager@demo.teampulse', { theme, viewport: { width: 390, height: 844 }, mobile: true })
-    for (const [h, sel] of [['#/dashboard', '.wb-col'], ['#/contribution', 'h1:has-text("Team intelligence")'], ['#/reviews?tab=signals', '.signal'], ['#/copilot', '.q-card'], ['#/requests', 'h1:has-text("Task requests")'], ['#/team-tasks', 'table.task-table'], ['#/contribution/' + priyaId, 'h2:has-text("In short")']]) {
+    for (const [h, sel] of [['#/dashboard', '[data-testid=overview-glance]'], ['#/workboard', '.wb-col'], ['#/contribution', 'h1:has-text("People")'], ['#/reviews?tab=signals', '.signal'], ['#/copilot', '.q-card'], ['#/requests', 'h1:has-text("Task requests")'], ['#/team-tasks', 'table.task-table'], ['#/contribution/' + priyaId, 'h2:has-text("In short")']]) {
       await p.goto(`${base}/${h}`); await p.waitForSelector(sel)
       ok(await overflow(p) <= 1, `${h} fits a phone in ${theme} (${await overflow(p)}px)`)
     }
@@ -161,7 +156,7 @@ try {
 
   step = 'employee cannot open manager pages'
   const e = await session('priya@demo.teampulse')
-  await e.goto(`${base}/#/copilot`); await e.waitForSelector('h1:has-text("Manager Copilot is for managers")')
+  await e.goto(`${base}/#/copilot`); await e.waitForSelector('h1:has-text("Ask about your team is for managers")')
   await e.goto(`${base}/#/reviews`); await e.waitForFunction(() => location.hash === '#/dashboard'); await e.waitForSelector('main h1')
 } catch (err) {
   problems.unshift(`FAILED at "${step}": ${err.message}`)

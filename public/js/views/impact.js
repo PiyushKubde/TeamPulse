@@ -12,9 +12,9 @@ export async function renderImpact(main, q) {
   if (q.get('category')) params.set('category', q.get('category'))
   const [records, summary] = await Promise.all([api(`/api/impact?${params}`), api(`/api/impact-summary${view === 'mine' ? '?view=mine' : ''}`)])
   main.innerHTML = html`
-    <div class="crumbs"><a href="#/contributions">Contributions</a></div>
-    <div class="page-head"><div><div class="eyebrow">${icon('award', 'xs')}Outcomes</div><h1>Outcomes &amp; impact</h1><p>Contributions shown by what changed, with evidence and verification — never a single score. Research, prevention and learning count; estimates are labelled.</p></div>
-      <button class="btn" id="new-impact">Record a contribution</button></div>
+    <div class="crumbs"><a href="#/contributions">Journeys</a></div>
+    <div class="page-head"><div><div class="eyebrow">${icon('award', 'xs')}Contributions</div><h1>${view === 'mine' ? 'Other contributions' : 'Contributions'}</h1><p>Contributions shown by what changed, with evidence and verification — never a single score. Research, prevention and learning count; estimates are labelled.</p></div>
+      <button class="btn" id="new-impact">Record an exceptional contribution</button></div>
     <div class="tabs">${(app.isManager ? [['team', 'Team'], ['mine', 'Mine']] : [['mine', 'Mine']]).map(([k, l]) => html`<a href="#/impact?view=${k}" ${view === k ? raw('aria-current="page"') : ''}>${l}</a>`)}
       ${app.isManager ? html`<a href="#/impact?view=team&status=PENDING" ${status === 'PENDING' && view === 'team' ? raw('aria-current="page"') : ''}>To verify</a>` : ''}
       <a href="${app.isManager ? '#/contribution' : `#/contribution/${app.me.id}`}">Contribution analysis →</a>
@@ -29,7 +29,7 @@ export async function renderImpact(main, q) {
       <div class="grid three" style="margin-top:10px;gap:10px"><div><div class="small muted">Problem or opportunity</div><div class="pre">${said(r.previousState)}</div></div><div><div class="small muted">What was done</div><div class="pre">${said(r.workPerformed)}</div></div><div><div class="small muted">What changed</div><div class="pre">${said(r.result)}</div></div></div>
       ${r.measurableValue !== null ? html`<div style="margin-top:8px"><span class="badge ${r.isEstimate ? 'warn' : 'ok'}">${r.isEstimate ? 'Estimate: ≈ ' : 'Measured: '}${r.measurableValue} ${r.measurementUnit}</span></div>` : ''}
       ${r.verificationStatus === 'REJECTED' ? html`<div class="notice err small" style="margin:8px 0 0">Not verified: ${r.rejectionReason}</div>` : ''}
-    </article>`)}</div>` : empty('No contributions recorded yet', view === 'mine' ? 'Record a contribution when you solved something that mattered: the problem, what you did, and what changed. A short note is enough, and the number of records is never a measure.' : 'When your team records outcomes, they appear here for you to verify.')}`
+    </article>`)}</div>` : empty('No contributions recorded yet', view === 'mine' ? 'Tasks you submit are assessed automatically. Record something here only when meaningful work has no task: mentoring, preventing an incident, helping another team, improving a process. A short note is enough, and the number of records is never a measure.' : 'When your team records outcomes, they appear here for you to verify.')}`
   main.querySelector('#new-impact').addEventListener('click', () => openImpactForm())
   main.querySelectorAll('#f select').forEach((s) => s.addEventListener('change', () => {
     const p = new URLSearchParams({ view })
@@ -42,8 +42,8 @@ export async function renderImpact(main, q) {
 export async function openImpactForm(existing = null, taskId = null) {
   const [tasks, people] = await Promise.all([api('/api/tasks?view=mine&includeClosed=true').catch(() => []), api('/api/members').catch(() => [])])
   const r = existing || {}
-  return modal(html`<h2 id="modal-title">${existing ? 'Edit contribution' : 'Record a contribution'}</h2>
-    <p class="small muted">Say what you contributed, in as much detail as you have. A short record is fine. Records are not points: the value of the work matters, not how many you write. It stays a claim until you attach evidence and a manager verifies it. Don’t invent numbers: leave the value empty if it was not measured.</p>
+  return modal(html`<h2 id="modal-title">${existing ? 'Edit contribution' : 'Record an exceptional contribution'}</h2>
+    <p class="small muted">For meaningful work that has no task: mentoring, preventing an incident, helping another team, improving a process. Finished tasks are assessed for you, so you do not need to record them here. A short record is fine. Records are not points: the value of the work matters, not how many you write. It stays a claim until you attach evidence and a manager verifies it. Don’t invent numbers.</p>
     <form id="imp"><div class="form-error"></div>
     <div class="field"><label for="i-t">Title</label><input id="i-t" name="title" type="text" required maxlength="200" value="${r.title || ''}" placeholder="e.g. Cut deploy time by 70%"></div>
     <div class="fields">
@@ -91,7 +91,7 @@ export async function renderImpactDetail(main, id) {
   const mine = r.userId === app.me.id
   const canVerify = app.isManager && !mine
   main.innerHTML = html`
-    <div class="crumbs"><a href="#/impact">Outcomes &amp; impact</a></div>
+    <div class="crumbs"><a href="#/impact">Contributions</a></div>
     <div class="page-head"><div><h1>${r.title}</h1><div class="row" style="margin-top:8px">${stageBadge(r)} <span class="badge outline">${r.categoryLabel}</span> <span class="badge outline">${OUTCOME_TYPES[r.outcomeType]}</span>${r.isQuality ? html`<span class="badge outline">Quality</span>` : ''}${r.isReusable ? html`<span class="badge outline">Reusable</span>` : ''}</div></div>
       <div class="row">${canVerify && r.verificationStatus !== 'VERIFIED' ? html`<button class="btn" id="verify">Verify</button><button class="btn ghost" id="reject">Reject</button>` : ''}${mine && r.verificationStatus !== 'VERIFIED' ? html`<button class="btn ghost" id="edit">Edit</button>` : ''}</div></div>
     ${r.verificationStatus === 'REJECTED' ? html`<div class="notice err"><b>Not verified:</b> ${r.rejectionReason}${mine ? ' — edit the record to resubmit it.' : ''}</div>` : ''}

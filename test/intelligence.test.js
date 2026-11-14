@@ -159,7 +159,7 @@ test("Manager Copilot: grounded, scoped to the manager's people, no rankings", a
       assert.doesNotMatch(JSON.stringify(r.body), /"(score|rank|commits|messages|emails)"\s*:/i)
     }
     assert.equal((await t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, question: 'Who is blocked and why?' } })).body.intent, 'blocked')
-    assert.equal((await ask(s.otherAdmin, 'blocked')).body.items.length, 0, 'another organization sees nothing')
+    assert.equal((await ask(s.otherAdmin, 'blocked')).body.items?.length ?? 0, 0, 'another organization sees nothing')
 
     // Intent classification: add/remove verb must win over team_members noun match
     const q = (question) => t.call('/api/assistant/ask', { method: 'POST', as: s.manager, body: { team: true, question } })
@@ -215,7 +215,7 @@ test('proactive signals: detected by rules, deduplicated, resolved when fixed, d
     assert.equal(blocker.severity, 'high'); assert.match(blocker.reason, /outside their control/); assert.match(blocker.action, /not on the person/)
     assert.match(mine.find((x) => x.kind === 'rework').action, /not poor effort/)
     assert.equal((await t.call('/api/signals?scope=team', { as: s.employee })).status, 403)
-    assert.equal((await t.call('/api/signals?scope=team', { as: s.otherAdmin })).body.length, 0)
+    assert.equal((await t.call('/api/signals?scope=team', { as: s.otherAdmin })).status, 403, 'an admin who manages no team has no team signals')
     assert.equal((await t.call('/api/signals?scope=team', { as: s.manager2 })).body.filter((x) => x.personId === s.employee.id).length, 0)
     // Dedupe: running again creates nothing new.
     assert.equal(detectSignals(t.db, s.org.id).opened, 0)

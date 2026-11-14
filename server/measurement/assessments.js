@@ -16,6 +16,7 @@ import { buildEvidencePack, hashInput, isInsufficient } from './evidence-pack.js
 import { GUARDRAIL_VERSION } from './guardrails.js'
 import { rubricFor } from './rubric.js'
 import { storeMatches } from '../evidence/matching.js'
+import { lifecycleOfAssessment, waitsForManager } from './lifecycle.js'
 import { canSeeEvidence } from '../evidence/service.js'
 
 /** Resolves AI_MODE / AI_SUPERVISED_TASKS ("taskId:owner@email, …") into { mode, tasks: Map(taskId → email|null) }. */
@@ -42,7 +43,7 @@ function supervisedCheck(db, ctx, mode, task, provider) {
 }
 
 const userName = (db, id) => (id ? db.prepare('SELECT name FROM users WHERE id = ?').get(id)?.name ?? null : null)
-export const canSeeSubject = (db, ctx, userId) => userId === ctx.user.id || isAdmin(ctx) || (ctx.role === 'manager' && scopeUserIds(db, ctx).includes(userId))
+export const canSeeSubject = (db, ctx, userId) => userId === ctx.user.id || (isManager(ctx) && scopeUserIds(db, ctx).includes(userId))
 const canReviewSubject = (db, ctx, userId) => isManager(ctx) && userId !== ctx.user.id && canSeeSubject(db, ctx, userId)
 const levelText = (dim, level) => (level == null ? null : dim === 'complexity' ? `L${level}` : String(level))
 
@@ -292,7 +293,7 @@ function personSummary(db, ctx, userId, p) {
   const complexityMix = { L1: 0, L2: 0, L3: 0, L4: 0, insufficient: 0 }
   const dims = Object.fromEntries(RATED.map((k) => [k, { label: LABELS[k], assessed: 0, levels: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, insufficient: 0, notApplicable: 0, highlights: [] }]))
   let outsideHours = 0; let blockedItems = 0
-  const reviews = { awaitingEmployee: 0, awaitingManager: 0, employeeDisputes: 0, managerAdjusted: 0, managerDisputed: 0 }
+  const reviews = { awaitingEmployee: 0, awaitingManager: 0, employeeDisputes: 0, managerApproved: 0, managerAdjusted: 0, managerDisputed: 0 }
   const estimated = []
   for (const { a, eff } of items) {
     const c = eff.complexity
@@ -307,7 +308,9 @@ function personSummary(db, ctx, userId, p) {
     const outside = (ctxj.blockers || []).filter((b) => b.outside)
     if (outside.length) { blockedItems++; outsideHours += outside.reduce((n, b) => n + (b.hours ?? Math.round((Date.now() - Date.parse(b.reportedAt)) / 3600000)), 0) }
     if (a.employee_status === 'PENDING') reviews.awaitingEmployee++
-    if (a.manager_status === 'PENDING') reviews.awaitingManager++
+    // Only a meaningful contribution waits for a manager; routine work and work without enough evidence are recorded, not queued.
+    if (waitsForManager(db, a)) reviews.awaitingManager++
+    if (a.manager_status === 'APPROVED') reviews.managerApproved++
     if (['CORRECTION_PROPOSED', 'DISPUTED'].includes(a.employee_status)) reviews.employeeDisputes++
     if (a.manager_status === 'ADJUSTED') reviews.managerAdjusted++
     if (a.manager_status === 'DISPUTED') reviews.managerDisputed++
@@ -318,7 +321,7 @@ function personSummary(db, ctx, userId, p) {
   const verified = verifiedOutcomes(db, ctx.orgId, userId, p)
   const work = items.map(({ a, eff }) => ({
     assessmentId: a.id, taskId: a.task_id, taskTitle: a.task_title, taskStatus: a.task_status, periodEnd: a.period_end, provider: a.provider, simulated: Boolean(json(a.context_json, {}).simulated),
-    evidenceState: a.evidence_state, complexity: eff.complexity.state === 'assessed' ? `L${eff.complexity.level}` : null, employeeStatus: a.employee_status, managerStatus: a.manager_status,
+    evidenceState: a.evidence_state, lifecycle: lifecycleOfAssessment(db, a), complexity: eff.complexity.state === 'assessed' ? `L${eff.complexity.level}` : null, employeeStatus: a.employee_status, managerStatus: a.manager_status,
     levels: Object.fromEntries(RATED.map((k) => [k, eff[k].state === 'assessed' ? eff[k].level : eff[k].state === 'not_applicable' ? 'n/a' : null]))
   }))
   return { complexityMix, dimensions: dims, verified, estimated, blockers: { itemsAffected: blockedItems, outsideControlHours: outsideHours }, reviews, work }
@@ -350,6 +353,41 @@ export function personProfile(db, ctx, userId, q = {}) {
   }
 }
 
+/**
+ * The team's patterns for Work Intelligence, pooled across everyone (never per person, so nothing here can rank anyone): how complex the work was,
+ * how the assessed dimensions are distributed, and how contribution changed over three equal consecutive periods.
+ */
+function teamPatterns(db, ctx, ids, p) {
+  const span = Math.max(1, Date.parse(p.to) - Date.parse(p.from))
+  const windows = [2, 1, 0].map((back) => {
+    const to = new Date(Date.parse(p.to) - back * span).toISOString()
+    return { from: new Date(Date.parse(to) - span).toISOString(), to }
+  })
+  const tally = (w) => {
+    const rows = ids.length ? db.prepare(`SELECT a.* FROM contribution_assessments a WHERE a.org_id = ? AND a.is_current = 1 AND a.user_id IN (${ids.map(() => '?').join(',')}) AND COALESCE(a.period_end, a.created_at) > ? AND COALESCE(a.period_end, a.created_at) <= ?`).all(ctx.orgId, ...ids, w.from, w.to) : []
+    const out = { from: w.from, to: w.to, assessments: 0, meaningful: 0, approved: 0, routine: 0, notEnoughEvidence: 0, complexityMix: { L1: 0, L2: 0, L3: 0, L4: 0, insufficient: 0 } }
+    const dims = Object.fromEntries(RATED.map((k) => [k, { label: LABELS[k], assessed: 0, levels: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, insufficient: 0 }]))
+    for (const a of rows) {
+      out.assessments++
+      const life = lifecycleOfAssessment(db, a)
+      if (life === 'ROUTINE') out.routine++
+      else if (life === 'NOT_ENOUGH_EVIDENCE') out.notEnoughEvidence++
+      else out.meaningful++
+      if (life === 'APPROVED' || life === 'ADJUSTED') out.approved++
+      const c = effectiveRow(db, a.id, 'complexity')
+      if (c?.state === 'assessed') out.complexityMix[`L${c.level}`]++; else out.complexityMix.insufficient++
+      for (const k of RATED) {
+        const d = effectiveRow(db, a.id, k)
+        if (d?.state === 'assessed') { dims[k].assessed++; dims[k].levels[d.level]++ } else if (d?.state !== 'not_applicable') dims[k].insufficient++
+      }
+    }
+    return { out, dims }
+  }
+  const all = windows.map(tally)
+  const current = all[2]
+  return { complexityMix: current.out.complexityMix, dimensions: current.dims, assessments: current.out.assessments, overTime: all.map((x) => x.out) }
+}
+
 export function teamOverview(db, ctx, q = {}) {
   requireManager(ctx)
   const p = period(q)
@@ -363,11 +401,12 @@ export function teamOverview(db, ctx, q = {}) {
     return {
       userId: x.user_id, name: x.name, role: x.role, title: x.title, team: x.team,
       analysed: s.work.length, complexityMix: s.complexityMix, verifiedOutcomes: s.verified.length, sharedOutcomes: s.verified.filter((o) => o.shared).length,
+      approved: s.reviews.managerApproved + s.reviews.managerAdjusted, routine: s.work.filter((w) => w.lifecycle === 'ROUTINE').length, notEnoughEvidence: s.work.filter((w) => w.lifecycle === 'NOT_ENOUGH_EVIDENCE').length,
       blockedByOthers: s.blockers.itemsAffected, awaitingYourReview: s.reviews.awaitingManager, disputes: s.reviews.employeeDisputes, insufficient: s.complexityMix.insufficient
     }
   })
   return {
-    period: p, ordering: 'alphabetical', people: rows,
+    period: p, ordering: 'alphabetical', people: rows, patterns: teamPatterns(db, ctx, ids, p),
     team: { verifiedOutcomes: teamOutcomes.size, note: 'Shared outcomes are counted once for the team, however many people contributed.' },
     note: 'Listed alphabetically. Not a ranking: the number of tasks is not a measure of contribution. Open a person to see what their work involved and why.'
   }

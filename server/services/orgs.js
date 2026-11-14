@@ -2,7 +2,7 @@
 import { randomBytes } from 'node:crypto'
 import { now, transaction, uuid, json } from '../db.js'
 import { AppError, conflict, forbidden, invalid, notFound } from '../errors.js'
-import { isAdmin, isManager, requireAdmin, requireManager, scopeUserIds } from '../access.js'
+import { isAdmin, isStaff, requireAdmin, requireStaff, scopeUserIds } from '../access.js'
 import { randomToken, sha256 } from '../auth/sessions.js'
 import * as v from '../validate.js'
 import { audit } from './audit.js'
@@ -32,7 +32,7 @@ export function createOrganization(db, user, body, { allowed = true } = {}) {
   transaction(db, () => {
     db.prepare('INSERT INTO organizations (id, name, join_code, settings, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(orgId, name, joinCode(), '{}', user.id, ts, ts)
-    db.prepare('INSERT INTO teams (id, org_id, name, manager_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(teamId, orgId, teamName, user.id, ts, ts)
+    db.prepare('INSERT INTO teams (id, org_id, name, manager_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(teamId, orgId, teamName, null, ts, ts) // no manager yet: an admin becomes one only by being assigned
     db.prepare('INSERT INTO memberships (id, org_id, user_id, role, team_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(uuid(), orgId, user.id, 'admin', teamId, 'active', ts, ts)
     audit(db, { orgId, actorId: user.id, action: 'organization.created', entityType: 'organization', entityId: orgId, after: { name } })
@@ -45,7 +45,7 @@ export function getOrganization(db, ctx) {
   return {
     id: o.id, name: o.name, createdAt: o.created_at,
     // The join code lets people ask to join; it never grants access by itself (approval is required).
-    joinCode: isManager(ctx) ? o.join_code : null,
+    joinCode: isStaff(ctx) ? o.join_code : null,
     intakeConfigured: Boolean(o.intake_token_hash),
     timezone: orgTimezone(db, ctx.orgId),
     workingCalendar: orgCalendar(db, ctx.orgId)
@@ -144,7 +144,7 @@ export function listMembers(db, ctx, { includeInactive = false } = {}) {
   return rows.map((r) => ({
     userId: r.user_id, name: r.name, role: r.role, teamId: r.team_id, teamName: r.team_name, status: r.status, title: r.title,
     pictureUrl: r.picture_url, inScope: visible.has(r.user_id),
-    email: visible.has(r.user_id) || isManager(ctx) ? r.email : null,
+    email: visible.has(r.user_id) || isStaff(ctx) ? r.email : null,
     phone: isAdmin(ctx) || r.user_id === ctx.user.id ? r.phone : null,
     lastLoginAt: visible.has(r.user_id) ? r.last_login_at : null
   }))
@@ -169,7 +169,7 @@ export function updateMember(db, ctx, userId, body) {
     const teamId = body.teamId ? requireTeam(db, ctx, body.teamId).id : null
     if (!isAdmin(ctx)) {
       // Managers may move employees only between teams they manage.
-      requireManager(ctx)
+      requireStaff(ctx)
       if (m.role !== 'employee' || !ctx.managedTeamIds.includes(m.team_id) || !teamId || !ctx.managedTeamIds.includes(teamId)) throw forbidden('Managers can only move employees between teams they manage.')
     }
     changes.team_id = teamId
@@ -186,7 +186,7 @@ export function updateMember(db, ctx, userId, body) {
     changes.status = status
   }
   if (body?.title !== undefined) {
-    if (!isManager(ctx) && userId !== ctx.user.id) throw forbidden()
+    if (!isStaff(ctx) && userId !== ctx.user.id) throw forbidden()
     changes.title = v.text(body.title, 'Title', { max: 80 })
   }
   if (!Object.keys(changes).length) throw invalid('Nothing to change.')
@@ -203,7 +203,7 @@ export function updateMember(db, ctx, userId, body) {
 
 // ---------- invitations ----------
 export function createInvitation(db, ctx, body, { appUrl = '' } = {}) {
-  requireManager(ctx)
+  requireStaff(ctx)
   const email = v.email(body?.email)
   const role = String(body?.role || 'employee').toLowerCase()
   if (!ROLES.includes(role)) throw invalid('Role must be admin, manager or employee.')
@@ -228,7 +228,7 @@ export function createInvitation(db, ctx, body, { appUrl = '' } = {}) {
 }
 
 export function listInvitations(db, ctx) {
-  requireManager(ctx)
+  requireStaff(ctx)
   return db.prepare(`SELECT i.*, t.name AS team_name, u.name AS invited_by_name FROM invitations i LEFT JOIN teams t ON t.id = i.team_id JOIN users u ON u.id = i.invited_by
                      WHERE i.org_id = ? AND i.status = 'pending' ORDER BY i.created_at DESC`).all(ctx.orgId)
     .filter((i) => isAdmin(ctx) || ctx.managedTeamIds.includes(i.team_id))
@@ -236,7 +236,7 @@ export function listInvitations(db, ctx) {
 }
 
 export function revokeInvitation(db, ctx, id) {
-  requireManager(ctx)
+  requireStaff(ctx)
   const i = db.prepare(`SELECT * FROM invitations WHERE id = ? AND org_id = ? AND status = 'pending'`).get(v.id(id, 'Invitation', { required: true }), ctx.orgId)
   if (!i || (!isAdmin(ctx) && !ctx.managedTeamIds.includes(i.team_id))) throw notFound('Invitation')
   db.prepare(`UPDATE invitations SET status = 'revoked', updated_at = ? WHERE id = ?`).run(now(), i.id)
@@ -320,14 +320,14 @@ export function withdrawJoinRequest(db, user) {
 }
 
 export function listJoinRequests(db, ctx) {
-  requireManager(ctx)
+  requireStaff(ctx)
   return db.prepare(`SELECT j.*, u.name, u.email, u.email_verified FROM join_requests j JOIN users u ON u.id = j.user_id WHERE j.org_id = ? AND j.status = 'pending' ORDER BY j.created_at`).all(ctx.orgId)
     .map((r) => ({ id: r.id, name: r.name, email: r.email, emailVerified: Boolean(r.email_verified), message: r.message, createdAt: r.created_at }))
 }
 
 /** Approve (as employee by default; only admins can grant manager/admin) or reject. */
 export function decideJoinRequest(db, ctx, id, body) {
-  requireManager(ctx)
+  requireStaff(ctx)
   const r = db.prepare(`SELECT * FROM join_requests WHERE id = ? AND org_id = ? AND status = 'pending'`).get(v.id(id, 'Request', { required: true }), ctx.orgId)
   if (!r) throw notFound('Join request')
   const decision = String(body?.decision || '')

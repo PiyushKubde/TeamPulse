@@ -36,6 +36,7 @@ async function session(email, { theme = 'light', viewport = { width: 1440, heigh
   await page.fill('#dev-email', email)
   await page.click('#dev-login button[type=submit]')
   await page.waitForSelector('#nav')
+  await page.goto(`${base}/#/workboard`)
   await page.waitForSelector('.wb-col')
   return { page, ctx }
 }
@@ -56,7 +57,7 @@ try {
   await m.click('#wb-refresh'); await settle(m)
   ok((await m.locator('.wb-col').count()) === 5, 'five columns')
   ok((await m.locator('.wb-col h2').allTextContents()).join('|') === 'To do|In progress|Blocked|In review|Done', 'column titles in order')
-  ok(await m.locator('h1').textContent() === 'Team Workboard', 'title')
+  ok(await m.locator('h1').textContent() === 'Workboard', 'title')
   ok((await m.locator('.wb-head p').textContent()).includes('See what your team is working on'), 'subtitle')
   ok((await m.locator('.wb-metric').count()) === 4, 'four metrics')
   ok(!(await m.locator('.stat, .decisions, .intervene, .hero').count()), 'the old overview panels are gone')
@@ -71,6 +72,7 @@ try {
   await shot(m, 'desktop-manager-light')
 
   step = 'contributions that matter'
+  await m.goto(`${base}/#/dashboard`)
   await m.waitForSelector('.wb-contrib')
   ok(await m.locator('.wb-contrib h2').textContent().then((t) => t.includes('Contributions that matter')), 'contribution strip')
   ok((await m.locator('.wb-contrib-note').textContent()).includes('Not task counts'), 'states that it is not a count or ranking')
@@ -80,10 +82,12 @@ try {
     const li = m.locator('.wb-contrib-list li').first()
     ok(await li.locator('.badge.brand, .prov').count() > 0, 'a contribution shows its complexity or evidence')
     await li.locator('a').click(); await m.waitForSelector('.task-head h1')
-    await m.goBack(); await m.waitForSelector('.wb-col')
+    await m.goBack(); await m.waitForSelector('.wb-contrib')
   } else ok(await m.locator('.wb-contrib-empty').count() === 1, 'honest empty line when nothing is significant yet')
   ok(await m.locator('.wb-contrib a[href="#/analytics"]').count() === 1, 'links to Work Analytics')
   await shot(m, 'desktop-manager-contrib')
+  await m.goto(`${base}/#/workboard`); await m.waitForSelector('.wb-col')
+  ok(!(await m.locator('.wb-contrib').count()), 'the Workboard is the board: the strip lives on Team Overview')
 
   step = 'owner opens that person contribution profile'
   await m.locator('.wb-col[data-col="in_progress"] a.wb-who').first().click()
@@ -148,7 +152,7 @@ try {
   await m.fill('#t-title', 'Board check: draft vendor review')
   await m.click('#task-form button[type=submit]')
   await m.waitForSelector('.wb-title:has-text("Board check: draft vendor review")')
-  ok(m.url().endsWith('#/dashboard'), 'stays on the board after creating')
+  ok(m.url().endsWith('#/workboard'), 'stays on the board after creating')
   const created = (await api(mctx, '/api/tasks?view=team')).body.find((t) => t.title === 'Board check: draft vendor review')
   ok(created && created.status === 'ASSIGNED' && !created.assigneeId, 'created through the existing API, unassigned')
   ok(await m.locator('.wb-card:has-text("Board check") .wb-flag.warn:has-text("Unassigned")').count() === 1, 'an unassigned task is shown as unassigned')
@@ -169,7 +173,7 @@ try {
   // ---------------- employee ----------------
   step = 'employee board'
   const { page: e, ctx: ectx } = await session('priya@demo.teampulse', { viewport: { width: 1440, height: 900 } })
-  ok(await e.locator('h1').textContent() === 'My workboard', 'employee title')
+  ok(await e.locator('h1').textContent() === 'My Workspace', 'employee title')
   ok(!(await e.locator('a[href="#/copilot"]').count()), 'no manager copilot for employees')
   ok(!(await e.locator('.wb-contrib').count()) && (await api(ectx, '/api/contribution/intelligence')).status === 403, 'employees get no team contribution strip, and the API refuses them')
   const mine = (await api(ectx, '/api/workboard')).body
@@ -279,10 +283,10 @@ try {
   const s = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   const sp = await s.newPage()
   sp.on('pageerror', (x) => problems.push(`[states] ${x.message}`))
-  await sp.goto(`${base}/#/login`); await sp.getByText('Local development sign-in').click(); await sp.fill('#dev-email', 'manager@demo.teampulse'); await sp.click('#dev-login button[type=submit]'); await sp.waitForSelector('.wb-col')
+  await sp.goto(`${base}/#/login`); await sp.getByText('Local development sign-in').click(); await sp.fill('#dev-email', 'manager@demo.teampulse'); await sp.click('#dev-login button[type=submit]'); await sp.goto(`${base}/#/workboard`); await sp.waitForSelector('.wb-col')
   await sp.goto(`${base}/#/team-tasks`); await sp.waitForSelector('h1:has-text("Team tasks")')
   await sp.route('**/api/workboard*', async (r) => { await new Promise((x) => setTimeout(x, 900)); await r.continue() })
-  await sp.evaluate(() => { location.hash = '#/dashboard' })
+  await sp.evaluate(() => { location.hash = '#/workboard' })
   await sp.waitForSelector('.wb-loading')
   await shot(sp, 'state-loading')
   await sp.waitForSelector('.wb-col'); await sp.unroute('**/api/workboard*')
@@ -291,7 +295,7 @@ try {
   ok(await toastHas(sp, 'The board is unavailable'), 'a failed refresh is reported')
   ok(await sp.locator('.wb-col').count() === 5, 'a failed refresh keeps the existing board')
   await sp.evaluate(() => { location.hash = '#/team-tasks' }); await sp.waitForSelector('h1:has-text("Team tasks")')
-  await sp.evaluate(() => { location.hash = '#/dashboard' }); await sp.waitForSelector('.wb-error')
+  await sp.evaluate(() => { location.hash = '#/workboard' }); await sp.waitForSelector('.wb-error')
   ok((await sp.locator('.wb-error').textContent()).includes('The board is unavailable'), 'error message shown')
   await shot(sp, 'state-error')
   await sp.unroute('**/api/workboard*')
@@ -324,7 +328,7 @@ try {
   await api(ectx, `/api/evidence/task/${rich.id}/links`, 'POST', { url: 'https://github.com/acme/shop/pull/481', label: 'PR 481: idempotent reservation token' })
   await api(ectx, `/api/tasks/${rich.id}/submit`, 'POST', { summary: 'Investigated logs across cart, payments and inventory and found the root cause: a race condition between reservation and payment capture. Added an idempotent reservation token and a regression test.', outcome: 'Checkout failures stopped in staging.' })
   for (let i = 0; i < 40; i++) { if ((await api(mctx, '/api/contribution/intelligence')).body.significant.some((x) => x.taskId === rich.id)) break; await m.waitForTimeout(500) }
-  await m.reload(); await m.waitForSelector('.wb-contrib-list li')
+  await m.goto(`${base}/#/dashboard`); await m.waitForSelector('.wb-contrib-list li')
   const item = m.locator('.wb-contrib-list li', { hasText: 'Fix the checkout reservation race' })
   ok(await item.count() === 1, 'the analysed task is listed')
   ok((await item.textContent()).includes('Priya Sharma') && (await item.textContent()).includes('Complexity L'), 'who, and the complexity level with its reason')
@@ -333,19 +337,19 @@ try {
   await item.locator('a').click(); await m.waitForSelector('.task-head h1')
   ok(await m.locator('.task-head h1').textContent() === 'Fix the checkout reservation race', 'opens the existing task page')
   await m.waitForSelector('#ai-card table.dims') // the existing assessment, where the manager verifies or adjusts
-  await m.goBack(); await m.waitForSelector('.wb-col')
+  await m.goBack(); await m.waitForSelector('.wb-contrib-list li')
   // The reviewer journey: workboard → owner → contribution profile → task assessment (screenshots of every step).
   step = 'reviewer journey'
-  await m.setViewportSize({ width: 1440, height: 1500 })
+  await m.setViewportSize({ width: 1440, height: 1500 }); await m.goto(`${base}/#/workboard`); await m.waitForSelector('.wb-col')
   await shot(m, 'journey-1-workboard')
   await m.locator('.wb-col[data-col="in_review"] a.wb-who', { hasText: 'Priya' }).first().click()
   await m.waitForSelector('h1:has-text("Priya Sharma")'); await m.waitForSelector('#p-tasks li, #p-tasks .muted'); await m.waitForSelector('#p-evidence ul, #p-evidence .muted, .dim-card')
   await settle(m)
   ok((await m.locator('#p-work tbody tr:visible').count()) === 8 && await m.locator('#p-work-all').count() === 1, 'a long analysed-work history is collapsed to the newest rows')
-  ok((await m.locator('.crumbs a').first().textContent()) === 'Overview' && m.url().includes('from=dashboard'), 'from the board, the way back is Overview')
-  ok(await m.locator('#nav a[data-key="dashboard"][aria-current="page"]').count() === 1, 'the sidebar keeps Overview highlighted')
+  ok((await m.locator('.crumbs a').first().textContent()) === 'Workboard' && m.url().includes('from=workboard'), 'from the board, the way back is the Workboard')
+  ok(await m.locator('#nav a[data-key="workboard"][aria-current="page"]').count() === 1, 'the sidebar keeps the Workboard highlighted')
   await m.click('.segmented a:has-text("Last 30 days")'); await m.waitForSelector('h1:has-text("Priya Sharma")')
-  ok((await m.locator('.crumbs a').first().textContent()) === 'Overview', 'changing the period keeps the way back')
+  ok((await m.locator('.crumbs a').first().textContent()) === 'Workboard', 'changing the period keeps the way back')
   await m.click('.segmented a:has-text("Last 90 days")'); await m.waitForSelector('#p-work tbody tr'); await settle(m)
   await shot(m, 'journey-2-profile')
   if (shots) await m.screenshot({ path: join(shots, 'journey-2-profile-full.png'), fullPage: true })
@@ -357,10 +361,10 @@ try {
   ok(await m.locator('#p-work .badge:has-text("Waiting for the employee")').count() >= 1 && !(await m.locator('#p-work').textContent()).includes('Waiting for your confirmation'), 'a reviewer is not told it waits for their confirmation')
   await m.click('#p-work-all')
   ok((await m.locator('#p-work tbody tr:visible').count()) > 8 && await m.locator('#p-work-all').count() === 0, 'Show all expands every analysed piece')
-  await m.goto(`${base}/#/contribution`); await m.waitForSelector('h1:has-text("Team intelligence")')
+  await m.goto(`${base}/#/contribution`); await m.waitForSelector('h1:has-text("People")')
   await m.locator('a[href^="#/contribution/"]', { hasText: 'Priya Sharma' }).first().click(); await m.waitForSelector('h1:has-text("Priya Sharma")')
-  ok((await m.locator('.crumbs a').first().textContent()) === 'Team intelligence' && await m.locator('#nav a[data-key="intelligence"][aria-current="page"]').count() === 1, 'from Team Intelligence, the way back is Team Intelligence')
-  await m.click('.crumbs a'); await m.waitForSelector('h1:has-text("Team intelligence")')
+  ok((await m.locator('.crumbs a').first().textContent()) === 'People' && await m.locator('#nav a[data-key="intelligence"][aria-current="page"]').count() === 1, 'from People, the way back is People')
+  await m.click('.crumbs a'); await m.waitForSelector('h1:has-text("People")')
   await m.goto(`${base}/#/contribution/${priyaId}`); await m.waitForSelector('#p-work tbody tr'); await settle(m)
   await m.locator('main table a', { hasText: 'Fix the checkout reservation race' }).first().click()
   await m.waitForSelector('#ai-card table.dims')
@@ -370,7 +374,7 @@ try {
 
   step = 'reviewer journey on a phone'
   const { page: pj } = await session('manager@demo.teampulse', { viewport: { width: 390, height: 844 }, mobile: true })
-  await pj.waitForSelector('.wb-contrib-list li')
+  await pj.waitForSelector('.wb-col')
   await shot(pj, 'journey-m1-workboard')
   ok(await overflow(pj) <= 1, 'phone: board fits')
   await pj.locator('.wb-col[data-col="in_review"] a.wb-who', { hasText: 'Priya' }).first().scrollIntoViewIfNeeded().catch(() => {})
@@ -384,7 +388,7 @@ try {
   await shot(pj, 'journey-m3-assessment')
 
   const { page: mc } = await session('manager@demo.teampulse', { viewport: { width: 390, height: 844 }, mobile: true })
-  await mc.waitForSelector('.wb-contrib-list li')
+  await mc.goto(`${base}/#/dashboard`); await mc.waitForSelector('.wb-contrib-list li')
   ok(await overflow(mc) <= 1, 'strip fits a phone')
   await shot(mc, 'mobile-manager-contrib')
 
@@ -395,8 +399,8 @@ try {
     await m.waitForSelector(sel)
     ok(!(await m.locator('.notice.err').count()), `${hash} opened without an error`)
   }
-  await m.evaluate(() => { location.hash = '#/dashboard' }); await m.waitForSelector('.wb-col')
-  await m.click('nav >> text="Review Queue"'); await m.waitForSelector('main h1')
+  await m.evaluate(() => { location.hash = '#/workboard' }); await m.waitForSelector('.wb-col')
+  await m.click('nav >> text="Reviews"'); await m.waitForSelector('main h1')
 
   if (problems.length) throw new Error(`Browser problems:\n${problems.join('\n')}`)
   console.log('E2E workboard passed (layout, data, metrics, filters, add task, drag-and-drop + menu, rollback, paging, employee view, responsive, dark, states).')

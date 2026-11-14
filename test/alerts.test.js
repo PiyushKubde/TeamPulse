@@ -166,7 +166,7 @@ test('scheduled routes need CRON_SECRET; a run reports what it did', async () =>
     assert.equal(w.status, 200)
     const w2 = await t.call('/tasks/weekly-report', { headers: { Authorization: 'Bearer test-cron-secret' } })
     assert.equal(w2.status, 200)
-    assert.equal(t.db.prepare('SELECT COUNT(*) AS n FROM weekly_reports').get().n, 4, 'one per manager and admin, not duplicated by a second run')
+    assert.equal(t.db.prepare('SELECT COUNT(*) AS n FROM weekly_reports').get().n, 2, 'one per manager (an admin who manages no team has no report), not duplicated by a second run')
   } finally { await t.close() }
 })
 

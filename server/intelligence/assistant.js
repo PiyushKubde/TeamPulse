@@ -6,13 +6,14 @@
 import { randomBytes } from 'node:crypto'
 import { json, now } from '../db.js'
 import { AppError, invalid } from '../errors.js'
-import { isAdmin, isManager, requireManager, scopeUserIds, taskScopeSql } from '../access.js'
+import { isAdmin, isManager, requireStaff, scopeUserIds, taskScopeSql } from '../access.js'
 import { deriveConditions } from '../services/tasks.js'
 import { managerDashboard } from '../services/dashboard.js'
 import { canSeeEvidence } from '../evidence/service.js'
 import { IN_ANALYSIS, taskRef } from '../evidence/matching.js'
 import { taskJourney } from './journeys.js'
 import { listSignals } from './signals.js'
+import { waitsForManager } from '../measurement/lifecycle.js'
 import * as v from '../validate.js'
 
 const DAY = 86400000
@@ -181,7 +182,7 @@ const ans = (intent, title, answer, items = [], extra = {}) => ({ intent, title,
 /** Answers a question about the asker's own work (employee) or their team (manager, team: true). */
 export function ask(db, ctx, body = {}) {
   const team = body.team === true
-  if (team) requireManager(ctx)
+  if (team) requireStaff(ctx) // team-structure questions are for staff; work data is limited to the teams you manage
   const question = v.text(body.question, 'Question', { max: 300 }) || ''
   const intent = body.intent ? String(body.intent) : classify(question, team)
   const valid = suggestions(team).map((s) => s.intent)
@@ -297,7 +298,7 @@ function teamAnswer(db, ctx, intent, body) {
   }
   if (intent === 'review') {
     const ph = people.map(() => '?').join(',')
-    const a = people.length ? db.prepare(`SELECT a.*, t.title FROM contribution_assessments a JOIN tasks t ON t.id = a.task_id WHERE a.org_id = ? AND a.is_current = 1 AND a.user_id IN (${ph}) AND a.manager_status = 'PENDING' AND a.provider != 'rules' ORDER BY a.created_at`).all(ctx.orgId, ...people) : []
+    const a = people.length ? db.prepare(`SELECT a.*, t.title FROM contribution_assessments a JOIN tasks t ON t.id = a.task_id WHERE a.org_id = ? AND a.is_current = 1 AND a.user_id IN (${ph}) AND a.manager_status = 'PENDING' AND (a.provider != 'rules' OR a.employee_status IN ('CORRECTION_PROPOSED','DISPUTED')) ORDER BY a.created_at`).all(ctx.orgId, ...people).filter((x) => waitsForManager(db, x)) : []
     const subs = people.length ? db.prepare(`SELECT t.* FROM tasks t WHERE t.org_id = ? AND t.status = 'SUBMITTED_FOR_REVIEW' AND t.assignee_id IN (${ph})`).all(ctx.orgId, ...people) : []
     const imp = people.length ? db.prepare(`SELECT * FROM impact_records WHERE org_id = ? AND verification_status = 'PENDING' AND user_id IN (${ph})`).all(ctx.orgId, ...people) : []
     const disputed = db.prepare(`SELECT * FROM external_evidence WHERE org_id = ? AND attribution = 'disputed' AND status = 'active'`).all(ctx.orgId).filter((x) => canSeeEvidence(db, ctx, x))
@@ -349,7 +350,7 @@ function teamAnswer(db, ctx, intent, body) {
 
   if (intent === 'team_members') {
     const teams = db.prepare('SELECT * FROM teams WHERE org_id = ?').all(ctx.orgId)
-    const myTeams = isAdmin(ctx) ? teams : teams.filter((t) => ctx.managedTeamIds.includes(t.id))
+    const myTeams = isAdmin(ctx) ? teams : teams.filter((t) => ctx.managedTeamIds.includes(t.id)) // team structure is administration: an admin sees every team
     if (!myTeams.length) return ans(intent, 'Your team members', 'You are not set as the manager of any team. Ask an admin to go to Settings → Teams and assign you as team manager.', [])
     const items = []
     for (const team of myTeams) {

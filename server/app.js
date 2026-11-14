@@ -28,6 +28,7 @@ import * as reflections from './services/reflections.js'
 import * as reports from './services/reports.js'
 import { dashboard } from './services/dashboard.js'
 import { getWorkboard } from './services/workboard.js'
+import { systemStatus } from './services/system.js'
 import { listNotifications, markRead } from './services/notify.js'
 import { listAudit } from './services/audit.js'
 import * as alerts from './services/alerts.js'
@@ -43,6 +44,7 @@ import { createAiProvider } from './ai/provider.js'
 import { seedRubrics } from './measurement/rubric.js'
 import { onWorkEvent, recoverRuns } from './measurement/engine.js'
 import * as measure from './measurement/assessments.js'
+import * as backlog from './measurement/backlog.js'
 import * as evidenceSources from './evidence/sources.js'
 import * as evidenceSvc from './evidence/service.js'
 import { receiveEvidenceEvent, retryInbox } from './evidence/ingest.js'
@@ -312,6 +314,7 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   // ---------- dashboard ----------
   app.get('/api/dashboard', h((req) => dashboard(db, member(req))))
   app.get('/api/workboard', h((req) => getWorkboard(db, member(req), req.query)))
+  app.get('/api/admin/system', h((req) => systemStatus(db, member(req), { cfg, ai, aiMode: aiModeNow, vs, m91, mailer })))
   app.get('/api/reflections/today', h((req) => reflections.getReflection(db, member(req), req.query.day)))
   app.put('/api/reflections', h((req) => reflections.saveReflection(db, member(req), req.body)))
   app.get('/api/reflections', h((req) => reflections.recentReflections(db, member(req))))
@@ -534,6 +537,9 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   }))
   app.post('/api/tasks/:id/assessment/respond', h((req) => { const ctx = member(req); measure.employeeRespond(db, ctx, req.params.id, req.body); return measure.getTaskAssessment(db, ctx, ai, req.params.id, aiModeNow) }))
   app.post('/api/tasks/:id/assessment/review', h((req) => { const ctx = member(req); measure.managerReview(db, ctx, req.params.id, req.body); return measure.getTaskAssessment(db, ctx, ai, req.params.id, aiModeNow) }))
+  // Controlled assessment of work submitted before assessments existed: counted and listed for the managers of the team, started by them, never automatic.
+  app.get('/api/assessments/backlog', h((req) => backlog.backlogStatus(db, member(req), ai, aiModeNow)))
+  app.post('/api/assessments/backlog/start', h((req) => { const ctx = member(req); limitAnalyse(`backlog:${ctx.user.id}`); return backlog.startBacklog(db, ctx, ai, aiModeNow, { taskIds: req.body?.taskIds }) }))
   app.get('/api/assessments/:id', h((req) => measure.getAssessmentById(db, member(req), req.params.id)))
   app.get('/api/contribution/team', h((req) => measure.teamOverview(db, member(req), req.query)))
   const limitWork = rateLimiter({ windowMs: 3600000, max: 6 })

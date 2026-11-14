@@ -33,8 +33,9 @@ test('manager scope: a manager cannot see or manage another team’s people or t
     assert.equal((await t.call(`/api/permissions/${s.outsider.id}`, { method: 'PATCH', as: s.manager, body: { can_create_tasks: true } })).status, 403)
     const perms = await t.call('/api/permissions', { as: s.manager })
     assert.deepEqual(perms.body.map((p) => p.name).sort(), ['Ed Employee', 'Eve Employee'])
-    // Admin sees everything in the org.
-    assert.equal((await t.call(`/api/tasks/${sales.body.task.id}`, { as: s.admin })).status, 200)
+    // An admin runs the organization but is not a manager: no authority over a team's work unless assigned to manage that team.
+    assert.equal((await t.call(`/api/tasks/${sales.body.task.id}`, { as: s.admin })).status, 404)
+    assert.equal((await t.call('/api/reports/workload', { as: s.admin })).status, 403)
     // Employees see only their own work.
     assert.equal((await t.call(`/api/tasks/${sales.body.task.id}`, { as: s.employee })).status, 404)
     // Reports and team endpoints are manager-only.

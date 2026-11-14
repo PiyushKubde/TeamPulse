@@ -52,7 +52,7 @@ function cardHtml(c, tz, busy) {
   return html`<article class="wb-card ${c.overdue ? 'is-overdue' : ''} ${busy ? 'is-busy' : ''}" data-id="${c.id}" data-col="${c.column}" draggable="${busy ? 'false' : 'true'}" aria-busy="${busy ? 'true' : 'false'}">
     <a class="wb-title" href="#/tasks/${c.id}" draggable="false">${c.title}</a>
     <div class="wb-meta">
-      ${c.assigneeName ? (app.isManager && c.assigneeId ? html`<a class="wb-who" href="#/contribution/${c.assigneeId}?from=dashboard" draggable="false" title="Owner: ${c.assigneeName} — open their work, evidence and contribution">${avatar(c.assigneeName, null, 'sm')}<span>${first(c.assigneeName)}</span></a>` : html`<span class="wb-who" title="Owner: ${c.assigneeName}">${avatar(c.assigneeName, null, 'sm')}<span>${first(c.assigneeName)}</span></span>`) : html`<span class="wb-flag warn">Unassigned</span>`}
+      ${c.assigneeName ? (app.isManager && c.assigneeId ? html`<a class="wb-who" href="#/contribution/${c.assigneeId}?from=workboard" draggable="false" title="Owner: ${c.assigneeName} — open their work, evidence and contribution">${avatar(c.assigneeName, null, 'sm')}<span>${first(c.assigneeName)}</span></a>` : html`<span class="wb-who" title="Owner: ${c.assigneeName}">${avatar(c.assigneeName, null, 'sm')}<span>${first(c.assigneeName)}</span></span>`) : html`<span class="wb-flag warn">Unassigned</span>`}
       ${c.dueAt ? html`<span class="wb-due ${c.overdue ? 'late' : soon ? 'soon' : ''}" title="${c.overdue ? `Overdue by ${c.hoursOverdue}h` : 'Deadline'}">${icon('clock', 'xs')}${c.overdue ? 'Overdue · ' : ''}${dueLabel(c, tz)}</span>` : ''}
       ${c.priority ? html`<span class="wb-prio prio prio-${c.priority}" title="Confirmed priority">${icon('flag', 'xs')}${PRIO[c.priority]}</span>` : ''}
     </div>
@@ -74,7 +74,7 @@ function cardHtml(c, tz, busy) {
  * Work volume is not work value: next to the board, the few contributions that carry weight (complex work or verified outcomes, with the evidence behind them)
  * and what waits on the manager's own judgement. Everything comes from the existing contribution-intelligence API; nothing is scored or ranked.
  */
-async function renderContributions(box) {
+export async function renderContributions(box) {
   let t
   try { t = await api(`/api/contribution/intelligence?from=${encodeURIComponent(new Date(Date.now() - 30 * 86400000).toISOString())}`) } catch { return } // an extra: the board does not depend on it
   if (!box.isConnected) return
@@ -114,11 +114,10 @@ export async function renderWorkboard(main, q = new URLSearchParams()) {
   const live = () => main.isConnected
 
   main.innerHTML = html`<div class="wb">
-    <header class="wb-head"><div><h1>${manager ? 'Team Workboard' : 'My workboard'}</h1><p>${manager ? 'See what your team is working on.' : 'See what you are working on.'}</p></div>
+    <header class="wb-head"><div><h1>${manager ? 'Workboard' : 'My Workspace'}</h1><p>${manager ? 'See what your team is working on.' : 'See what you are working on.'}</p></div>
       <div class="row">${manager ? html`<a class="btn ghost" href="#/copilot">${icon('copilot')}Ask Copilot</a>` : ''}<button class="btn ghost icon-only" id="wb-refresh" aria-label="Refresh the board" title="Refresh">${icon('refresh')}</button><button class="btn" id="wb-new">${icon('plus')}${app.session.membership.creationMode === 'direct' ? 'New task' : 'Suggest a task'}</button></div></header>
     <div id="wb-inbox"></div>
     <div class="wb-summary"><div class="wb-metrics" id="wb-metrics" role="group" aria-label="Task summary"></div><div class="wb-attn" id="wb-attn" aria-live="polite"></div></div>
-    ${manager ? html`<div id="wb-contrib"></div>` : ''}
     <form class="wb-toolbar" id="wb-filters" role="search" onsubmit="return false">
       <div class="search-box">${icon('search', 'sm')}<input type="search" id="wb-q" placeholder="Search tasks" aria-label="Search tasks by title" autocomplete="off" maxlength="100"></div>
       ${manager ? html`<select id="wb-assignee" aria-label="Filter by assignee"><option value="">Anyone</option></select>` : ''}
@@ -134,7 +133,6 @@ export async function renderWorkboard(main, q = new URLSearchParams()) {
   if (manager) api('/api/parameter-review').then((r) => { if (live() && Array.isArray(r) && r.length) $('wb-attn').dataset.review = String(r.length), paintAttention() }).catch(() => {})
   renderInbox($('wb-inbox'))
   if (!manager) renderReflection($('wb-reflection'))
-  else renderContributions($('wb-contrib'))
 
   const qs = (extra = {}) => {
     const p = new URLSearchParams()
@@ -159,7 +157,7 @@ export async function renderWorkboard(main, q = new URLSearchParams()) {
     box.innerHTML = (m.attention
       ? html`<button type="button" class="wb-attn-line" data-kpi="ATTENTION" aria-pressed="${f.kpi === 'ATTENTION'}">${icon('alert', 'sm')}<b>${m.attention} ${m.attention === 1 ? 'item needs' : 'items need'} attention</b> · ${parts.join(' · ')}</button>`
       : html`<span class="wb-ontrack">${icon('checkCircle', 'sm')}All work on track</span>`).toString()
-      + (review ? html`<a class="wb-review" href="#/review" title="Open the Review Queue">${icon('flag', 'sm')}${review} to review</a>`.toString() : '')
+      + (review ? html`<a class="wb-review" href="#/review" title="Open the priorities and deadlines waiting for you">${icon('flag', 'sm')}${review} to review</a>`.toString() : '')
   }
   function columnHtml(col) {
     const c = data.columns[col.key]

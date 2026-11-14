@@ -15,7 +15,7 @@ import * as v from '../validate.js'
 
 export const USE_CASES = [
   { key: 'new_task_notification', name: 'Team task notifications', description: 'When a task in your team is assigned: post it to a team Slack channel, message you in Slack, email you, or email the assignee — from your own Slack or Gmail. (Employees turn on their own notifications in Settings → Profile.)', channels: ['slack', 'gmail'], available: true },
-  { key: 'weekly_team_report', name: 'Weekly team report', description: 'Every Monday, your team’s report for the week that ended — verified outcomes, contributions, blockers, missed commitments with reasons — delivered to Slack or Gmail. Managers get their own team; admins get the whole organization.', channels: ['slack', 'gmail'], available: true },
+  { key: 'weekly_team_report', name: 'Weekly team report', description: 'Every Monday, your team’s report for the week that ended — verified outcomes, contributions, blockers, missed commitments with reasons — delivered to Slack or Gmail. Managers get their own teams; an admin gets one only for a team they are assigned to manage.', channels: ['slack', 'gmail'], available: true },
   { key: 'gmail_slack_intake', name: 'Gmail / Slack intake → task requests', description: 'Emails with a chosen Gmail label, or messages in a chosen Slack channel, become pending task requests for your team. Nothing is ever assigned or approved automatically.', channels: ['gmail', 'slack'], available: true },
   { key: 'context_flows', name: 'Flows built in context', description: 'Flows people build from a KONVO screen (My Tasks, Reports, Team Tasks) receive their own KONVO events.', channels: [], available: true, hidden: true },
   { key: 'external_request_intake', name: 'Any other source → task requests (web address)', description: 'Any other system or ViaSocket flow can post a request to a KONVO web address with a token. It becomes a pending task request — never assigned automatically.', channels: ['webhook'], available: true }
@@ -238,7 +238,7 @@ export async function runNewTaskNotification(db, vs, event, { trigger = 'event' 
 }
 
 /**
- * Automation B. One report per manager (their teams) and per admin (the whole organization), for the week that just
+ * Automation B. One report per manager (their teams; an admin only for teams they are assigned to manage), for the week that just
  * ended; the in-app notice always, Slack/Gmail when that person set it up. Each report and each delivery exists once.
  */
 export async function runWeeklyReports(db, vs, { at = new Date(), appUrl = '' } = {}) {
@@ -250,7 +250,7 @@ export async function runWeeklyReports(db, vs, { at = new Date(), appUrl = '' } 
       const ctx = userContext(db, ownerId, org.id)
       if (!ctx || !isManager(ctx)) continue
       const summary = weeklySummary(db, ctx, { weekStart: prev })
-      const scope = ctx.role === 'admin' ? 'organization' : 'team'
+      const scope = 'team'
       const inserted = db.prepare(`INSERT INTO weekly_reports (id, org_id, team_id, week_start, summary, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (org_id, team_id, week_start) DO NOTHING`)
         .run(uuid(), org.id, `user:${ownerId}`, prev, JSON.stringify({ scope, ...summary }), now()).changes
       if (inserted) notifyInApp(db, { orgId: org.id, userId: ownerId, kind: 'weekly_report', title: `Your ${scope} report for the week of ${prev} is ready`, link: `#/reports?type=weekly&weekStart=${prev}`, dedupeKey: `weekly:${org.id}:${prev}:${ownerId}` })

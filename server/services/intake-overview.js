@@ -3,7 +3,7 @@
 // only: no ranking, no score, nothing derived from task counts or message volume.
 import { json } from '../db.js'
 import { forbidden } from '../errors.js'
-import { isAdmin, isManager, scopeUserIds, taskScopeSql } from '../access.js'
+import { isManager, scopeUserIds, taskScopeSql } from '../access.js'
 import * as v from '../validate.js'
 import { presentTask } from './tasks.js'
 import { transfersInScope } from './assignments.js'
@@ -53,7 +53,7 @@ export function intakeOverview(db, ctx, q = {}) {
   if (q.due === 'overdue') tasks = tasks.filter((t) => t.overdue)
 
   // Slack messages that need a manager before they can become a task.
-  const people = isAdmin(ctx) ? null : scopeUserIds(db, ctx)
+  const people = scopeUserIds(db, ctx)
   const needManager = db.prepare(`SELECT i.*, r.status AS request_status, s.owner_id FROM slack_intake_items i LEFT JOIN task_requests r ON r.id = i.request_id LEFT JOIN intake_subscriptions s ON s.id = i.subscription_id WHERE i.org_id = ? AND i.outcome = 'NEEDS_MANAGER' ORDER BY i.created_at DESC LIMIT 100`).all(ctx.orgId)
     .filter((i) => !people || people.includes(i.owner_id))
     .map((i) => ({ id: i.id, reason: i.reason, text: i.text, senderName: i.sender_name, mentions: json(i.mentions, []), permalink: i.permalink, requestId: i.request_id, requestStatus: i.request_status, createdAt: i.created_at }))
