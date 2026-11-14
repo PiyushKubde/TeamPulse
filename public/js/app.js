@@ -267,7 +267,7 @@ async function route() {
   const hit = ROUTES.map(([re, key, fn]) => { const m = path.match(re); return m ? { key, view: fn(m) } : null }).find(Boolean)
   let key = hit?.key || 'dashboard'
   if (app.isManager && path.startsWith('#/tasks/')) key = 'team-tasks'
-  if (app.isManager && path.startsWith('#/contribution/')) key = q.get('from') === 'dashboard' ? 'dashboard' : 'intelligence'
+  if (app.isManager && path.startsWith('#/contribution/')) key = q.get('from') === 'dashboard' ? 'dashboard' : q.get('from') === 'analytics' ? 'analytics' : 'intelligence'
   setTitle(titleFor(key))
   if (currentShellKey === null) {
     claimRoot().innerHTML = shell(key)

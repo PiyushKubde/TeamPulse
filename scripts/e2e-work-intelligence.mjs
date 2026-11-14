@@ -2,7 +2,7 @@
 // who-is-doing-what with links to the contribution profile; the assessment table (only what was assessed); Person and Task tabs; the employee's limited view;
 // desktop and phone layouts. Runs on a disposable DATA_DIR with demo data and the simulated analyser (never ./data).
 // Usage: npm run test:e2e:intelligence   (SCREENSHOTS=<dir> keeps screenshots)
-/* global document, window */
+/* global document, window, getComputedStyle */
 import { spawn, execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -47,54 +47,71 @@ try {
   const { page: e, ctx: ectx } = await session('priya@demo.teampulse')
   const priyaId = (await api(mctx, '/api/assignable')).body.find((p) => p.name === 'Priya Sharma').userId
 
-  step = 'team tab without analysed work'
-  await m.goto(`${base}/#/analytics`); await m.waitForSelector('[data-testid=analytics-summary]'); await m.waitForSelector('[data-testid=performance-empty]')
+  step = 'team tab: people first'
+  await m.goto(`${base}/#/analytics`); await m.waitForSelector('[data-testid=analytics-summary]'); await m.waitForSelector('[data-testid=people-list] [data-person-row]')
+  await m.waitForFunction(() => !document.querySelector('[data-assess]:not(.muted)') || true)
   ok((await m.locator('h1').textContent()) === 'Work Intelligence', 'title')
-  ok((await m.locator('.page-head p').textContent()).includes('what your team is doing, what they contribute and what outcomes they create'), 'description')
-  const heads = await m.locator('.wi-card h2').allTextContents()
-  ok(heads.join('|') === 'What needs my attention?|Who is doing what?|How is the work being performed?|What outcomes have been achieved?|Work trend', `sections in order: ${heads.join('|')}`)
-  const labels = await m.locator('.wi-kpi .label').allTextContents()
-  ok(labels.join('|') === 'Active work|Completed work|Blocked work|Work requiring review', `four metrics: ${labels.join('|')}`)
-  ok(!(await m.locator('[data-testid=health-chart], [data-testid=people-chart]').count()), 'the duplicate health donut and stacked bars are gone')
-  ok(await m.locator('[data-testid=analytics-notes]').evaluate((d) => d.tagName === 'DETAILS' && !d.open), 'fairness notes are available but collapsed')
-  ok((await m.locator('[data-testid=analytics-notes]').textContent()).includes('never a performance score'), 'fairness note text present')
-  // who is doing what: alphabetical, current work, links, no ranking
-  const names = await m.locator('[data-testid=contribution-table] tbody tr td:first-child a').allTextContents()
-  ok(names.length >= 3 && JSON.stringify(names) === JSON.stringify([...names].sort((a, b) => a.localeCompare(b))), `people are alphabetical: ${names}`)
-  ok((await m.locator('[data-testid=contribution-table] tbody').textContent()).includes('Cut checkout API p95 latency below 200ms'), 'current work is named')
-  ok(!(await m.locator('main').textContent()).match(/leaderboard|top performer|score:|rank/i), 'no ranking or score language')
-  ok((await m.locator('[data-testid=performance-empty]').textContent()).includes('nothing is estimated in advance'), 'honest empty state for assessments')
-  await shot(m, 'wi-desktop-team-empty')
+  ok((await m.locator('.page-head p').textContent()) === 'Understand your team’s work and contribution.', 'subtitle')
+  ok(await m.locator('[data-testid=tab-team][aria-selected=true]').count() === 1 && await m.locator('[data-testid=tab-person]').count() === 1 && await m.locator('[data-testid=tab-task]').count() === 1, 'Team, Person and Task tabs')
+  ok((await m.locator('.wi-sec h2').allTextContents()).join('|') === 'People and their work|Team outcomes', 'only two sections below the glance row')
+  ok((await m.locator('.wi-g').allTextContents()).map((t) => t.replace(/^[\d,]+\s*/, '')).join('|') === 'In progress|Completed|Needs attention', 'three inline metrics')
+  ok(!(await m.locator('.wi-team table, .wi-card, [data-testid=trend-chart], [data-testid=analytics-tasks], .wi-kpi').count()), 'no tables, cards, trend chart, task table or KPI cards on the Team tab')
+  ok(!(await m.locator('main').textContent()).match(/leaderboard|top performer|score:|\brank/i), 'no ranking or score language')
+  const names = await m.locator('.wi-pname').allTextContents()
+  const sorted = names.filter((x) => x !== 'Unassigned work')
+  ok(sorted.length >= 3 && JSON.stringify(sorted) === JSON.stringify([...sorted].sort((a, b) => a.localeCompare(b))), `people are alphabetical: ${names}`)
+  const priya = m.locator('[data-person-row]', { hasText: 'Priya Sharma' })
+  const text = await priya.textContent()
+  ok(text.includes('Cut checkout API p95 latency below 200ms') && text.includes('In progress'), 'current work with its status')
+  ok(/Due (\w+ \d+|\d+ \w+)/.test(text), `confirmed deadline context: ${text.slice(0, 220)}`)
+  ok(text.includes('+') && text.includes('more task'), 'extra tasks are one expandable line')
+  await priya.locator('summary').click()
+  ok((await priya.locator('.wi-task').count()) >= 2, 'the rest can be expanded')
+  await m.waitForFunction(() => [...document.querySelectorAll('[data-assess]')].every((e) => !e.textContent.startsWith('Reading')))
+  ok((await priya.textContent()).includes('Not enough evidence yet'), 'assessment status says so when there is no evidence')
+  const neha = await m.locator('[data-person-row]', { hasText: 'Neha Rao' }).textContent()
+  ok(neha.includes('Overdue'), 'overdue is shown as plain context')
+  ok(!(await m.locator('[data-testid=outcomes-section]').textContent()).includes('Claimed, awaiting'), 'outcomes: a compact line, no large claimed/shared cards')
+  ok((await m.locator('[data-testid=analytics-notes]').evaluate((d) => d.tagName === 'DETAILS' && !d.open)), 'fairness notes available but collapsed')
+  const wide = await m.locator('.wi-people-list').evaluate((e) => e.getBoundingClientRect().width)
+  ok(wide > 1100, `the list uses the available width (${Math.round(wide)}px)`)
+  ok(await m.locator('.wi-row:not(.wi-head)').first().evaluate((e) => getComputedStyle(e).display) === 'grid' && await m.locator('.wi-people-list').evaluate((e) => getComputedStyle(e).listStyleType) === 'none', 'the people list is styled as one row per person (columns), not a bulleted list')
+  await shot(m, 'wi2-desktop-team-empty')
 
-  step = 'metric filter and employee link'
-  const active = Number(await m.locator('[data-testid=stat-open] .value').textContent())
-  await m.click('[data-testid=kpi-blocked]'); await settle(m)
-  ok((await m.locator('[data-testid=filter-chip]').textContent()).includes('Blocked'), 'the metric filters the task table')
-  ok(Number(await m.locator('[data-testid=stat-open] .value').textContent()) === active, 'metrics keep describing the whole team')
-  await m.click('[data-clear]')
-  await m.click('[data-testid=kpi-review]'); await settle(m)
-  ok((await m.locator('[data-testid=analytics-tasks] tbody tr').count()) >= 1, 'work requiring review lists the submitted tasks')
-  await m.click('[data-clear]')
-  await m.locator('[data-testid=contribution-table] a[data-person]', { hasText: 'Priya Sharma' }).click()
-  await m.waitForSelector('[data-testid=person-measure]')
-  ok(await m.locator('[data-testid=tab-person][aria-selected=true]').count() === 1, 'a name opens the Person view')
-  await m.locator('[data-testid=tab-task]').click(); await m.waitForSelector('#af-task'); await m.goBack()
+  step = 'glance filters the people'
+  const all = await m.locator('[data-person-row]:visible').count()
+  await m.click('[data-glance=attention]')
+  const att = await m.locator('[data-person-row]:visible').count()
+  ok(att >= 1 && att < all, `Needs attention shows only the people it applies to (${att} of ${all})`)
+  await m.click('[data-glance=attention]')
+  ok((await m.locator('[data-person-row]:visible').count()) === all, 'a second click shows everyone again')
 
-  step = 'analysed work appears in the assessment table'
+  step = 'names open the contribution profile; tasks open the task'
+  await m.locator('.wi-pname', { hasText: 'Priya Sharma' }).click()
+  await m.waitForSelector('h1:has-text("Priya Sharma")'); await m.waitForSelector('.dim-card, #p-work')
+  ok(m.url().includes('#/contribution/') && (await m.locator('.crumbs a').first().textContent()) === 'Work Intelligence', 'profile opened, with the way back to Work Intelligence')
+  ok(await m.locator('#nav a[data-key="analytics"][aria-current="page"]').count() === 1, 'the sidebar keeps Work Analytics highlighted')
+  await m.click('.crumbs a'); await m.waitForSelector('[data-testid=people-list]')
+  await m.locator('[data-person-row]', { hasText: 'Neha Rao' }).locator('.wi-ttl').first().click()
+  await m.waitForSelector('.task-head h1')
+  await m.goBack(); await m.waitForSelector('[data-testid=people-list]')
+  await m.locator('[data-person-row]', { hasText: 'Priya Sharma' }).locator('a.wi-profile-link').click()
+  await m.waitForSelector('h1:has-text("Priya Sharma")')
+
+  step = 'analysed work shows as a short status here, the detail in the profile'
   const rich = (await api(mctx, '/api/tasks', 'POST', { title: 'Fix the checkout reservation race', description: 'Checkout fails for some users with no clear error. Needs investigation across multiple services (cart, payments, inventory).', assigneeId: priyaId, priority: 'HIGH' })).body.task
   await api(ectx, `/api/tasks/${rich.id}/status`, 'POST', { status: 'IN_PROGRESS' })
   await api(ectx, `/api/evidence/task/${rich.id}/links`, 'POST', { url: 'https://github.com/acme/shop/pull/481', label: 'PR 481: idempotent reservation token' })
   await api(ectx, `/api/tasks/${rich.id}/submit`, 'POST', { summary: 'Investigated logs across cart, payments and inventory and found the root cause: a race condition between reservation and payment capture. Added an idempotent reservation token and a regression test.', outcome: 'Checkout failures stopped in staging.' })
   for (let i = 0; i < 40; i++) { if ((await api(mctx, '/api/contribution/team')).body.people.some((p) => p.analysed > 0)) break; await m.waitForTimeout(500) }
-  await m.goto(`${base}/#/analytics`); await m.waitForSelector('[data-testid=performance-table]')
-  const row = m.locator('[data-testid=performance-table] tbody tr', { hasText: 'Priya Sharma' })
-  const rowText = await row.textContent()
-  ok(rowText.includes('L4') && rowText.includes('Includes simulated'), 'complexity shown, simulated analysis labelled')
-  ok(rowText.includes('Not enough evidence'), 'dimensions without evidence say so instead of showing a value')
-  ok(!(await row.textContent()).match(/\bscore\b/i), 'no score')
-  ok(Number(await m.locator('[data-testid=stat-review] .value').textContent()) >= 1, 'the submitted task counts as work requiring review')
-  await shot(m, 'wi-desktop-team')
-  await row.locator('a', { hasText: 'Why these levels' }).click(); await m.waitForSelector('[data-testid=person-measure]')
+  await m.goto(`${base}/#/analytics`); await m.waitForSelector('[data-testid=people-list] [data-person-row]')
+  await m.waitForFunction(() => [...document.querySelectorAll('[data-assess]')].every((e) => !e.textContent.startsWith('Reading')))
+  const row = m.locator('[data-person-row]', { hasText: 'Priya Sharma' })
+  const rt = await row.textContent()
+  ok(rt.includes('L4') && rt.includes('to review'), 'complexity level and the number waiting for the manager’s review')
+  ok(!/Ownership|Problem-solving|Quality|Collaboration|Impact/.test(rt), 'the dimensions are not repeated on the Team tab')
+  ok(!rt.match(/\bscore\b/i), 'no score')
+  await shot(m, 'wi2-desktop-team')
 
   step = 'person and task views still work'
   await m.goto(`${base}/#/analytics?tab=task&taskId=${rich.id}`); await m.waitForSelector('[data-testid=task-original]')
@@ -106,13 +123,13 @@ try {
   await e.goto(`${base}/#/analytics`); await e.waitForSelector('[data-testid=analytics-summary]')
   ok(await e.locator('[data-testid=tab-team]').count() === 0, 'employees have no team tab')
   ok((await api(ectx, '/api/analytics/team')).status === 403 && (await api(ectx, '/api/contribution/team')).status === 403, 'team data is refused for employees by the server')
-  ok((await e.locator('.wi-card h2').allTextContents()).every((t) => !/Who is doing what/.test(t)), 'no team table for employees')
+  ok(await e.locator('[data-testid=people-list]').count() === 0, 'no team people list for employees')
 
   step = 'phone layout'
   const { page: p } = await session('manager@demo.teampulse', { viewport: { width: 390, height: 844 }, mobile: true })
-  await p.goto(`${base}/#/analytics`); await p.waitForSelector('[data-testid=performance-table]'); await settle(p)
+  await p.goto(`${base}/#/analytics`); await p.waitForSelector('[data-testid=people-list] [data-person-row]'); await settle(p)
   ok(await overflow(p) <= 1, `phone: no page overflow (${await overflow(p)}px)`)
-  ok(await p.locator('.wi-kpis.four .wi-kpi').count() === 4, 'phone: four metrics')
+  ok(await p.locator('.wi-g').count() === 3 && await p.locator('.wi-row.wi-head').evaluate((e) => getComputedStyle(e).display) === 'none', 'phone: three metrics and stacked employee cards')
   await shot(p, 'wi-mobile-team')
   await p.goto(`${base}/#/analytics?tab=person&userId=${priyaId}`); await p.waitForSelector('[data-testid=person-measure]'); await settle(p)
   ok(await overflow(p) <= 1, 'phone: person view fits')
