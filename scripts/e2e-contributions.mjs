@@ -86,11 +86,13 @@ try {
   ok(!(await row.textContent()).includes('Verified'), 'profile: a claim is not shown as verified')
   ok((await m.locator('.sec-h').textContent()) === 'Assessment', 'the profile reads contributions, then assessment')
   await shot(m, 'cr-manager-profile')
-  await m.goto(`${base}/#/analytics`); await m.waitForSelector('[data-testid=people-list] [data-person-row]')
+  await m.goto(`${base}/#/contribution`); await m.waitForSelector('[data-testid=people-list] [data-person-row]')
   await m.waitForFunction(() => document.querySelector('.wi-contrib'))
   const wi = await m.locator('[data-person-row]', { hasText: 'Priya Sharma' }).textContent()
-  ok(wi.includes('Stopped the double-charge race') && wi.includes('Supported') && wi.includes('awaiting your review'), 'Work Intelligence: the contribution, its stage and that it awaits review')
-  ok(!(await m.locator('[data-testid=outcomes-section]').textContent()).includes('Stopped the double-charge race'), 'Team outcomes lists verified outcomes only')
+  ok(wi.includes('Stopped the double-charge race') && wi.includes('Supported') && wi.includes('awaiting your review'), 'People: the contribution, its stage and that it awaits review')
+  await m.goto(`${base}/#/analytics`); await m.waitForSelector('[data-testid=outcomes-section]')
+  ok(!(await m.locator('[data-testid=outcomes-section]').textContent()).includes('Stopped the double-charge race'), 'Work Intelligence lists verified outcomes only')
+  await m.goto(`${base}/#/contribution`); await m.waitForSelector('[data-testid=people-list] [data-person-row]'); await m.waitForFunction(() => document.querySelector('.wi-contrib'))
   await shot(m, 'cr-manager-team')
 
   step = 'manager reviews: not verified, with a reason; the employee corrects it'

@@ -231,8 +231,30 @@ export async function renderContribution(main, q) {
       if (!ppl.isConnected) return
       ppl.innerHTML = peopleList(d, { from: null, contributions: true }).toString()
       fillAssessments(ppl, d, { analysis: false }) // People is operational: complexity and dimensions are Work Intelligence
+      bindPeopleFilter(ppl)
     }).catch((e) => { ppl.innerHTML = html`<p class="muted">Could not load the team’s work: ${errorText(e)}</p>`.toString() })
   }
+}
+
+// People filter: show only the people with work in progress, completed work, or work that needs attention. Counts are people, never scores.
+function bindPeopleFilter(body) {
+  const rows = [...body.querySelectorAll('[data-person-row]')]
+  if (!rows.length) return
+  const defs = [['progress', 'In progress', 'People with a task whose status is In progress.'], ['completed', 'Completed', 'People who have completed work in this period.'], ['attention', 'Needs attention', 'People with work that is overdue, blocked, or waiting for a review or decision. Blocked work is not a fault of its owner.']]
+  const has = (r, k) => (r.dataset.flags || '').split(' ').includes(k)
+  const bar = document.createElement('div')
+  bar.className = 'wi-glance'; bar.setAttribute('role', 'group'); bar.setAttribute('data-testid', 'people-glance'); bar.setAttribute('aria-label', 'Filter people. Select one to show only the people it applies to; select it again to show everyone.')
+  bar.innerHTML = defs.map(([k, l, tip]) => { const c = rows.filter((r) => has(r, k)).length; return `<button type="button" class="wi-g ${k === 'attention' && c ? 'warn' : ''}" data-glance="${k}" title="${tip}" aria-pressed="false"><b class="value">${c}</b> <span>${l}</span></button>` }).join('')
+  body.prepend(bar)
+  const btns = [...bar.querySelectorAll('[data-glance]')]
+  const empty = body.querySelector('.wi-empty-filter')
+  btns.forEach((b) => b.addEventListener('click', () => {
+    const on = b.getAttribute('aria-pressed') !== 'true'
+    btns.forEach((x) => x.setAttribute('aria-pressed', String(x === b && on)))
+    let shown = 0
+    for (const r of rows) { const show = !on || has(r, b.dataset.glance); r.hidden = !show; if (show) shown++ }
+    if (empty) empty.hidden = shown > 0
+  }))
 }
 
 export async function renderPerson(main, userId, q) {

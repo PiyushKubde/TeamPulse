@@ -165,7 +165,7 @@ try {
   await manager.selectOption('[data-testid=af-priority]', 'HIGH')
   await manager.click('[data-testid=af-apply]')
   await manager.waitForFunction((t) => Number(document.querySelector('[data-testid=analytics-summary]')?.dataset.tasks) < t, total)
-  check(await manager.locator('[data-testid=people-list] [data-person-row]').count() >= 1, 'the filtered people list is empty')
+  check(await manager.locator('[data-testid=wi-patterns]').count() === 1 && await manager.locator('[data-testid=people-list]').count() === 0, 'the filtered team view should show the analysis and not repeat the people list')
   check(!(await manager.textContent('[data-testid=analytics-body]')).match(/leaderboard|top performer|score:/i), 'the analytics page shows a ranking or score')
   step = 'analytics task view'
   await go(manager, `#/analytics?tab=task&taskId=${taskA}`)

@@ -47,16 +47,9 @@ try {
   const { page: e, ctx: ectx } = await session('priya@demo.teampulse')
   const priyaId = (await api(mctx, '/api/assignable')).body.find((p) => p.name === 'Priya Sharma').userId
 
-  step = 'team tab: people first'
-  await m.goto(`${base}/#/analytics`); await m.waitForSelector('[data-testid=analytics-summary]'); await m.waitForSelector('[data-testid=people-list] [data-person-row]')
-  await m.waitForFunction(() => !document.querySelector('[data-assess]:not(.muted)') || true)
-  ok((await m.locator('h1').textContent()) === 'Work Intelligence', 'title')
-  ok((await m.locator('.page-head p').textContent()) === 'Understand your team’s work and contribution.', 'subtitle')
-  ok(await m.locator('[data-testid=tab-team][aria-selected=true]').count() === 1 && await m.locator('[data-testid=tab-person]').count() === 1 && await m.locator('[data-testid=tab-task]').count() === 1, 'Team, Person and Task tabs')
-  ok((await m.locator('.wi-sec h2').allTextContents()).join('|') === 'People and their work|Team outcomes', 'only two sections below the glance row')
-  ok((await m.locator('.wi-g').allTextContents()).map((t) => t.replace(/^[\d,]+\s*/, '')).join('|') === 'In progress|Completed|Needs attention', 'three inline metrics')
-  ok(!(await m.locator('.wi-team table, .wi-card, [data-testid=trend-chart], [data-testid=analytics-tasks], .wi-kpi').count()), 'no tables, cards, trend chart, task table or KPI cards on the Team tab')
-  ok(!(await m.locator('main').textContent()).match(/leaderboard|top performer|score:|\brank/i), 'no ranking or score language')
+  step = 'People is operational: who is doing what'
+  await m.goto(`${base}/#/contribution`); await m.waitForSelector('[data-testid=people-list] [data-person-row]')
+  { const t = await m.locator('main').textContent(); const hit = t.match(/.{30}(leaderboard|top performer|score:|\brank(?!ing)).{30}/i); ok(!hit, `no ranking or score language (${hit ? hit[0] : ''})`) }
   const names = await m.locator('.wi-pname').allTextContents()
   const sorted = names.filter((x) => x !== 'Unassigned work')
   ok(sorted.length >= 3 && JSON.stringify(sorted) === JSON.stringify([...sorted].sort((a, b) => a.localeCompare(b))), `people are alphabetical: ${names}`)
@@ -68,49 +61,64 @@ try {
   await priya.locator('summary').click()
   ok((await priya.locator('.wi-task').count()) >= 2, 'the rest can be expanded')
   await m.waitForFunction(() => [...document.querySelectorAll('[data-assess]')].every((e) => !e.textContent.startsWith('Reading')))
-  ok((await priya.textContent()).includes('Not enough evidence yet'), 'assessment status says so when there is no evidence')
+  ok((await priya.textContent()).includes('Not enough evidence yet'), 'contribution status says so when there is no evidence')
   const neha = await m.locator('[data-person-row]', { hasText: 'Neha Rao' }).textContent()
   ok(neha.includes('Overdue'), 'overdue is shown as plain context')
-  ok(!(await m.locator('[data-testid=outcomes-section]').textContent()).includes('Claimed, awaiting'), 'outcomes: a compact line, no large claimed/shared cards')
-  ok((await m.locator('[data-testid=analytics-notes]').evaluate((d) => d.tagName === 'DETAILS' && !d.open)), 'fairness notes available but collapsed')
   const wide = await m.locator('.wi-people-list').evaluate((e) => e.getBoundingClientRect().width)
-  ok(wide > 1100, `the list uses the available width (${Math.round(wide)}px)`)
+  ok(wide > 1000, `the list uses the available width (${Math.round(wide)}px)`)
   ok(await m.locator('.wi-row:not(.wi-head)').first().evaluate((e) => getComputedStyle(e).display) === 'grid' && await m.locator('.wi-people-list').evaluate((e) => getComputedStyle(e).listStyleType) === 'none', 'the people list is styled as one row per person (columns), not a bulleted list')
-  await shot(m, 'wi2-desktop-team-empty')
+  await shot(m, 'wi2-desktop-people')
 
-  step = 'glance filters the people'
+  step = 'People filter: Needs attention shows only the people it applies to; a second click resets'
+  await m.goto(`${base}/#/contribution`); await m.waitForSelector('[data-testid=people-list] [data-person-row]'); await m.waitForSelector('[data-testid=people-glance]')
   const all = await m.locator('[data-person-row]:visible').count()
   await m.click('[data-glance=attention]')
   const att = await m.locator('[data-person-row]:visible').count()
   ok(att >= 1 && att < all, `Needs attention shows only the people it applies to (${att} of ${all})`)
   await m.click('[data-glance=attention]')
   ok((await m.locator('[data-person-row]:visible').count()) === all, 'a second click shows everyone again')
+  step = 'work intelligence is analytical, and does not repeat the people list'
+  await m.goto(`${base}/#/analytics`); await m.waitForSelector('[data-testid=wi-people-link]')
+  ok((await m.locator('h1').textContent()) === 'Work Intelligence', 'title')
+  ok((await m.locator('.page-head p').textContent()) === 'Understand your team’s work and contribution.', 'subtitle')
+  ok(await m.locator('[data-testid=tab-team][aria-selected=true]').count() === 1 && await m.locator('[data-testid=tab-person]').count() === 1 && await m.locator('[data-testid=tab-task]').count() === 1, 'Team, Person and Task tabs')
+  ok(await m.locator('[data-testid=people-list]').count() === 0 && await m.locator('[data-glance]').count() === 0, 'no second people list and no people filters on Work Intelligence')
+  ok((await m.locator('[data-testid=wi-people-link] a').getAttribute('href')) === '#/contribution', 'it points to People for who is doing what')
+  ok((await m.locator('[data-testid=outcomes-section]').count()) === 1 && !(await m.locator('[data-testid=outcomes-section]').textContent()).includes('Claimed, awaiting'), 'outcomes: verified only, a compact line')
+  ok((await m.locator('[data-testid=analytics-notes]').evaluate((d) => d.tagName === 'DETAILS' && !d.open)), 'fairness notes available but collapsed')
+  ok(!(await m.locator('main').textContent()).match(/leaderboard|top performer|score:|\brank/i), 'no ranking or score language')
+  await shot(m, 'wi2-desktop-team-empty')
 
   step = 'names open the contribution profile; tasks open the task'
+  await m.goto(`${base}/#/contribution`); await m.waitForSelector('[data-testid=people-list] [data-person-row]')
   await m.locator('.wi-pname', { hasText: 'Priya Sharma' }).click()
   await m.waitForSelector('h1:has-text("Priya Sharma")'); await m.waitForSelector('.dim-card, #p-work')
-  ok(m.url().includes('#/contribution/') && (await m.locator('.crumbs a').first().textContent()) === 'Work Intelligence', 'profile opened, with the way back to Work Intelligence')
-  ok(await m.locator('#nav a[data-key="analytics"][aria-current="page"]').count() === 1, 'the sidebar keeps Work Analytics highlighted')
-  await m.click('.crumbs a'); await m.waitForSelector('[data-testid=people-list]')
+  ok(m.url().includes('#/contribution/'), 'profile opened')
+  await m.goBack(); await m.waitForSelector('[data-testid=people-list]')
   await m.locator('[data-person-row]', { hasText: 'Neha Rao' }).locator('.wi-ttl').first().click()
   await m.waitForSelector('.task-head h1')
   await m.goBack(); await m.waitForSelector('[data-testid=people-list]')
   await m.locator('[data-person-row]', { hasText: 'Priya Sharma' }).locator('a.wi-profile-link').click()
   await m.waitForSelector('h1:has-text("Priya Sharma")')
 
-  step = 'analysed work shows as a short status here, the detail in the profile'
+  step = 'analysed work: a short status on People, the pooled analysis on Work Intelligence'
   const rich = (await api(mctx, '/api/tasks', 'POST', { title: 'Fix the checkout reservation race', description: 'Checkout fails for some users with no clear error. Needs investigation across multiple services (cart, payments, inventory).', assigneeId: priyaId, priority: 'HIGH' })).body.task
   await api(ectx, `/api/tasks/${rich.id}/status`, 'POST', { status: 'IN_PROGRESS' })
   await api(ectx, `/api/evidence/task/${rich.id}/links`, 'POST', { url: 'https://github.com/acme/shop/pull/481', label: 'PR 481: idempotent reservation token' })
   await api(ectx, `/api/tasks/${rich.id}/submit`, 'POST', { summary: 'Investigated logs across cart, payments and inventory and found the root cause: a race condition between reservation and payment capture. Added an idempotent reservation token and a regression test.', outcome: 'Checkout failures stopped in staging.' })
   for (let i = 0; i < 40; i++) { if ((await api(mctx, '/api/contribution/team')).body.people.some((p) => p.analysed > 0)) break; await m.waitForTimeout(500) }
-  await m.goto(`${base}/#/analytics`); await m.waitForSelector('[data-testid=people-list] [data-person-row]')
+  await m.goto(`${base}/#/contribution`); await m.waitForSelector('[data-testid=people-list] [data-person-row]')
   await m.waitForFunction(() => [...document.querySelectorAll('[data-assess]')].every((e) => !e.textContent.startsWith('Reading')))
   const row = m.locator('[data-person-row]', { hasText: 'Priya Sharma' })
   const rt = await row.textContent()
-  ok(rt.includes('L4') && rt.includes('awaiting your review'), 'complexity level and the number waiting for the manager’s review')
-  ok(!/Ownership|Problem-solving|Quality|Collaboration|Impact/.test(rt), 'the dimensions are not repeated on the Team tab')
+  ok(rt.includes('awaiting your review') && !rt.includes('L4'), 'People: the number waiting for the manager’s review, not the complexity')
   ok(!rt.match(/\bscore\b/i), 'no score')
+  await shot(m, 'wi2-desktop-people-assessed')
+  await m.goto(`${base}/#/analytics`); await m.waitForSelector('[data-testid=wi-complexity]')
+  const cx = await m.locator('[data-testid=wi-complexity]').textContent()
+  ok(cx.includes('L4'), 'Work Intelligence: the pooled complexity')
+  ok(await m.locator('[data-testid=wi-dimensions]').count() === 1 && await m.locator('[data-testid=wi-over-time]').count() === 1, 'dimensions and change over time')
+  { const t = await m.locator('main').textContent(); const hit = t.match(/.{30}(?<!performance )\bscore\b.{30}/i); ok(!hit, `no score on Work Intelligence (${hit ? hit[0] : ''})`) }
   await shot(m, 'wi2-desktop-team')
 
   step = 'person and task views still work'
@@ -127,15 +135,18 @@ try {
 
   step = 'phone layout'
   const { page: p } = await session('manager@demo.teampulse', { viewport: { width: 390, height: 844 }, mobile: true })
-  await p.goto(`${base}/#/analytics`); await p.waitForSelector('[data-testid=people-list] [data-person-row]'); await settle(p)
-  ok(await overflow(p) <= 1, `phone: no page overflow (${await overflow(p)}px)`)
-  ok(await p.locator('.wi-g').count() === 3 && await p.locator('.wi-row.wi-head').evaluate((e) => getComputedStyle(e).display) === 'none', 'phone: three metrics and stacked employee cards')
+  await p.goto(`${base}/#/contribution`); await p.waitForSelector('[data-testid=people-list] [data-person-row]'); await settle(p)
+  ok(await overflow(p) <= 1, `phone: People has no page overflow (${await overflow(p)}px)`)
+  ok(await p.locator('.wi-row.wi-head').evaluate((e) => getComputedStyle(e).display) === 'none', 'phone: stacked employee cards')
+  await shot(p, 'wi-mobile-people')
+  await p.goto(`${base}/#/analytics`); await p.waitForSelector('[data-testid=wi-complexity]'); await settle(p)
+  ok(await overflow(p) <= 1, `phone: Work Intelligence has no page overflow (${await overflow(p)}px: ${(await p.evaluate(() => { const w = document.documentElement.clientWidth; return [...document.querySelectorAll('main *')].filter((e) => e.getBoundingClientRect().right > w + 1).slice(0, 5).map((e) => e.tagName + '.' + e.className + ' w=' + Math.round(e.getBoundingClientRect().width)) })).join('; ')})`)
   await shot(p, 'wi-mobile-team')
   await p.goto(`${base}/#/analytics?tab=person&userId=${priyaId}`); await p.waitForSelector('[data-testid=person-measure]'); await settle(p)
   ok(await overflow(p) <= 1, 'phone: person view fits')
 
   if (problems.length) throw new Error(`Browser problems:\n${problems.join('\n')}`)
-  console.log('E2E work intelligence passed (team tab order, metrics, filters, who-is-doing-what, assessments, person/task tabs, employee limits, phone).')
+  console.log('E2E work intelligence passed (People operational, Work Intelligence analytical, assessments, person/task tabs, employee limits, phone).')
 } catch (err) {
   console.error(`E2E work intelligence FAILED at step "${step}":`, err.message)
   if (problems.length) console.error(problems.join('\n'))

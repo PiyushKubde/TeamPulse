@@ -97,7 +97,7 @@ try {
   ok(!(await m.locator('.wb-contrib').count()), 'the strip is not on the Workboard')
   await go(m, '#/workboard?kpi=ATTENTION'); await m.waitForSelector('.wb-col'); ok((await m.locator('.wb-attn-line[aria-pressed="true"]').count()) === 1, 'the overview’s Needs attention link opens the Workboard with that filter')
   await go(m, '#/workboard?kpi=COMPLETED'); await m.waitForSelector('.wb-col'); ok((await m.locator('.wb-metric[data-kpi="COMPLETED"][aria-pressed="true"]').count()) === 1, 'and Completed does too')
-  await go(m, '#/analytics'); ok(await m.locator('[data-testid=people-list]').count() === 1, 'Work Intelligence stays a separate detailed area with its own tabs')
+  await go(m, '#/analytics'); await m.waitForSelector('[data-testid=wi-people-link]'); ok(await m.locator('[data-testid=people-list]').count() === 0 && await m.locator('[data-testid=tab-team]').count() === 1, 'Work Intelligence is a separate analytical area with its own tabs, and does not repeat the people list')
   ok(await m.locator('[data-testid=tab-team]').count() === 1 && await m.locator('[data-testid=tab-person]').count() === 1 && await m.locator('[data-testid=tab-task]').count() === 1, 'Team, Person and Task tabs')
 
   step = 'manager: My workspace menu'

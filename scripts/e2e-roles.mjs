@@ -101,8 +101,12 @@ try {
   await go(m, '#/contribution'); await m.waitForSelector('[data-testid=people-list] [data-person-row]')
   await m.waitForFunction(() => [...document.querySelectorAll('[data-assess]')].every((x) => !x.textContent.startsWith('Reading')))
   const row = await m.locator(`[data-assess="${priyaId}"]`).textContent()
-  ok(row.includes('1 awaiting your review') && row.includes('L4'), `People shows the assessment waiting for review (${row.slice(0, 160)})`)
-  ok(row.includes('without enough evidence'), 'and the work that could not be judged, quietly')
+  ok(row.includes('1 awaiting your review'), `People shows what is waiting for review (${row.slice(0, 160)})`)
+  ok(!row.includes('L4') && !row.includes('without enough evidence'), 'People is operational: complexity and evidence quality are on Work Intelligence')
+  await go(m, '#/analytics'); await m.waitForSelector('[data-testid=wi-complexity]')
+  ok((await m.locator('[data-testid=wi-complexity]').textContent()).includes('L4') && (await m.locator('[data-testid=wi-complexity]').textContent()).includes('could not be judged'), 'Work Intelligence shows the pooled complexity and the work that could not be judged, quietly')
+  ok(await m.locator('[data-testid=people-list]').count() === 0 && await m.locator('[data-testid=wi-over-time]').count() === 1 && await m.locator('[data-testid=wi-dimensions]').count() === 1, 'and does not repeat the people list')
+  await go(m, '#/contribution'); await m.waitForSelector('[data-testid=people-list] [data-person-row]')
   ok((await m.locator('[data-person-row]', { hasText: 'Priya Sharma' }).textContent()).includes('Cut checkout API p95 latency'), 'in the same row as what they are working on')
   await shot(m, 'roles-manager-people')
   await go(m, '#/reviews'); await m.waitForSelector('h1:has-text("Assessments to confirm")')
@@ -136,10 +140,22 @@ try {
   await shot(a, 'roles-admin-overview-simulator')
   for (const h of ['#/settings/organization', '#/settings/members', '#/settings/permissions', '#/settings/alerts', '#/settings/audit', '#/automations']) { await go(a, h); ok(!(await a.locator('main .notice.err').count()), `${h} opens for the admin`) }
   await go(a, '#/settings/members'); ok((await a.locator('#nav a[aria-current="page"]').allTextContents()).join('').includes('Users and teams'), 'the admin navigation marks the settings page')
+  // An admin is not a manager: no team workspace, a note that says why, and the server refuses team data.
+  await go(a, '#/admin'); await a.waitForSelector('[data-testid=ai-status]')
+  ok(await a.locator('[data-testid=ad-not-manager]').count() === 1, 'the admin overview explains that an admin is not a team manager')
+  await a.click('#profile-btn'); ok(await a.locator('#profile-menu [data-mode="manager"]').count() === 0, 'no switch to the team workspace without a team to manage'); await a.keyboard.press('Escape')
+  for (const path of ['/api/contribution/team', '/api/analytics/team', '/api/reports/workload', '/api/assessments/backlog']) ok((await api(actx, path)).status === 403, `the server refuses ${path} to an admin who manages no team`)
+  // Acting as a manager needs an explicit, authorized assignment: the admin is made the manager of a team in Users and teams.
+  const adminId = (await api(actx, '/api/session')).body.user.id
+  const team = (await api(actx, '/api/teams')).body.find((t) => t.managerId)
+  await api(actx, `/api/teams/${team.id}`, 'PATCH', { managerId: adminId })
+  await a.reload(); await a.waitForSelector('h1:has-text("Admin overview")')
   await a.click('#profile-btn'); await a.click('#profile-menu [data-mode="manager"]'); await a.waitForSelector('h1:has-text("Team Overview")')
-  ok((await topNames(a)).join('|') === 'Team Overview|Workboard|People|Reviews|Work Intelligence', 'the admin can switch to the team workspace')
+  ok((await topNames(a)).join('|') === 'Team Overview|Workboard|People|Reviews|Work Intelligence', 'once assigned to manage a team, the admin can switch to the team workspace')
+  ok((await api(actx, '/api/contribution/team')).status === 200, 'and the server now allows that team’s data')
   await a.click('#profile-btn'); await a.click('#profile-menu [data-mode="admin"]'); await a.waitForSelector('h1:has-text("Admin overview")')
   ok(true, 'and back')
+  await api(actx, `/api/teams/${team.id}`, 'PATCH', { managerId: team.managerId }) // restore the original manager
   const sys = await api(actx, '/api/admin/system')
   ok(sys.status === 200 && !JSON.stringify(sys.body).match(/secret|apikey|token/i), 'the system view holds no secret')
   A.stop()

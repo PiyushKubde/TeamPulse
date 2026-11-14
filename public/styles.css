@@ -1245,3 +1245,7 @@ a.ov-ttl:hover { text-decoration: underline; }
 .wi-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm, 13px) }
 .wi-table th, .wi-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border) }
 .wi-table tr[aria-current="true"] { background: var(--brand-soft, rgba(99,102,241,.1)) }
+.wi-sec .table-wrap { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch }
+.wi-team, .wi-sec, .wi-dim { min-width: 0 }
+@media (max-width: 640px) { .wi-table th, .wi-table td { padding: 6px 8px; font-size: 12px } .wi-table { min-width: 460px } }
+.wi-team { grid-template-columns: minmax(0, 1fr) }

@@ -250,6 +250,7 @@ function teamView(main, d) {
   const s = d.summary
   if (!s.tasks) return html`<div data-testid="analytics-empty">${empty('No tasks match these filters', 'Nothing was created, worked on or completed in this period for the people you manage. Try a longer date range or reset the filters.', html`<a class="btn small ghost" href="#/analytics">Reset filters</a>`, 'trending')}</div>`
   return html`<div class="wi-team">
+    <p class="small muted wi-caption" data-testid="analytics-summary" data-tasks="${s.tasks}"><b>${n(s.tasks)}</b> task${s.tasks === 1 ? '' : 's'} in this period · ${n(s.completed)} completed · ${n(s.byStatus.IN_PROGRESS || 0)} in progress</p>
     <p class="small muted wi-caption" data-testid="wi-people-link">Who is doing what, current tasks and progress, what is blocked and what awaits review are on <a href="#/contribution">People</a>. This page is about what the work involved and what the evidence says.</p>
     <div id="wi-patterns" data-testid="wi-patterns"><div class="loading">Reading the assessments…</div></div>
     <section class="wi-sec" aria-labelledby="wi-out"><h2 id="wi-out">What the evidence says: verified outcomes</h2>${teamOutcomes(d.outcomeList)}</section></div>`
