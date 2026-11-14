@@ -6,6 +6,7 @@ import { isAdmin, isManager, requireManager, requireVisibleTask, scopeUserIds } 
 import * as v from '../validate.js'
 import { listEvidence, setImpactVisibility } from './evidence.js'
 import { notifyInApp } from './notify.js'
+import { audit } from './audit.js'
 import { emit } from './events.js'
 
 export const CATEGORY_LABELS = {
@@ -22,9 +23,9 @@ function readFields(db, ctx, body, current = {}) {
     title: v.text(pick('title'), 'Title', { required: true, max: 200 }),
     category: v.oneOf(pick('category'), 'Impact category', v.IMPACT_CATEGORIES, { required: true }),
     outcome_type: v.oneOf(pick('outcomeType'), 'Outcome type', v.OUTCOME_TYPES, { fallback: 'DELIVERED' }),
-    previous_state: v.text(pick('previousState'), 'Problem or previous state', { required: true, max: 4000 }),
-    work_performed: v.text(pick('workPerformed'), 'Work performed', { required: true, max: 4000 }),
-    result: v.text(pick('result'), 'Result or new state', { required: true, max: 4000 }),
+    previous_state: v.text(pick('previousState'), 'Problem or opportunity', { max: 4000 }) ?? '',
+    work_performed: v.text(pick('workPerformed'), 'What was done', { max: 4000 }) ?? '',
+    result: v.text(pick('result'), 'What changed', { max: 4000 }) ?? '',
     value_type: v.oneOf(pick('valueType'), 'Value type', v.VALUE_TYPES, { fallback: 'NONE' }),
     measurable_value: v.number(pick('measurableValue'), 'Measurable value'),
     measurement_unit: v.text(pick('measurementUnit'), 'Measurement unit', { max: 40 }),
@@ -49,9 +50,22 @@ function readFields(db, ctx, body, current = {}) {
   return f
 }
 
+/**
+ * Where a contribution stands, derived from existing records only (nothing is promoted automatically):
+ *  CLAIMED   the contributor described it; nothing is attached
+ *  SUPPORTED evidence (a link or file) is attached; no manager has judged it yet
+ *  REVIEWED  a manager reviewed it and did not verify it (the reason is on the record); the contributor can correct and resubmit
+ *  VERIFIED  a manager confirmed the result
+ */
+export function contributionStage(status, evidenceCount) {
+  return status === 'VERIFIED' ? 'VERIFIED' : status === 'REJECTED' ? 'REVIEWED' : evidenceCount > 0 ? 'SUPPORTED' : 'CLAIMED'
+}
+
 export function presentImpact(db, r, { withEvidence = false } = {}) {
   const u = (id) => (id ? db.prepare('SELECT name FROM users WHERE id = ?').get(id)?.name ?? null : null)
+  const evidenceCount = db.prepare(`SELECT COUNT(*) AS n FROM evidence WHERE owner_type = 'impact' AND owner_id = ?`).get(r.id).n
   return {
+    stage: contributionStage(r.verification_status, evidenceCount), evidenceCount,
     id: r.id, userId: r.user_id, userName: u(r.user_id), taskId: r.task_id,
     taskTitle: r.task_id ? db.prepare('SELECT title FROM tasks WHERE id = ?').get(r.task_id)?.title ?? null : null,
     title: r.title, category: r.category, categoryLabel: CATEGORY_LABELS[r.category], outcomeType: r.outcome_type,
@@ -77,13 +91,21 @@ export function createImpact(db, ctx, body) {
     if (t.assignee_id !== ctx.user.id && t.created_by !== ctx.user.id && !isManager(ctx)) throw forbidden('You can link impact only to your own tasks.')
   }
   const links = v.links(body?.evidenceLinks, 'Evidence links')
+  if (!f.previous_state && !f.work_performed && !f.result && !links.length) throw invalid('Add at least what you did, the problem or what changed, or a link to evidence. A short record is fine.')
+  // An existing record of the same work is edited or extended, not repeated: the same person, the same title, within the last 90 days.
+  const same = db.prepare(`SELECT id FROM impact_records WHERE org_id = ? AND user_id = ? AND lower(trim(title)) = lower(?) AND created_at >= ?`).get(ctx.orgId, ctx.user.id, f.title.toLowerCase(), new Date(Date.now() - 90 * 86400000).toISOString())
+  if (same) throw conflict(`You already recorded a contribution called “${f.title}”. Edit it or add evidence to it instead of recording it again.`, 'duplicate_contribution')
+  // The day the work happened (optional). Never in the future, and not older than a year; the record is dated by it.
+  const on = v.dateOnly(body?.contributedOn, 'Date of contribution')
+  if (on && (on > new Date().toISOString().slice(0, 10) || Date.parse(on) < Date.now() - 366 * 86400000)) throw invalid('The date of the contribution must be within the last year and not in the future.', { field: 'contributedOn' })
   const id = uuid()
-  const ts = now()
+  const ts = on ? `${on}T12:00:00.000Z` : now()
   transaction(db, () => {
     db.prepare(`INSERT INTO impact_records (id, org_id, user_id, task_id, title, category, outcome_type, previous_state, work_performed, result, value_type, measurable_value, measurement_unit,
                 is_reusable, is_quality, shared_outcome_key, contributors, verification_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`)
       .run(id, ctx.orgId, ctx.user.id, taskId, f.title, f.category, f.outcome_type, f.previous_state, f.work_performed, f.result, f.value_type, f.measurable_value, f.measurement_unit,
-        f.is_reusable, f.is_quality, f.shared_outcome_key, JSON.stringify(f.contributors), ts, ts)
+        f.is_reusable, f.is_quality, f.shared_outcome_key, JSON.stringify(f.contributors), ts, now())
+    audit(db, { orgId: ctx.orgId, actorId: ctx.user.id, action: 'impact.recorded', entityType: 'impact', entityId: id, after: { title: f.title, taskId, contributedOn: on, evidenceLinks: links.length } })
     for (const l of links) {
       db.prepare(`INSERT INTO evidence (id, org_id, owner_type, owner_id, task_id, kind, url, label, created_by, created_at) VALUES (?, ?, 'impact', ?, ?, 'link', ?, ?, ?, ?)`).run(uuid(), ctx.orgId, id, taskId, l.url, l.label, ctx.user.id, ts)
     }
@@ -111,6 +133,9 @@ export function updateImpact(db, ctx, id, body) {
     valueType: r.value_type, measurableValue: r.measurable_value, measurementUnit: r.measurement_unit, isReusable: Boolean(r.is_reusable), isQuality: Boolean(r.is_quality),
     sharedOutcomeKey: r.shared_outcome_key, contributors: json(r.contributors, [])
   })
+  if (!f.previous_state && !f.work_performed && !f.result && !db.prepare(`SELECT 1 FROM evidence WHERE owner_type = 'impact' AND owner_id = ?`).get(r.id)) throw invalid('Keep at least what you did, the problem or what changed, or evidence. A short record is fine.')
+  const changed = ['title', 'category', 'outcome_type', 'previous_state', 'work_performed', 'result', 'value_type', 'measurable_value', 'measurement_unit'].filter((k) => r[k] !== f[k])
+  audit(db, { orgId: ctx.orgId, actorId: ctx.user.id, action: 'impact.edited', entityType: 'impact', entityId: r.id, before: Object.fromEntries(changed.map((k) => [k, r[k]])), after: Object.fromEntries(changed.map((k) => [k, f[k]])) })
   // Editing a rejected record re-submits it for verification.
   db.prepare(`UPDATE impact_records SET title = ?, category = ?, outcome_type = ?, previous_state = ?, work_performed = ?, result = ?, value_type = ?, measurable_value = ?, measurement_unit = ?,
               is_reusable = ?, is_quality = ?, shared_outcome_key = ?, contributors = ?, verification_status = 'PENDING', rejection_reason = NULL, updated_at = ? WHERE id = ?`)

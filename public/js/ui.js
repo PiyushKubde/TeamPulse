@@ -244,6 +244,14 @@ export const due = (t) => (t.dueAt ? html`<span class="due ${t.overdue ? 'late' 
 export const progressBar = (p) => html`<div class="progress ${Number(p) >= 100 ? 'ok' : ''}" role="progressbar" aria-valuenow="${p}" aria-valuemin="0" aria-valuemax="100" aria-label="Progress"><span style="width:${Number(p) || 0}%"></span></div>`
 export const REQUEST_LABEL = { PENDING: 'Pending', APPROVED: 'Approved', REJECTED: 'Rejected', CLARIFICATION_REQUESTED: 'Needs clarification', WITHDRAWN: 'Withdrawn' }
 export const requestBadge = (s) => html`<span class="badge ${({ PENDING: 'info', APPROVED: 'ok', REJECTED: 'bad', CLARIFICATION_REQUESTED: 'warn' })[s] || 'outline'}">${REQUEST_LABEL[s] || s}</span>`
+// Where a contribution stands (derived on the server from existing records; a claim is never promoted automatically).
+export const STAGE = {
+  CLAIMED: ['Claimed', 'outline', 'The contributor has described it. Nothing is attached yet.'],
+  SUPPORTED: ['Supported', 'info', 'Evidence is attached. A manager has not reviewed it yet.'],
+  REVIEWED: ['Reviewed', 'warn', 'A manager reviewed it and did not verify it yet. The reason is on the record, and the contributor can correct it.'],
+  VERIFIED: ['Verified', 'ok', 'A manager confirmed the result.']
+}
+export const stageBadge = (r) => html`<span class="badge ${STAGE[r.stage][1]}" title="${STAGE[r.stage][2]}">${STAGE[r.stage][0]}</span>`
 export const verifyBadge = (s) => html`<span class="badge ${({ PENDING: 'info', VERIFIED: 'ok', REJECTED: 'bad' })[s]}">${({ PENDING: 'Pending verification', VERIFIED: 'Verified', REJECTED: 'Not verified' })[s]}</span>`
 /**
  * Provenance label — where a statement comes from. The same visual language everywhere:

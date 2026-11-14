@@ -1222,3 +1222,7 @@ a.wi-pname:hover { text-decoration: underline; }
   .wi-row { grid-template-columns: 1fr; gap: 6px; padding: 16px 0; }
   .wi-row [data-label]::before { content: attr(data-label); display: block; margin-bottom: 2px; color: var(--text-4); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
 }
+.sec-h { margin: 22px 0 0; font-size: var(--fs-md); font-weight: var(--fw-semibold); }
+.wi-contribs { display: grid; gap: 3px; margin-top: 6px; width: 100%; }
+.wi-contrib { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wi-contrib a { color: var(--text-2); font-weight: var(--fw-medium); overflow-wrap: anywhere; }

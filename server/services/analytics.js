@@ -180,8 +180,27 @@ const latest = (a, b) => (!a ? b : !b ? a : a > b ? a : b)
  * The outcomes recorded on a set of tasks, as one list: a shared outcome appears once however many people or tasks record it, and
  * "verified" (a manager confirmed it) stays separate from "claimed" (recorded, not yet verified). Rejected records are left out.
  */
-function outcomeList(db, rows) {
+/**
+ * Contributions recorded without a task (the task is optional) are outcomes too. They have no priority, status or deadline, so they are left out
+ * whenever a task-specific filter is on, and otherwise follow the same date range and the same people the caller may see.
+ */
+function tasklessOutcomes(db, f, userIds) {
+  if (['priority', 'complexity', 'observedComplexity', 'status', 'deadline', 'outcome', 'workType', 'teamId'].some((k) => f[k]) || !userIds.length) return []
+  const ids = f.userId ? userIds.filter((id) => id === f.userId) : userIds
+  if (!ids.length) return []
+  return db.prepare(`SELECT * FROM impact_records WHERE task_id IS NULL AND verification_status != 'REJECTED' AND created_at >= ? AND created_at <= ? AND user_id IN (${ids.map(() => '?').join(',')})`).all(f.from, f.to, ...ids)
+    .map((o) => ({ id: o.id, key: o.shared_outcome_key ? `shared:${o.shared_outcome_key}` : `impact:${o.id}`, title: o.title, category: CATEGORY_LABELS[o.category] || o.category, state: o.verification_status === 'VERIFIED' ? 'VERIFIED' : 'CLAIMED', shared: Boolean(o.shared_outcome_key), userId: o.user_id }))
+}
+
+function outcomeList(db, rows, extra = []) {
   const byKey = new Map()
+  for (const o of extra) {
+    const x = byKey.get(o.key) || { key: o.key, id: o.id, title: o.title, category: o.category, state: o.state, shared: o.shared, taskId: null, taskTitle: null, people: [] }
+    if (o.state === 'VERIFIED') x.state = 'VERIFIED'
+    const n = nameOf(db, o.userId)
+    if (n && !x.people.includes(n)) x.people.push(n)
+    byKey.set(o.key, x)
+  }
   for (const r of rows) {
     for (const o of r.outcomeItems) {
       const x = byKey.get(o.key) || { key: o.key, id: o.id, title: o.title, category: o.category, state: o.state, shared: o.shared, taskId: r.id, taskTitle: r.title, people: [] }
@@ -227,7 +246,7 @@ export function personAnalytics(db, ctx, userId, q = {}) {
   const mine = uid === ctx.user.id
   return {
     view: 'person', filters: f, person: profile.person, period: profile.period, summary: summarise(rows, f), tasks: present(rows), truncated: rows.length > 200,
-    outcomeList: outcomeList(db, rows), attention: attention(rows), lastMeaningfulAt: rows.reduce((m, r) => latest(m, r.lastMeaningfulAt), null),
+    outcomeList: outcomeList(db, rows, tasklessOutcomes(db, f, [uid])), attention: attention(rows), lastMeaningfulAt: rows.reduce((m, r) => latest(m, r.lastMeaningfulAt), null),
     recent: rows.slice().sort((a, b) => String(b.lastMeaningfulAt || b.createdAt).localeCompare(String(a.lastMeaningfulAt || a.createdAt))).slice(0, 8).map((r) => ({ id: r.id, title: r.title, status: r.status, health: r.health, at: r.lastMeaningfulAt || null, createdAt: r.createdAt })),
     measurement: { complexityMix: profile.complexityMix, verifiedOutcomes: profile.verified.length, sharedOutcomes: profile.verified.filter((o) => o.shared).length, narrative: profile.narrative },
     viewingOwn: mine, notes: NOTES
@@ -250,7 +269,7 @@ export function teamAnalytics(db, ctx, q = {}) {
   const byTeam = teams.map((tm) => ({ teamId: tm.id, team: tm.name, rows: rows.filter((r) => r.teamId === tm.id) })).filter((x) => x.rows.length).map((x) => ({ teamId: x.teamId, team: x.team, ...summarise(x.rows, f) }))
   return { view: 'team', filters: f, period: overview.period, summary: summarise(rows, f), teams: byTeam, people: people.sort((a, b) => a.name.localeCompare(b.name)), ordering: 'alphabetical', tasks: present(rows), truncated: rows.length > 200,
     unassigned: (() => { const u = rows.filter((r) => !r.assigneeId); return { ...(({ tasks, open, completed, blocked, byStatus }) => ({ tasks, open, completed, blocked, byStatus }))(summarise(u, f)) } })(),
-    outcomeList: outcomeList(db, rows), attention: attention(rows), notes: NOTES }
+    outcomeList: outcomeList(db, rows, tasklessOutcomes(db, f, people.map((p) => p.userId))), attention: attention(rows), notes: NOTES }
 }
 
 /** A single task: expectations (original and revised), their history, change requests, blockers, outcomes and the journey. Managers of the task only. */

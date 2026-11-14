@@ -3,7 +3,7 @@
 // Fairness is part of the design: people are listed alphabetically and never ranked, bars show the mix of task states and not volume,
 // there is no score or grade, a deadline that is only suggested or proposed is never shown as confirmed, and missing data says so
 // ("No activity recorded", "Not enough data") instead of showing a zero.
-import { api, html, raw, errorText, dt, ago, icon, empty, loading, prioBadge, statusBadge, progressBar } from '../ui.js'
+import { api, html, raw, errorText, dt, ago, icon, empty, loading, prioBadge, statusBadge, progressBar, stageBadge } from '../ui.js'
 import { app } from '../app.js'
 
 const PRIORITIES = [['CRITICAL', 'Critical'], ['HIGH', 'High'], ['MEDIUM', 'Medium'], ['LOW', 'Low'], ['UNRESOLVED', 'Not set']]
@@ -192,7 +192,7 @@ function peopleList(d) {
       <div class="wi-c-work" data-label="Current work">${cur.length ? html`${workLine(cur[0], { detail: true })}${cur.length > 1 ? html`<details class="wi-more"><summary>+${cur.length - 1} more task${cur.length > 2 ? 's' : ''}</summary>${cur.slice(1).map((t) => workLine(t))}</details>` : ''}` : html`<span class="muted">No open work</span>`}</div>
       <div class="wi-c-load small" data-label="Workload"><b>${n(r.p.open)}</b> active · <b>${n(r.p.completed)}</b> completed${r.p.blocked ? html` · <b>${n(r.p.blocked)}</b> blocked` : ''}</div>
       <div class="wi-c-act small" data-label="Latest meaningful activity">${r.id ? activity(r.p.lastMeaningfulAt) : html`<span class="muted">—</span>`}</div>
-      <div class="wi-c-assess small" data-label="Contribution assessment">${r.id ? html`<span data-assess="${r.id}" class="muted">Reading the assessments…</span><a class="wi-profile-link" href="${profileHref(r.id)}">View contribution profile ${icon('arrowRight', 'xs')}</a>` : html`<span class="muted">Needs an owner</span>`}</div></li>`
+      <div class="wi-c-assess small" data-label="Contribution assessment">${r.id ? html`<span data-assess="${r.id}" class="muted">Reading the assessments…</span><div class="wi-contribs" data-contribs="${r.id}"></div><a class="wi-profile-link" href="${profileHref(r.id)}">View contribution profile ${icon('arrowRight', 'xs')}</a>` : html`<span class="muted">Needs an owner</span>`}</div></li>`
   }
   return html`<ul class="wi-people-list" data-testid="people-list" aria-label="People and their work, alphabetical">
     <li class="wi-row wi-head" aria-hidden="true"><div>Employee</div><div>Current work</div><div>Workload</div><div>Latest meaningful activity</div><div>Contribution assessment</div></li>${rows.map(li)}</ul>
@@ -217,6 +217,19 @@ async function fillAssessments(host, d) {
       + (x.awaitingYourReview ? html` <span class="badge warn">${x.awaitingYourReview} to review</span>`.toString() : '') + (x.disputes ? html` <span class="badge warn">${x.disputes} disputed</span>`.toString() : '')
   }
   host.querySelectorAll('[data-assess].muted').forEach((el) => { if (el.textContent.startsWith('Reading')) el.textContent = 'Not enough evidence yet' })
+  // Recorded contributions: the latest two per person with where each stands; how many still wait for a manager. A claim is never shown as verified.
+  try {
+    const list = await api(`/api/impact?${q}`)
+    if (!host.isConnected) return
+    const by = new Map()
+    for (const c of list) { if (!by.has(c.userId)) by.set(c.userId, []); by.get(c.userId).push(c) }
+    for (const [uid, items] of by) {
+      const el = host.querySelector(`[data-contribs="${uid}"]`)
+      if (!el) continue
+      const waiting = items.filter((c) => c.stage === 'CLAIMED' || c.stage === 'SUPPORTED').length
+      el.innerHTML = html`${items.slice(0, 2).map((c) => html`<div class="wi-contrib"><a href="#/impact/${c.id}" title="${c.title}">${c.title}</a> ${stageBadge(c)}</div>`)}${waiting ? html`<div class="small muted">${waiting} awaiting your review</div>` : ''}`.toString()
+    }
+  } catch { /* contributions are an extra here; the profile has them */ }
 }
 
 /** Verified outcomes only, briefly; claimed ones are a count, never mixed in. */
@@ -224,7 +237,7 @@ function teamOutcomes(o) {
   if (!o) return html`<p class="muted">Not enough data.</p>`
   const verified = o.items.filter((i) => i.state === 'VERIFIED')
   return html`<div data-testid="outcomes-section"><p class="small muted wi-oc-sum"><b>${n(o.verified)}</b> verified${o.claimed ? html` · ${n(o.claimed)} claimed, awaiting verification` : ''}</p>
-    ${verified.length ? html`<ul class="wi-outcomes">${verified.map((i) => html`<li><div class="wi-attn-main"><a href="#/impact/${i.id}">${i.title}</a><div class="small muted">${i.category}${i.people.length ? ` · ${i.people.join(', ')}` : ''} · <a href="#/tasks/${i.taskId}">Task and evidence</a></div></div><span class="row nowrap">${i.shared ? html`<span class="badge outline" title="Several people recorded this outcome; it counts once.">Shared</span>` : ''}<span class="badge ok">Verified</span></span></li>`)}</ul>` : html`<p class="muted">No verified outcomes yet.</p>`}</div>`
+    ${verified.length ? html`<ul class="wi-outcomes">${verified.map((i) => html`<li><div class="wi-attn-main"><a href="#/impact/${i.id}">${i.title}</a><div class="small muted">${i.category}${i.people.length ? ` · ${i.people.join(', ')}` : ''} · <a href="${i.taskId ? `#/tasks/${i.taskId}` : `#/impact/${i.id}`}">${i.taskId ? 'Task and evidence' : 'Contribution and evidence'}</a></div></div><span class="row nowrap">${i.shared ? html`<span class="badge outline" title="Several people recorded this outcome; it counts once.">Shared</span>` : ''}<span class="badge ok">Verified</span></span></li>`)}</ul>` : html`<p class="muted">No verified outcomes yet.</p>`}</div>`
 }
 
 function teamView(main, d) {

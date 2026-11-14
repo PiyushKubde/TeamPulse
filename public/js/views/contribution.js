@@ -1,7 +1,8 @@
 // AI contribution analysis: the card on a task page, a person's contribution profile, and the team overview.
 // Plain language for employees; the reasons and evidence behind every level for managers. Never a score or a rank.
-import { api, html, raw, modal, bindForm, toast, errorText, ago, d, empty, loading, icon, avatar, prov, statusBadge, due, progressBar, appTile } from '../ui.js'
+import { api, html, raw, modal, bindForm, toast, errorText, ago, d, empty, loading, icon, avatar, prov, statusBadge, due, progressBar, appTile, stageBadge } from '../ui.js'
 import { app } from '../app.js'
+import { openImpactForm } from './impact.js'
 import { renderEvidenceReview } from './evidence.js'
 import { questionBox } from './assistant.js'
 
@@ -249,6 +250,8 @@ export async function renderPerson(main, userId, q) {
       <div class="row" style="margin-top:8px">${mix(p.complexityMix)}${p.reviews.awaitingManager && !me ? html`<span class="badge warn">${p.reviews.awaitingManager} awaiting review</span>` : ''}${p.reviews.awaitingEmployee && me ? html`<span class="badge info">${p.reviews.awaitingEmployee} waiting for your confirmation</span>` : ''}</div></section>
     ${me ? '' : html`<div class="grid two" style="margin-top:16px"><section class="card" id="p-tasks"><div class="card-head"><h2><span class="card-icon">${icon('tasks')}</span>Assigned tasks</h2><a class="btn small subtle" href="#/team-tasks?assigneeId=${userId}">All${icon('arrowRight', 'sm')}</a></div>${loading()}</section>
       <section class="card" id="p-evidence"><div class="card-head"><h2><span class="card-icon teal">${icon('evidence')}</span>Recent evidence</h2></div>${loading()}</section></div>`}
+    <section class="card" id="p-contrib" style="margin-top:16px"><div class="card-head"><div><h2><span class="card-icon brand">${icon('award')}</span>Contributions</h2><p>${me ? 'What you say you contributed: the problem, what changed and where it stands.' : 'What this person says they contributed: the problem, what changed and where each stands.'} A claim is not verified until a manager confirms it.</p></div>${me ? html`<button class="btn small" id="p-record">${icon('plus')}Record a contribution</button>` : ''}</div>${loading()}</section>
+    <h2 class="sec-h">Assessment</h2><p class="small muted" style="margin:2px 0 0">How the work was judged: levels per task, each with its reason and evidence. Nothing is guessed, and levels are never added into a score.</p>
     ${(() => { const all = Object.entries(p.dimensions); const rated = all.filter(([, s]) => s.assessed); const rest = all.filter(([, s]) => !s.assessed); return html`${rated.length ? html`<div class="grid two" style="margin-top:16px">${rated.map(dimCard)}</div>` : ''}${rest.length ? html`<p class="small muted" style="margin:12px 0 0">Not enough evidence to rate yet: ${rest.map(([, x]) => x.label).join(', ')}. Nothing is guessed.</p>` : ''}` })()}
     <div class="grid two" style="margin-top:16px">
       <section class="card"><h2 style="margin-bottom:8px">Verified outcomes</h2>
@@ -274,6 +277,17 @@ export async function renderPerson(main, userId, q) {
     main.querySelector('#p-work .table-wrap').insertAdjacentHTML('afterend', `<button type="button" class="btn small ghost" id="p-work-all" style="margin-top:10px">Show all ${workRows.length} analysed pieces</button>`)
     main.querySelector('#p-work-all').addEventListener('click', (e) => { workRows.forEach((r) => { r.hidden = false }); e.currentTarget.remove() })
   }
+  // Contributions: one story per record (challenge → what changed → evidence → where it stands), newest first.
+  main.querySelector('#p-record')?.addEventListener('click', () => openImpactForm())
+  api(`/api/impact?userId=${userId}&from=${encodeURIComponent(from)}`).then((list) => {
+    const box = main.querySelector('#p-contrib'); if (!box) return
+    box.querySelector('.loading')?.remove()
+    const cut = (t, n = 170) => (t.length > n ? `${t.slice(0, n).trim()}…` : t)
+    box.insertAdjacentHTML('beforeend', list.length ? html`<ul class="mini-list">${list.slice(0, 6).map((c) => html`<li><div class="grow"><a class="ttl" href="#/impact/${c.id}">${c.title}</a> <span class="small muted">· ${d(c.createdAt)}</span>
+        ${c.previousState ? html`<div class="small"><b>Challenge:</b> ${cut(c.previousState)}</div>` : ''}${c.result ? html`<div class="small"><b>What changed:</b> ${cut(c.result)}</div>` : ''}${!c.previousState && !c.result && c.workPerformed ? html`<div class="small"><b>Did:</b> ${cut(c.workPerformed)}</div>` : ''}
+        <div class="row" style="gap:6px;margin-top:6px">${stageBadge(c)}${c.evidenceCount ? html`<span class="badge outline">${c.evidenceCount} evidence</span>` : html`<span class="badge outline" title="Missing evidence is not the same as no contribution">No evidence yet</span>`}${c.contributors.length ? html`<span class="badge outline">With ${c.contributors.map((x) => x.name).join(', ')}</span>` : ''}${c.sharedOutcomeKey ? html`<span class="badge outline" title="A shared outcome counts once for the team">Shared</span>` : ''}${c.taskTitle ? html`<a class="small" href="#/tasks/${c.taskId}">${c.taskTitle}</a>` : ''}</div></div></li>`)}</ul>${list.length > 6 ? html`<p class="small muted" style="margin:10px 0 0">${list.length - 6} more in <a href="#/impact?view=${me ? 'mine' : 'team'}">Outcomes</a>.</p>` : ''}`.toString()
+      : html`<p class="small muted" style="margin:0">Nothing recorded in this period. That does not mean nothing was contributed: the tasks and evidence above are read as well.</p>`.toString())
+  }).catch(() => { main.querySelector('#p-contrib')?.remove() })
   if (!me) {
     api(`/api/tasks?view=team&assigneeId=${userId}`).then((tasks) => {
       const box = main.querySelector('#p-tasks'); if (!box) return
