@@ -1187,3 +1187,12 @@ i.seg { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
 .wb-contrib-empty { margin: 6px 0 0; color: var(--text-3); font-size: var(--fs-sm); }
 .wb:has(.wb-contrib) .wb-board { height: clamp(440px, calc(100dvh - 400px), 960px); }
 a.wb-who:hover span:last-child { text-decoration: underline; }
+.wi-kpis.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.wi-work { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; max-width: 320px; }
+.wi-work a { font-weight: var(--fw-medium); }
+.wi-lv { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.wi-notes summary { cursor: pointer; }
+[data-testid=performance-table] { min-width: 760px; }
+@media (max-width: 1100px) { .wi-kpis.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+[data-testid=contribution-table] td:nth-child(2) { min-width: 230px; }
+[data-testid=performance-table] td:first-child { min-width: 120px; }

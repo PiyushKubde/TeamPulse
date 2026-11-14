@@ -21,7 +21,6 @@ const HEALTH = [
   ['OVERDUE', 'overdue', 'Overdue', 'Open and past its confirmed deadline. Suggested or proposed deadlines are never counted.'],
   ['UNCONFIRMED_DEADLINE', 'unconfirmedDeadline', 'Deadline not confirmed', 'Open with no confirmed deadline, so it cannot be judged against one.']
 ]
-const SEGMENTS = [['completed', 'Completed'], ['inProgress', 'In progress'], ['blocked', 'Blocked'], ['other', 'Other states']]
 const KPIS = [
   ['tasks', 'Total tasks', 'Every task in the selected period and filters that you are allowed to see.', 'all'],
   ['open', 'Active', 'Tasks that are not completed, cancelled or declined.', 'open'],
@@ -30,7 +29,14 @@ const KPIS = [
   ['atrisk', 'At risk', 'Open, not overdue, and little time left for the progress made (the app’s own at-risk rule). Needs a confirmed deadline.', 'warn'],
   ['overdue', 'Overdue', 'Open and past the confirmed deadline. Suggested or proposed deadlines are never counted.', 'bad']
 ]
-const KPI_TEST = { tasks: () => true, open: (r) => r.health !== null, completed: (r) => r.status === 'COMPLETED', blocked: (r) => r.status === 'BLOCKED', atrisk: (r) => r.atRisk, overdue: (r) => r.overdue }
+// The team view opens with four numbers a manager acts on; each one filters the task table below.
+const TEAM_KPIS = [
+  ['open', 'Active work', 'Tasks that are not completed, cancelled or declined.', 'open'],
+  ['completed', 'Completed work', 'Tasks whose status is Completed.', 'ok'],
+  ['blocked', 'Blocked work', 'Tasks whose status is Blocked. A blocker can be outside the owner’s control.', 'warn'],
+  ['review', 'Work requiring review', 'Tasks submitted for review that are waiting for a manager.', 'info']
+]
+const KPI_TEST = { review: (r) => r.status === 'SUBMITTED_FOR_REVIEW', tasks: () => true, open: (r) => r.health !== null, completed: (r) => r.status === 'COMPLETED', blocked: (r) => r.status === 'BLOCKED', atrisk: (r) => r.atRisk, overdue: (r) => r.overdue }
 const GROUP_TEST = { completed: (r) => r.status === 'COMPLETED', inProgress: (r) => r.status === 'IN_PROGRESS', blocked: (r) => r.status === 'BLOCKED', other: (r) => !['COMPLETED', 'IN_PROGRESS', 'BLOCKED'].includes(r.status) }
 const KIND = { OVERDUE: ['bad', 'Overdue'], REVIEW: ['info', 'Awaiting review'], CHANGE_REQUEST: ['info', 'Change request'], BLOCKED: ['warn', 'Blocked'], UNCONFIRMED: ['outline', 'Not confirmed'] }
 const OUTCOME_CHIP = { VERIFIED: ['ok', 'Verified'], CLAIMED: ['outline', 'Claimed, not verified'] }
@@ -84,9 +90,9 @@ const hashFor = (q, over = {}) => {
 }
 
 // ---------- small visual building blocks (SVG / CSS, no chart dependency) ----------
-function kpiRow(s, relabel = {}) {
-  const val = { tasks: s.tasks, open: s.open, completed: s.completed, blocked: s.blocked, atrisk: s.atRisk, overdue: s.overdue }
-  return html`<div class="wi-kpis" data-testid="analytics-summary" role="group" aria-label="Summary of tasks. Select a card to filter the task table.">${KPIS.map(([id, label, tip, tone]) => html`
+function kpiRow(s, relabel = {}, list = KPIS) {
+  const val = { tasks: s.tasks, open: s.open, completed: s.completed, blocked: s.blocked, atrisk: s.atRisk, overdue: s.overdue, review: s.awaitingReview }
+  return html`<div class="wi-kpis ${list === KPIS ? '' : 'four'}" data-testid="analytics-summary" role="group" aria-label="Summary of tasks. Select a card to filter the task table.">${list.map(([id, label, tip, tone]) => html`
     <div class="stat wi-kpi ${val[id] > 0 && ['warn', 'bad'].includes(tone) ? tone : ''}" data-testid="stat-${id}" data-kpi="${id}">
       <button type="button" class="wi-kpi-btn" data-testid="kpi-${id}" data-kpi-btn="${id}" title="${tip}" aria-pressed="false" aria-label="${relabel[id] || label}: ${val[id]}. ${tip} Select to filter the task table.">
         <span class="label">${relabel[id] || label}</span><span class="value">${n(val[id])}</span>
@@ -94,25 +100,39 @@ function kpiRow(s, relabel = {}) {
     </div>`)}</div>`
 }
 
-function peopleChart(d) {
-  const rows = d.people.map((p) => ({ id: p.userId, name: p.name, total: p.tasks, completed: p.byStatus.COMPLETED || 0, inProgress: p.inProgress, blocked: p.blocked, other: 0 }))
+/** Who is doing what: one row per person, alphabetical, never ranked. Current work comes from the same task rows the table below uses. */
+function whoTable(d) {
+  const open = (r) => r.health !== null
+  const rows = d.people.map((p) => ({ id: p.userId, name: p.name, team: p.team, p, work: d.tasks.filter((r) => r.assigneeId === p.userId && open(r)) }))
   const u = d.unassigned
-  if (u && u.tasks) rows.push({ id: null, name: 'Unassigned', total: u.tasks, completed: u.byStatus.COMPLETED || 0, inProgress: u.byStatus.IN_PROGRESS || 0, blocked: u.blocked, other: 0 })
-  for (const r of rows) r.other = Math.max(0, r.total - r.completed - r.inProgress - r.blocked)
-  const totals = Object.fromEntries(SEGMENTS.map(([k]) => [k, rows.reduce((a, r) => a + r[k], 0)]))
+  if (u?.tasks) rows.push({ id: null, name: 'Unassigned', team: null, p: { open: u.open, completed: u.completed, blocked: u.blocked, verifiedOutcomes: null, lastMeaningfulAt: null }, work: d.tasks.filter((r) => !r.assigneeId && open(r)) })
   if (!rows.length) return html`<p class="muted">Not enough data: nobody has tasks in this period.</p>`
-  return html`<div class="wi-legend" aria-label="Legend">${SEGMENTS.map(([k, l]) => html`<span class="wi-key"><i class="seg seg-${k}"></i>${l} <b>${n(totals[k])}</b></span>`)}</div>
-    <ul class="wi-people" data-testid="people-chart" aria-label="Task states per person, alphabetical">${rows.map((r) => html`<li class="wi-person">
-      ${r.id ? html`<a class="wi-name" href="${personHref(r.id)}" title="Open ${r.name}’s profile" data-person="${r.id}">${r.name}</a>` : html`<span class="wi-name muted">${r.name}</span>`}
-      ${r.total ? html`<div class="wi-bar" role="group" aria-label="${r.name}: ${SEGMENTS.map(([k, l]) => `${r[k]} ${l.toLowerCase()}`).join(', ')}">${SEGMENTS.filter(([k]) => r[k] > 0).map(([k, l]) => html`<button type="button" class="seg seg-${k}" style="flex:${r[k]} 1 0" data-owner="${r.id || 'none'}" data-group="${k}" data-label="${r.name} · ${l}" title="${r.name}: ${r[k]} ${l.toLowerCase()} of ${r.total}" aria-label="${r.name}: ${r[k]} ${l.toLowerCase()} of ${r.total}. Select to filter the task table."><span>${r[k]}</span></button>`)}</div><span class="wi-total small muted">${n(r.total)} task${r.total === 1 ? '' : 's'}</span>` : html`<span class="muted small wi-none">No tasks in this period</span>`}
-    </li>`)}</ul>
-    <p class="small muted wi-caption">Each bar shows how that person’s tasks are spread across states. It does not measure how much or how well anyone works. Task volume is not a performance score.</p>`
+  const current = (w) => (w.length ? html`<ul class="wi-work">${w.slice(0, 2).map((r) => html`<li><a href="#/tasks/${r.id}">${r.title}</a> <span class="small muted">· ${STATUS_TEXT(r.status)}</span></li>`)}${w.length > 2 ? html`<li class="small muted">+${w.length - 2} more</li>` : ''}</ul>` : html`<span class="muted">No open work</span>`)
+  return html`<div class="table-wrap"><table data-testid="contribution-table"><thead><tr><th scope="col">Employee</th><th scope="col">Current work</th><th class="num" scope="col">Active</th><th class="num" scope="col">Completed</th><th class="num" scope="col">Blocked</th><th scope="col">Latest meaningful activity</th><th class="num" scope="col">Verified outcomes</th></tr></thead>
+    <tbody>${rows.map((r) => html`<tr><td>${r.id ? html`<a href="${personHref(r.id)}" title="Open ${r.name}’s contribution profile" data-person="${r.id}">${r.name}</a>` : html`<span class="muted">${r.name}</span>`}${r.team ? html`<div class="small muted">${r.team}</div>` : ''}</td>
+      <td>${current(r.work)}</td><td class="num">${n(r.p.open)}</td><td class="num">${n(r.p.completed)}</td><td class="num">${r.p.blocked ? html`<span class="badge warn">${n(r.p.blocked)}</span>` : 0}</td>
+      <td>${r.id ? activity(r.p.lastMeaningfulAt) : html`<span class="muted">—</span>`}</td><td class="num">${r.p.verifiedOutcomes === null ? html`<span class="muted">—</span>` : n(r.p.verifiedOutcomes)}</td></tr>`)}</tbody></table></div>
+    <p class="small muted wi-caption">Listed alphabetically. Task counts show workload and progress, not how well anyone works: open a name for the evidence and assessments.</p>`
 }
 
-function contributionTable(d) {
-  return html`<div class="table-wrap"><table data-testid="contribution-table"><thead><tr><th scope="col">Employee</th><th class="num" scope="col">Assigned</th><th class="num" scope="col">Active</th><th class="num" scope="col">Completed</th><th class="num" scope="col">Blocked</th><th class="num" scope="col">Verified outcomes</th><th scope="col">Latest meaningful activity</th></tr></thead>
-    <tbody>${d.people.map((p) => html`<tr><td><a href="${personHref(p.userId)}">${p.name}</a>${p.team ? html`<div class="small muted">${p.team}</div>` : ''}</td><td class="num">${n(p.tasks)}</td><td class="num">${n(p.open)}</td><td class="num">${n(p.completed)}</td><td class="num">${n(p.blocked)}</td><td class="num">${n(p.verifiedOutcomes)}</td><td>${activity(p.lastMeaningfulAt)}</td></tr>`)}</tbody></table></div>
-    <p class="small muted wi-caption">Task volume is not a performance score. Review complexity, evidence, ownership and outcomes together. People are listed alphabetically.</p>`
+const DIM_ORDER = ['Ownership', 'Problem-solving', 'Quality', 'Collaboration', 'Impact']
+/** How the work is being performed: the existing assessments, per person. A dimension without enough evidence says so; nothing is filled in. */
+async function performanceSection(host, d) {
+  const q = new URLSearchParams({ from: d.period.from, to: d.period.to })
+  try {
+    const team = await api(`/api/contribution/team?${q}`)
+    const analysed = team.people.filter((x) => x.analysed > 0).slice(0, 12)
+    if (!host.isConnected) return
+    if (!analysed.length) { host.innerHTML = html`<p class="muted" data-testid="performance-empty">No analysed work in this period yet. Work is analysed from its submission and evidence; nothing is estimated in advance.</p>`.toString(); return }
+    const profiles = await Promise.all(analysed.map((x) => api(`/api/contribution/people/${x.userId}?${q}`).catch(() => null)))
+    if (!host.isConnected) return
+    const lv = (s) => (s && s.assessed ? html`<span class="wi-lv">${[5, 4, 3, 2, 1].filter((l) => s.levels[l]).map((l) => html`<span class="badge ${l >= 4 ? 'ok' : l === 3 ? 'info' : 'warn'}">${s.levels[l]}× L${l}</span>`)}</span>` : html`<span class="muted small">Not enough evidence</span>`)
+    const mix = (m) => (['L4', 'L3', 'L2', 'L1'].some((k) => m[k]) ? html`<span class="wi-lv">${['L4', 'L3', 'L2', 'L1'].filter((k) => m[k]).map((k) => html`<span class="badge ${k === 'L4' || k === 'L3' ? 'brand' : 'outline'}">${m[k]}× ${k}</span>`)}</span>` : html`<span class="muted small">Not enough evidence</span>`)
+    host.innerHTML = html`<div class="table-wrap"><table data-testid="performance-table"><thead><tr><th scope="col">Employee</th><th scope="col">Complexity</th>${DIM_ORDER.map((l) => html`<th scope="col">${l}</th>`)}<th scope="col">Reasoning and evidence</th></tr></thead>
+      <tbody>${profiles.map((p, i) => (p ? html`<tr><td><a href="${personHref(analysed[i].userId)}">${analysed[i].name}</a>${p.work.some((w) => w.simulated) ? html`<div><span class="badge warn" title="A development simulation, not an AI analysis">Includes simulated</span></div>` : ''}</td><td>${mix(p.complexityMix)}</td>
+        ${DIM_ORDER.map((l) => html`<td>${lv(Object.values(p.dimensions).find((x) => x.label === l))}</td>`)}<td><a class="small" href="${personHref(analysed[i].userId)}">Why these levels</a></td></tr>` : ''))}</tbody></table></div>
+      <p class="small muted wi-caption">Levels are per task, each with its reason and evidence in the profile. “Not enough evidence” means it was not assessed: nothing is guessed, and levels are never added into a score. Managers make the judgement.</p>`.toString()
+  } catch (e) { host.innerHTML = html`<p class="muted">Could not load the assessments: ${errorText(e)}</p>`.toString() }
 }
 
 function trendChart(trend) {
@@ -124,16 +144,6 @@ function trendChart(trend) {
       <div class="wi-wk small muted">${weekLabel(w.weekStart)}</div></div>`)}</div></div>
     <details class="wi-alt"><summary class="small">Show as a table</summary><div class="table-wrap"><table><thead><tr><th scope="col">Week of</th><th class="num" scope="col">Created</th><th class="num" scope="col">Completed</th></tr></thead><tbody>${trend.map((w) => html`<tr><td>${weekLabel(w.weekStart)}</td><td class="num">${n(w.created)}</td><td class="num">${n(w.completed)}</td></tr>`)}</tbody></table></div></details>
     <p class="small muted wi-caption">Tasks are counted in the week they were created and in the week they were completed. The two are shown side by side for context; they are not a measure of anyone’s contribution.</p>`
-}
-
-function healthChart(s) {
-  const total = HEALTH.reduce((a, [, k]) => a + s.health[k], 0)
-  if (!total) return html`<p class="muted">No open tasks to assess.</p>`
-  let acc = 0
-  const arcs = HEALTH.filter(([, k]) => s.health[k] > 0).map(([id, k]) => { const pct = (s.health[k] / total) * 100; const a = acc; acc += pct; return html`<circle class="hc hc-${id}" cx="21" cy="21" r="15.9155" fill="none" stroke-width="6" stroke-dasharray="${pct} ${100 - pct}" stroke-dashoffset="${25 - a}"></circle>` })
-  return html`<div class="wi-health" data-testid="health-chart">
-    <svg viewBox="0 0 42 42" class="wi-donut" role="img" aria-label="Open tasks by health: ${HEALTH.map(([, k, l]) => `${s.health[k]} ${l.toLowerCase()}`).join(', ')}"><circle cx="21" cy="21" r="15.9155" fill="none" stroke="var(--border)" stroke-width="6"></circle>${arcs}<text x="21" y="21.5" text-anchor="middle" class="wi-donut-n">${total}</text><text x="21" y="27" text-anchor="middle" class="wi-donut-l">open</text></svg>
-    <ul class="wi-health-legend">${HEALTH.map(([id, k, l, tip]) => html`<li><button type="button" class="wi-hbtn" data-health="${id}" data-label="${l}" title="${tip}" aria-label="${l}: ${s.health[k]} of ${total} open tasks. ${tip} Select to filter the task table."><i class="seg hc-${id}"></i><span>${l}</span><b>${n(s.health[k])}</b></button></li>`)}</ul></div>`
 }
 
 function attentionList(a) {
@@ -198,7 +208,7 @@ function bindFilters(main, ctl, { showOwner }) {
   const set = (f) => ctl.setFilter(f)
   main.querySelectorAll('[data-kpi-btn]').forEach((b) => b.addEventListener('click', () => {
     const id = b.dataset.kpiBtn
-    set(id === 'tasks' ? null : { kpi: id, label: KPIS.find(([k]) => k === id)[1], test: KPI_TEST[id] })
+    set(id === 'tasks' ? null : { kpi: id, label: [...KPIS, ...TEAM_KPIS].find(([k]) => k === id)[1], test: KPI_TEST[id] })
   }))
   main.querySelectorAll('[data-health]').forEach((b) => b.addEventListener('click', () => set({ label: b.dataset.label, test: (r) => r.health === b.dataset.health })))
   if (showOwner) {
@@ -214,14 +224,13 @@ const card = (id, title, sub, body, extra = '') => html`<section class="card wi-
 function teamView(main, d) {
   const s = d.summary
   if (!s.tasks) return html`<div data-testid="analytics-empty">${empty('No tasks match these filters', 'Nothing was created, worked on or completed in this period for the people you manage. Try a longer date range or reset the filters.', html`<a class="btn small" href="#/analytics?tab=team" data-testid="filters-reset-empty">Reset filters</a>`, 'trending')}</div>`
-  return html`${kpiRow(s)}
+  return html`${kpiRow(s, {}, TEAM_KPIS)}
     <div class="wi-grid">
-      ${card('people', 'Who is working on what', 'Task states per person, alphabetical. Select a name to open their profile, or a segment to filter the tasks below.', peopleChart(d), 'wi-wide')}
-      ${card('contribution', 'Individual contribution', 'Context for a conversation, not a ranking.', contributionTable(d), 'wi-wide')}
-      ${card('trend', 'Work progress', 'Tasks created and completed each week in the selected period.', trendChart(s.trend))}
-      ${card('health', 'Task health', 'Open tasks by the app’s own definitions.', healthChart(s))}
-      ${card('attention', 'Needs attention', 'What may need a decision from you today.', attentionList(d.attention), 'wi-wide')}
-      ${card('outcomes', 'Outcomes and impact', 'What has actually come out of the work.', outcomesSection(d.outcomeList), 'wi-wide')}
+      ${card('attention', 'What needs my attention?', 'Overdue work, deadline risks, blockers and pending decisions. Each item opens its task.', attentionList(d.attention), 'wi-wide')}
+      ${card('who', 'Who is doing what?', 'Each person’s current work and progress. Select a name to open their contribution profile.', whoTable(d), 'wi-wide')}
+      ${card('performance', 'How is the work being performed?', 'Complexity and the rated dimensions, from the existing evidence-based assessments.', html`<div id="wi-perf" data-testid="performance-section"><div class="loading">Reading the assessments…</div></div>`, 'wi-wide')}
+      ${card('outcomes', 'What outcomes have been achieved?', 'Verified outcomes stay separate from claimed ones.', outcomesSection(d.outcomeList), 'wi-wide')}
+      ${card('trend', 'Work trend', 'Tasks created and completed each week. Context, not a measure of anyone’s contribution.', trendChart(s.trend), 'wi-wide')}
     </div>
     <section class="wi-tasks" data-testid="task-table" data-host="table" aria-label="Tasks"></section>`
 }
@@ -295,7 +304,7 @@ export async function renderAnalytics(main, q) {
   const tabLink = (k, label) => html`<a href="${hashFor(q, { tab: k, taskId: k === 'task' ? q.get('taskId') : null })}" role="tab" data-testid="tab-${k}" class="tab-link" ${tab === k ? raw('aria-selected="true" aria-current="page"') : raw('aria-selected="false"')}>${label}</a>`
   const opt = (v, l, cur) => html`<option value="${v}" ${String(cur) === String(v) ? raw('selected') : ''}>${l}</option>`
 
-  main.innerHTML = html`<header class="page-head"><div><h1>Work Intelligence</h1><p class="muted">Understand team progress, contribution and outcomes.</p></div></header>
+  main.innerHTML = html`<header class="page-head"><div><h1>Work Intelligence</h1><p class="muted">Understand what your team is doing, what they contribute and what outcomes they create.</p></div></header>
     ${manager ? html`<div class="tabs" role="tablist" aria-label="Views">${tabLink('team', 'Team')}${tabLink('person', 'Person')}${tabLink('task', 'Task')}</div>` : ''}
     <form id="af" class="wi-controls" data-testid="analytics-filters" aria-label="Filters"><input type="hidden" name="tab" value="${tab}">
       <div class="wi-bar-row">
@@ -321,7 +330,7 @@ export async function renderAnalytics(main, q) {
         <div class="row"><button class="btn small" type="submit" data-testid="af-apply">Apply filters</button><a class="btn small ghost" href="#/analytics?tab=${tab}${personId && manager ? `&userId=${personId}` : ''}" data-testid="filters-reset">Reset filters</a></div></div>`}
       <p class="small err-text" id="wi-err" role="alert" hidden></p>
     </form>
-    <div class="notice wi-notes" data-testid="analytics-notes" role="note"><b>How to read this</b><ul>${DEFAULT_NOTES.map((x) => html`<li>${x}</li>`)}</ul></div>
+    <details class="notice wi-notes" data-testid="analytics-notes" role="note"><summary><b>How to read this</b> <span class="muted small">fairness and definitions</span></summary><ul>${DEFAULT_NOTES.map((x) => html`<li>${x}</li>`)}</ul></details>
     <div id="an-body" data-testid="analytics-body" aria-live="polite" aria-busy="true">${loading('Reading the latest work data…')}</div>`.toString()
 
   const form = main.querySelector('#af')
@@ -391,6 +400,7 @@ export async function renderAnalytics(main, q) {
       const showOwner = data.view === 'team'
       const ctl = mountTable(host, data.tasks, { showOwner, total: data.summary.tasks, truncated: Boolean(data.truncated) })
       bindFilters(body, ctl, { showOwner })
+      if (data.view === 'team') performanceSection(body.querySelector('#wi-perf'), data)
     }
   }
   await load()
