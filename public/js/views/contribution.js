@@ -189,6 +189,7 @@ export async function renderContribution(main, q) {
   const tab = q.get('tab') === 'review' ? 'review' : 'team'
   main.innerHTML = loading().toString()
   const [t, unverified] = await Promise.all([api(`/api/contribution/intelligence?from=${encodeURIComponent(from)}`), api('/api/impact?view=team&status=PENDING').catch(() => [])])
+  if (!t.people.length && !(app.session?.membership?.managedTeamIds?.length)) { main.innerHTML = html`<div class="page-head"><div><h1>People</h1></div></div><div class="notice" data-testid="no-managed-team"><b>You are not assigned as the manager of any team yet.</b> An admin sets a team's manager in Users and teams; until then you see no team members or their work.</div>`.toString(); return }
   const rv = t.evidenceReview
   const toReview = rv.disputed + rv.unknownAuthor + rv.sharedPending
   const awaiting = t.people.reduce((n, x) => n + x.awaitingYourReview, 0)

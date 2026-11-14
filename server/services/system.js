@@ -21,6 +21,9 @@ export function systemStatus(db, ctx, { cfg, ai, aiMode, vs, m91, mailer }) {
   requireAdmin(ctx)
   const roles = Object.fromEntries(db.prepare(`SELECT role, COUNT(*) AS n FROM memberships WHERE org_id = ? AND status = 'active' GROUP BY role`).all(ctx.orgId).map((r) => [r.role, r.n]))
   const teams = db.prepare('SELECT COUNT(*) AS n FROM teams WHERE org_id = ?').get(ctx.orgId).n
+  const unassigned = db.prepare(`SELECT COUNT(*) AS n FROM memberships WHERE org_id = ? AND status = 'active' AND role = 'employee' AND team_id IS NULL`).get(ctx.orgId).n
+  const deactivated = db.prepare(`SELECT COUNT(*) AS n FROM memberships WHERE org_id = ? AND status != 'active'`).get(ctx.orgId).n
+  const teamsWithoutManager = db.prepare('SELECT COUNT(*) AS n FROM teams WHERE org_id = ? AND manager_id IS NULL').get(ctx.orgId).n
   const policyConfirmed = Boolean(cfg.ai?.viasocketPolicyConfirmed)
   const requested = cfg.ai?.provider || null
   const mode = aiMode.mode
@@ -28,7 +31,7 @@ export function systemStatus(db, ctx, { cfg, ai, aiMode, vs, m91, mailer }) {
   try { const b = lastBackup(db); backup = b ? { at: b.at, offsite: b.offsite, restoreVerified: Boolean(b.restoreVerifiedAt) } : null } catch { backup = null }
   return {
     unassessedSubmitted: backlogCount(db, ctx.orgId), // a count only: the admin runs the organization, the team's manager starts and reads the assessments
-    organization: { name: ctx.orgName, members: { admin: roles.admin || 0, manager: roles.manager || 0, employee: roles.employee || 0 }, teams },
+    organization: { name: ctx.orgName, members: { admin: roles.admin || 0, manager: roles.manager || 0, employee: roles.employee || 0 }, teams, unassigned, deactivated, teamsWithoutManager },
     ai: {
       configured: Boolean(ai.configured), provider: ai.configured ? ai.name : null, model: ai.configured ? ai.model : null, simulated: Boolean(ai.simulated), live: Boolean(ai.configured && !ai.simulated),
       requestedProvider: requested, policyConfirmed, mode, automatic: Boolean(ai.configured && mode === 'on'), reason: ai.configured ? null : ai.reason || null,

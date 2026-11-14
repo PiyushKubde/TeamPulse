@@ -172,7 +172,9 @@ export function updateMember(db, ctx, userId, body) {
       requireStaff(ctx)
       if (m.role !== 'employee' || !ctx.managedTeamIds.includes(m.team_id) || !teamId || !ctx.managedTeamIds.includes(teamId)) throw forbidden('Managers can only move employees between teams they manage.')
     }
-    changes.team_id = teamId
+    if (teamId && m.status !== 'active') throw conflict('Reactivate this person before assigning a team.', 'inactive_member')
+    if (teamId === m.team_id) delete body.teamId
+    else changes.team_id = teamId
   }
   if (body?.status !== undefined) {
     requireAdmin(ctx)

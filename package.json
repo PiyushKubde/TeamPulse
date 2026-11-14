@@ -27,6 +27,7 @@
     "test:e2e:intelligence": "node --disable-warning=ExperimentalWarning scripts/e2e-work-intelligence.mjs",
     "test:e2e:contributions": "node --disable-warning=ExperimentalWarning scripts/e2e-contributions.mjs",
     "test:e2e:nav": "node --disable-warning=ExperimentalWarning scripts/e2e-nav-structure.mjs",
+    "test:e2e:team-assignment": "node --disable-warning=ExperimentalWarning scripts/e2e-team-assignment.mjs",
     "test:e2e:roles": "node --disable-warning=ExperimentalWarning scripts/e2e-roles.mjs"
   },
   "dependencies": {
