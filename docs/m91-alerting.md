@@ -18,8 +18,7 @@ Checked every minute by the API process (so a dead worker is still noticed). Ans
 | Condition (`customId`) | Rings when | Severity |
 |---|---|---|
 | `workpulse-database-down` | PostgreSQL unreachable for 3 checks in a row | CRITICAL (also phones) |
-| `workpulse-redis-down` | Redis unreachable for 3 checks in a row | CRITICAL |
-| `workpulse-worker-stalled` | no worker heartbeat for 10 min, or the hourly job hasn't run for 2 h | HIGH |
+| `workpulse-worker-stalled` (scheduled jobs) | no worker heartbeat for 10 min, or the hourly job hasn't run for 2 h | HIGH |
 | `workpulse-ingest-backlog` | over 200 app events waiting for 10 minutes | HIGH |
 | `workpulse-sync-dead-<app>` | 3+ events from one app failed after all retries in the last hour | HIGH |
 | `workpulse-api-errors` | over 20 server errors in 5 minutes | HIGH |

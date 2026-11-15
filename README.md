@@ -15,42 +15,26 @@ impact, execution quality, delivery reliability, goal alignment and evidence. It
 
 ## Local development
 
-Requirements: Node.js 22.13+ (tested on 26.9), npm 11, PostgreSQL 15+ and Redis 6.2+.
+Requirements: Node.js 22.13+ (tested on 26.9) and npm 11. Nothing else: the database is a SQLite file and background
+jobs run inside the API process, the same as on Embarko.
 
-### 1. Databases
-
-Either **Docker** (starts Postgres, Redis, and optional MinIO and Mailpit):
-
-```bash
-docker compose up -d
-```
-
-Or **Homebrew** (what this repository was built and tested with):
-
-```bash
-brew services start postgresql@18
-brew services start redis
-createdb workpulse && createdb workpulse_test && createdb workpulse_e2e
-```
-
-### 2. Configure
+### 1. Configure
 
 ```bash
 cp .env.example .env
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"   # paste as APP_ENCRYPTION_KEY
 ```
 
-Set `DATABASE_URL`, `TEST_DATABASE_URL` and `REDIS_URL`. With Homebrew Postgres this is usually
-`postgresql://<your-macOS-user>@localhost:5432/workpulse`. For integrations and AI, add the three `VIASOCKET_*` values
-(see [Integrations](docs/integrations.md)).
+For integrations and AI, add the three `VIASOCKET_*` values (see [Integrations](docs/integrations.md)); for phone alerts,
+`M91_SEND_LINK` and `M91_API_KEY` (see [M91 alerting](docs/m91-alerting.md)).
 
-### 3. Install, migrate, seed, run
+### 2. Install, migrate, seed, run
 
 ```bash
 npm install
 npm run db:deploy        # apply migrations
 npm run db:seed          # optional: demo organization "Northwind Labs (demo)"
-npm run dev              # API :4000, worker, web :5173
+npm run dev              # API :4000 (with jobs and schedules), web :5173
 ```
 
 Open http://localhost:5173. Demo accounts (seed only): `olivia@`, `marcus@`, `priya@`, `diego@`, `lena@`, `sam@demo.workpulse.dev`,
@@ -79,9 +63,7 @@ Integration and AI tests use a deterministic fake viaSocket transport. Real-acco
 
 ```bash
 npm ci && npm run build
-npm run db:deploy
-npm start                # API (serve apps/web/dist from a CDN or reverse proxy)
-npm run worker           # background worker: ingestion, retries, schedules
+npm start                # migrations, then one process: API, web app, background jobs
 ```
 
-See [docs/deployment.md](docs/deployment.md).
+Hosted on Embarko as https://teampulse.embarko.app: see [docs/deployment.md](docs/deployment.md).
