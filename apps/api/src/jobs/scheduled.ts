@@ -9,6 +9,7 @@ import { keyResultProgress } from '../modules/goals.js'
 import { generateReport } from '../modules/reports.js'
 import { toMarkdown, type ReportContent } from '../services/reports.js'
 import { deliverToSlack } from '../integrations/delivery.js'
+import { heartbeat } from '../services/phone-alerts.js'
 
 const localHour = (tz: string, at = new Date()) => new Date(at.getTime() + tzOffsetMs(tz, at)).getUTCHours()
 const localDow = (tz: string, at = new Date()) => new Date(at.getTime() + tzOffsetMs(tz, at)).getUTCDay()
@@ -33,6 +34,7 @@ async function slackSafe(userId: string, orgId: string, text: string, key: strin
 
 /** Hourly: deadlines, overdue, blocker escalation, planning and review reminders, daily reports. */
 export async function hourly(now = new Date()) {
+  await heartbeat('hourly')
   const soon = new Date(now.getTime() + 24 * 36e5)
   const due = await prisma.task.findMany({
     where: { deletedAt: null, archivedAt: null, assigneeId: { not: null }, status: { notIn: ['COMPLETED', 'CANCELLED'] }, dueAt: { lte: soon } },

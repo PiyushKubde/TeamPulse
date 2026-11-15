@@ -6,6 +6,7 @@ import { env, viasocketConfigured } from '../config/env.js'
 import { logger } from '../config/logger.js'
 import { unavailable } from '../lib/errors.js'
 import { viasocket } from '../integrations/viasocket/client.js'
+import { recordFailure, recordSuccess } from '../services/phone-alerts.js'
 
 export function aiStatus(): { configured: boolean; provider: string | null; reason: string | null } {
   if (!env.AI_PROVIDER) return { configured: false, provider: null, reason: 'AI is switched off (AI_PROVIDER is empty).' }
@@ -61,29 +62,35 @@ export async function structured<S extends z.ZodType>(req: StructuredRequest<S>)
   const jsonSchema = { name: req.name, schema: strictJsonSchema(req.schema), strict: true }
   let raw: unknown
   const started = Date.now()
-  if (env.AI_PROVIDER === 'viasocket') {
-    const reply = await viasocket().user(req.userId).ai.send({
-      message: req.input,
-      prompt: req.system,
-      responseType: 'json_schema',
-      jsonSchema,
-      service: env.AI_SERVICE,
-      model,
-    })
-    if (reply.finishReason === 'truncated') throw unavailable('ai_truncated', 'The AI answer was cut short. Try a narrower question.')
-    raw = typeof reply.content === 'string' ? JSON.parse(reply.content) : reply.content
-  } else {
-    openai ??= new OpenAI({ apiKey: env.OPENAI_API_KEY })
-    const completion = await openai.chat.completions.create({
-      model,
-      messages: [
-        { role: 'system', content: req.system },
-        { role: 'user', content: req.input },
-      ],
-      response_format: { type: 'json_schema', json_schema: jsonSchema },
-    })
-    raw = JSON.parse(completion.choices[0]?.message.content ?? 'null')
+  try {
+    if (env.AI_PROVIDER === 'viasocket') {
+      const reply = await viasocket().user(req.userId).ai.send({
+        message: req.input,
+        prompt: req.system,
+        responseType: 'json_schema',
+        jsonSchema,
+        service: env.AI_SERVICE,
+        model,
+      })
+      if (reply.finishReason === 'truncated') throw unavailable('ai_truncated', 'The AI answer was cut short. Try a narrower question.')
+      raw = typeof reply.content === 'string' ? JSON.parse(reply.content) : reply.content
+    } else {
+      openai ??= new OpenAI({ apiKey: env.OPENAI_API_KEY })
+      const completion = await openai.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: req.system },
+          { role: 'user', content: req.input },
+        ],
+        response_format: { type: 'json_schema', json_schema: jsonSchema },
+      })
+      raw = JSON.parse(completion.choices[0]?.message.content ?? 'null')
+    }
+  } catch (e) {
+    void recordFailure('ai')
+    throw e
   }
+  void recordSuccess('ai')
   logger.info({ ai: req.name, ms: Date.now() - started, provider: env.AI_PROVIDER }, 'ai call')
   const parsed = req.schema.safeParse(raw)
   if (!parsed.success) {

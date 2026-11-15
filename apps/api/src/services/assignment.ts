@@ -123,8 +123,10 @@ export async function chooseAssignee(
   orgId: string,
   requesterId: string,
   task: { title: string; description?: string | null; namedPerson?: string | null; category?: string | null },
+  exclude: string[] = [],
 ): Promise<AssignmentDecision> {
-  const ids = await assignableIds(orgId, requesterId)
+  const ids = (await assignableIds(orgId, requesterId)).filter((id) => !exclude.includes(id))
+  if (!ids.length) return { userId: requesterId, reason: 'Nobody else can take it.', by: 'SELF' }
   const candidates = await profiles(orgId, ids)
   if (task.namedPerson) {
     const all = await prisma.organizationMember.findMany({ where: { orgId, status: 'ACTIVE' }, select: { userId: true, user: { select: { name: true } } } })

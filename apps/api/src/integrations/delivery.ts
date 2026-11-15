@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma.js'
 import { HttpError } from '../lib/errors.js'
 import { notConnected } from './messages.js'
+import { recordFailure, recordSuccess } from '../services/phone-alerts.js'
 import { runFlow } from './flows.js'
 
 /** Posts to the user's own Slack destination (chosen once in Integrations), through their delivery flow. */
@@ -22,8 +23,10 @@ export async function deliverToSlack(userId: string, orgId: string, text: string
   if (exec.status === 'SUCCEEDED') return
   try {
     await runFlow(conn, 'slack_delivery', { text })
+    void recordSuccess('delivery')
     await prisma.automationExecution.update({ where: { id: exec.id }, data: { status: 'SUCCEEDED', attempts: { increment: 1 } } })
   } catch (e) {
+    void recordFailure('delivery')
     await prisma.automationExecution.update({
       where: { id: exec.id },
       data: { status: 'FAILED', error: e instanceof Error ? e.message.slice(0, 500) : 'failed' },
@@ -44,8 +47,10 @@ export async function deliverToGmail(userId: string, orgId: string, subject: str
   if (exec.status === 'SUCCEEDED') return
   try {
     await runFlow(conn, 'gmail_delivery', { subject, text }, { email: user.email })
+    void recordSuccess('delivery')
     await prisma.automationExecution.update({ where: { id: exec.id }, data: { status: 'SUCCEEDED' } })
   } catch (e) {
+    void recordFailure('delivery')
     await prisma.automationExecution.update({
       where: { id: exec.id },
       data: { status: 'FAILED', error: e instanceof Error ? e.message.slice(0, 500) : 'failed' },

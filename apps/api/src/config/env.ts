@@ -51,6 +51,10 @@ const schema = z.object({
   VIASOCKET_PROJECT_ID: optional,
   VIASOCKET_EMBED_SECRET: optional,
   DISABLE_RATE_LIMIT: bool(false),
+  /** M91 send link of the on-call channel (anything from "?" on is stripped: that form raises an alert). */
+  M91_SEND_LINK: optional.transform((v) => (v ? v.split('?')[0]!.replace(/\/$/, '') : undefined)),
+  /** M91 API key (m91sk_…) to invite users by phone and alert them directly. */
+  M91_API_KEY: optional,
 })
 
 export type Env = z.infer<typeof schema>

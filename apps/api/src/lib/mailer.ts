@@ -35,8 +35,15 @@ export async function mailConfigured() {
 }
 
 export async function sendMail(to: string, subject: string, text: string): Promise<{ delivered: boolean; via: 'smtp' | 'gmail' | 'none' }> {
+  const { recordFailure, recordSuccess } = await import('../services/phone-alerts.js')
   if (transport) {
-    await transport.sendMail({ from: env.MAIL_FROM, to, subject, text })
+    try {
+      await transport.sendMail({ from: env.MAIL_FROM, to, subject, text })
+    } catch (e) {
+      void recordFailure('email')
+      throw e
+    }
+    void recordSuccess('email')
     return { delivered: true, via: 'smtp' }
   }
   const gmail = isTest ? null : await systemGmail()
@@ -44,8 +51,10 @@ export async function sendMail(to: string, subject: string, text: string): Promi
     try {
       const { runFlow } = await import('../integrations/flows.js')
       await runFlow(gmail, 'system_mail', { to, subject, text })
+      void recordSuccess('email')
       return { delivered: true, via: 'gmail' }
     } catch (e) {
+      void recordFailure('email')
       logger.error({ err: e instanceof Error ? e.message : e, to }, 'system email through Gmail failed')
     }
   }

@@ -6,6 +6,7 @@ import { prisma } from './lib/prisma.js'
 import { QUEUES, closeQueues, queue, redis } from './jobs/queues.js'
 import { PROCESSORS } from './jobs/processors.js'
 import { reconcileSubscriptions } from './integrations/connections.js'
+import { heartbeat } from './services/phone-alerts.js'
 
 const workers = QUEUES.map(
   (name) =>
@@ -26,6 +27,11 @@ for (const w of workers) {
 await queue('reminders').upsertJobScheduler('hourly', { pattern: '5 * * * *' }, { name: 'hourly' })
 await queue('snapshots').upsertJobScheduler('nightly', { pattern: '0 2 * * *' }, { name: 'nightly' })
 await queue('reports').upsertJobScheduler('weekly', { pattern: '0 8 * * 1' }, { name: 'weekly' })
+// Answers to personal phone alerts are read back every minute (no public URL needed).
+await queue('reminders').upsertJobScheduler('phone-answers', { pattern: '* * * * *' }, { name: 'phone-answers' })
+// Lets the API's on-call monitor notice a dead worker.
+await heartbeat('worker')
+setInterval(() => void heartbeat('worker'), 60_000).unref()
 logger.info('WorkPulse worker started')
 // Point viaSocket handlers at the current public URL (tunnels change address on restart).
 await reconcileSubscriptions().catch((e) => logger.warn({ err: e instanceof Error ? e.message : e }, 'reconcile failed'))

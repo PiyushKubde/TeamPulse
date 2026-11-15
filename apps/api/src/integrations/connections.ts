@@ -282,7 +282,13 @@ export async function refreshConnectionHealth(userId: string) {
     const authId = authIdOf(c)
     const vs = list.find((x) => x.id === authId || x.auth_row_id === authId)
     const status = !vs ? 'REVOKED' : vs.isExpired ? 'EXPIRED' : c.status === 'EXPIRED' ? 'ACTIVE' : c.status
-    if (status !== c.status) await prisma.integrationConnection.update({ where: { id: c.id }, data: { status } })
+    if (status !== c.status) {
+      await prisma.integrationConnection.update({ where: { id: c.id }, data: { status } })
+      if (status === 'EXPIRED') {
+        const { phoneAlertConnectionExpired } = await import('../services/phone-alerts.js')
+        await phoneAlertConnectionExpired(c)
+      }
+    }
   }
 }
 

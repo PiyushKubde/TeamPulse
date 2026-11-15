@@ -41,7 +41,10 @@ export function SettingsPage() {
         ]}
       >
         <TabPanel value="profile">
-          <Profile />
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Profile />
+            <PhoneAlerts />
+          </div>
         </TabPanel>
         <TabPanel value="members">
           <Members />
@@ -800,6 +803,145 @@ function Audit() {
           </div>
         </>
       )}
+    </Card>
+  )
+}
+
+interface PhoneAlertsState {
+  available: boolean
+  phone: string | null
+  state: 'pending' | 'accepted' | 'declined' | null
+  moments: { key: string; label: string; on: boolean }[]
+  recent: { id: string; title: string; status: string; decision: string | null; createdAt: string }[]
+}
+
+/** The person's own phone alerts through M91. Says only what rings, why, and what to do. */
+function PhoneAlerts() {
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['phone-alerts'], queryFn: () => api<PhoneAlertsState>('/me/phone-alerts') })
+  const [phone, setPhone] = useState('')
+  const done = (d: PhoneAlertsState) => qc.setQueryData(['phone-alerts'], d)
+  const save = useMutation({
+    mutationFn: () => api<PhoneAlertsState>('/me/phone', { method: 'PUT', body: { phone } }),
+    onSuccess: (d) => {
+      done(d)
+      toast.success('Invitation sent to your M91 app')
+    },
+    onError: (e) => toast.error(errorMessage(e), { duration: 10000 }),
+  })
+  const refresh = useMutation({
+    mutationFn: () => api<PhoneAlertsState>('/me/phone/refresh', { method: 'POST' }),
+    onSuccess: (d) => {
+      done(d)
+      toast(d.state === 'accepted' ? 'Connected: your phone will ring' : 'Not accepted yet: open the M91 app and accept the invitation')
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const test = useMutation({
+    mutationFn: () => api<{ delivered: number }>('/me/phone/test', { method: 'POST' }),
+    onSuccess: () => toast.success('Test alert sent: your phone should ring now'),
+    onError: (e) => toast.error(errorMessage(e), { duration: 10000 }),
+  })
+  const prefs = useMutation({
+    mutationFn: (b: Record<string, boolean>) => api<PhoneAlertsState>('/me/alert-prefs', { method: 'PATCH', body: b }),
+    onSuccess: done,
+  })
+  const remove = useMutation({ mutationFn: () => api<PhoneAlertsState>('/me/phone', { method: 'DELETE' }), onSuccess: done })
+  if (q.isLoading) return <Skeleton className="h-60" />
+  const d = q.data
+  if (!d) return null
+  return (
+    <Card>
+      <CardHeader
+        title="Phone alerts"
+        description="WorkPulse rings your phone, even on silent, when something needs you now: you can answer right from the alert."
+      />
+      <div className="space-y-4 p-5 text-sm">
+        {!d.available ? (
+          <p className="text-muted">Phone alerts aren’t set up on this server yet. An administrator needs to add the M91 API key.</p>
+        ) : (
+          <>
+            <ol className="list-decimal space-y-1 pl-5 text-ink-soft">
+              <li>
+                Install M91 on your phone:{' '}
+                <a className="text-primary hover:underline" href="https://apps.apple.com/app/id6759090472" target="_blank" rel="noreferrer">
+                  iPhone
+                </a>{' '}
+                ·{' '}
+                <a className="text-primary hover:underline" href="https://play.google.com/store/apps/details?id=com.msg91.m91" target="_blank" rel="noreferrer">
+                  Android
+                </a>
+                , and sign in with your number.
+              </li>
+              <li>Enter the same number below.</li>
+              <li>Accept the WorkPulse invitation that appears in the M91 app.</li>
+            </ol>
+            {d.phone ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg bg-canvas p-3">
+                <span className="font-medium">+{d.phone}</span>
+                <Badge tone={d.state === 'accepted' ? 'green' : d.state === 'declined' ? 'red' : 'amber'}>
+                  {d.state === 'accepted' ? 'Connected' : d.state === 'declined' ? 'Invitation declined' : 'Waiting for you to accept in the M91 app'}
+                </Badge>
+                {d.state !== 'accepted' && (
+                  <Button size="sm" variant="secondary" onClick={() => refresh.mutate()} loading={refresh.isPending}>
+                    I’ve accepted it
+                  </Button>
+                )}
+                {d.state === 'accepted' && (
+                  <Button size="sm" variant="secondary" onClick={() => test.mutate()} loading={test.isPending}>
+                    Send a test alert
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" className="ml-auto" onClick={() => remove.mutate()}>
+                  Remove
+                </Button>
+              </div>
+            ) : (
+              <form
+                className="flex gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  save.mutate()
+                }}
+              >
+                <Input aria-label="Mobile number" placeholder="+91 98765 43210" value={phone} onChange={(e) => setPhone(e.target.value)} />
+                <Button type="submit" loading={save.isPending} disabled={phone.replace(/\D/g, '').length < 10}>
+                  Send invitation
+                </Button>
+              </form>
+            )}
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Your phone rings when…</p>
+              <ul className="space-y-1.5">
+                {d.moments.map((m) => (
+                  <li key={m.key}>
+                    <label className="flex items-start gap-2">
+                      <input type="checkbox" className="mt-1" checked={m.on} onChange={(e) => prefs.mutate({ [m.key]: e.target.checked })} />
+                      <span>{m.label}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-muted">
+                Your answer counts: “Can’t take it” passes a task to the next best person, “I’ll unblock it” tells the teammate you’re on it.
+              </p>
+            </div>
+            {d.recent.length > 0 && (
+              <div>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Recent alerts</p>
+                <ul className="space-y-1 text-xs text-ink-soft">
+                  {d.recent.map((a) => (
+                    <li key={a.id} className="flex gap-2">
+                      <span className="flex-1 truncate">{a.title}</span>
+                      <span className="text-muted">{a.decision ?? (a.status === 'OPEN' ? 'waiting' : 'closed')}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </Card>
   )
 }

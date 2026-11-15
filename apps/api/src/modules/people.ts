@@ -4,7 +4,9 @@ import { z } from 'zod'
 import { correctionSchema, feedbackAckSchema, feedbackSchema, resolveCorrectionSchema, scoringModelSchema } from '@workpulse/shared'
 import { prisma } from '../lib/prisma.js'
 import { body, param, query } from '../lib/validate.js'
-import { badRequest, forbidden, notFound } from '../lib/errors.js'
+import { HttpError, badRequest, forbidden, notFound } from '../lib/errors.js'
+import * as m91 from '../lib/m91.js'
+import { MOMENTS, type Moment } from '../services/phone-alerts.js'
 import { assertAdmin, assertCanSeeUser, canManageUser, findVisibleTask, type Ctx } from '../lib/scope.js'
 import { audit } from '../lib/audit.js'
 import { isValidTz } from '../lib/dates.js'
@@ -258,4 +260,110 @@ people.get('/me/profile', async (req, res) => {
   res.json({
     user: await prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { id: true, name: true, email: true, timezone: true, emailVerifiedAt: true } }),
   })
+})
+
+// ───────────── Phone alerts (M91, the person's own phone) ─────────────
+
+const phoneStatus = async (userId: string) => {
+  const u = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { phone: true, phoneAlertState: true, alertPrefs: true } })
+  const prefs = u.alertPrefs as Record<string, boolean>
+  return {
+    available: m91.platformConfigured(),
+    phone: u.phone,
+    state: u.phoneAlertState,
+    moments: Object.entries(MOMENTS).map(([key, label]) => ({ key, label, on: prefs[key] !== false })),
+    recent: await prisma.phoneAlert.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      select: { id: true, title: true, status: true, decision: true, createdAt: true },
+    }),
+  }
+}
+
+const unavailable = () =>
+  new HttpError(503, 'phone_alerts_unavailable', 'Phone alerts aren’t set up on this server yet. An administrator needs to add the M91 API key.')
+const m91Message = (e: unknown) =>
+  e instanceof m91.M91Error
+    ? e.status === 0
+      ? 'M91 couldn’t be reached. Try again in a minute.'
+      : e.message
+    : 'M91 couldn’t be reached. Try again in a minute.'
+
+people.get('/me/phone-alerts', async (req, res) => {
+  res.json(await phoneStatus(userOf(req).id))
+})
+
+/** Saves the number and sends the M91 invitation; the person accepts it in the M91 app. */
+people.put('/me/phone', async (req, res) => {
+  if (!m91.platformConfigured()) throw unavailable()
+  const user = userOf(req)
+  const { phone: raw } = body(req, z.object({ phone: z.string().min(6).max(20) }))
+  const phone = m91.normalizePhone(raw)
+  if (!phone) throw badRequest('Enter your mobile number with the country code, for example +91 98765 43210.')
+  let state: string
+  try {
+    state = (await m91.invite(phone)).state
+  } catch (e) {
+    throw new HttpError(502, 'm91_invite_failed', `Couldn’t send the M91 invitation: ${m91Message(e)}`)
+  }
+  await prisma.user.update({ where: { id: user.id }, data: { phone, phoneAlertState: state } })
+  res.json(await phoneStatus(user.id))
+})
+
+/** Re-reads the invitation (accepted yet?). Inviting again is how M91 reports the current state. */
+people.post('/me/phone/refresh', async (req, res) => {
+  if (!m91.platformConfigured()) throw unavailable()
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userOf(req).id } })
+  if (!user.phone) throw badRequest('Add your number first.')
+  try {
+    const r = await m91.invite(user.phone)
+    await prisma.user.update({ where: { id: user.id }, data: { phoneAlertState: r.state } })
+  } catch (e) {
+    throw new HttpError(502, 'm91_unreachable', m91Message(e))
+  }
+  res.json(await phoneStatus(user.id))
+})
+
+people.post('/me/phone/test', async (req, res) => {
+  if (!m91.platformConfigured()) throw unavailable()
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userOf(req).id } })
+  if (!user.phone) throw badRequest('Add your number first.')
+  try {
+    const r = await m91.personAlert(user.phone, {
+      title: 'WorkPulse test: your phone alerts work',
+      description: 'This is the kind of alert WorkPulse sends for the moments you chose. Nothing to do.',
+      severity: 'LOW',
+      customId: `test-${user.id}-${Date.now()}`,
+      isAutoClose: true,
+      responseOptions: [
+        { label: 'It rang', effect: 'SHARED' },
+        { label: 'Seen', effect: 'PERSONAL' },
+      ],
+    })
+    if (r.delivered === 0)
+      throw new HttpError(409, 'not_reachable', 'Nobody was reached: open the M91 app on your phone and accept the WorkPulse invitation, then try again.')
+    res.json({ delivered: r.delivered })
+  } catch (e) {
+    if (e instanceof HttpError) throw e
+    if (e instanceof m91.M91Error && e.status === 409) {
+      await prisma.user.update({ where: { id: user.id }, data: { phoneAlertState: 'pending' } })
+      throw new HttpError(409, 'not_accepted', 'Your phone hasn’t accepted the WorkPulse invitation yet. Open the M91 app, accept it, then try again.')
+    }
+    throw new HttpError(502, 'm91_failed', m91Message(e))
+  }
+})
+
+people.patch('/me/alert-prefs', async (req, res) => {
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userOf(req).id } })
+  const input = body(req, z.partialRecord(z.enum(Object.keys(MOMENTS) as [Moment, ...Moment[]]), z.boolean()))
+  await prisma.user.update({ where: { id: user.id }, data: { alertPrefs: { ...(user.alertPrefs as object), ...input } } })
+  res.json(await phoneStatus(user.id))
+})
+
+people.delete('/me/phone', async (req, res) => {
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userOf(req).id } })
+  if (user.phone && m91.platformConfigured()) await m91.uninvite(user.phone).catch(() => undefined)
+  await prisma.user.update({ where: { id: user.id }, data: { phone: null, phoneAlertState: null } })
+  res.json(await phoneStatus(user.id))
 })

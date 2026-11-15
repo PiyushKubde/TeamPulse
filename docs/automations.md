@@ -67,6 +67,11 @@ Rules that always apply:
 | Recurring tasks | when one is completed | the next occurrence is created |
 | Score snapshots and goal check | nightly 02:00 UTC | weekly scores for every person and team; goal progress recalculated from key results; goals falling behind are marked "At risk" and their owner is notified |
 
+## 3b. Phone alerts (M91)
+
+When WorkPulse itself breaks, your on-call channel rings; for a few urgent moments, a person's own phone rings and their
+answer acts on the task. Details: [m91-alerting.md](m91-alerting.md).
+
 ## 4. Where to watch it
 
 - **Automation Center:** every live subscription and delivery flow, its event counts, run history and failed deliveries.

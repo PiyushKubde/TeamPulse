@@ -10,6 +10,7 @@ import { auth } from './modules/auth.js'
 import { orgs } from './modules/orgs.js'
 import { routes } from './modules/index.js'
 import { events } from './integrations/events.js'
+import { recordServerError } from './services/phone-alerts.js'
 
 const allowedOrigins = new Set(
   env.CORS_ORIGINS.split(',')
@@ -87,6 +88,8 @@ export function createApp() {
     if (err?.code === 'P2002') return res.status(409).json({ error: { code: 'conflict', message: 'That already exists.' } })
     if (err?.code === 'P2025') return res.status(404).json({ error: { code: 'not_found', message: 'Record not found.' } })
     logger.error({ err, path: req.path, method: req.method }, 'unhandled error')
+    // Counted only; the on-call monitor decides whether the rate is worth waking anybody.
+    void recordServerError()
     res.status(500).json({ error: { code: 'internal', message: 'Something went wrong. Try again.' } })
   }
   app.use(onError)

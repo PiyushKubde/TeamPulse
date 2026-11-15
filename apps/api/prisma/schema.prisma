@@ -32,6 +32,12 @@ model User {
   passwordHash    String?
   emailVerifiedAt DateTime?
   timezone        String    @default("UTC")
+  /// Phone for M91 alerts: digits with country code, no "+" (e.g. 919876543210).
+  phone           String?
+  /// M91 invitation state for that phone: pending | accepted | declined.
+  phoneAlertState String?
+  /// Per-moment opt-outs, e.g. { "task_assigned": false }. Missing = on.
+  alertPrefs      Json      @default("{}")
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -996,4 +1002,36 @@ model AuditLog {
   org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId, createdAt])
+}
+
+// ───────────── Phone alerts (M91) ─────────────
+
+/// Every M91 alert WorkPulse raised: to the on-call channel (userId null) or to one person's phone.
+model PhoneAlert {
+  id         String    @id @default(uuid())
+  orgId      String?
+  userId     String?
+  phone      String?
+  /// ops_* or a user moment: task_assigned, blocker_escalation, task_overdue, correction, connection_expired
+  kind       String
+  /// The condition's name: one open alert per condition and recipient (M91 deduplicates on it too).
+  customId   String
+  refId      String?
+  severity   String
+  title      String
+  /// OPEN → ANSWERED (a SHARED decision was acted on) → CLOSED
+  status     String    @default("OPEN")
+  m91Id      String?
+  delivered  Int       @default(0)
+  decision   String?
+  note       String?
+  answeredBy String?
+  error      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  closedAt   DateTime?
+
+  @@index([status, kind])
+  @@index([userId, createdAt])
+  @@index([customId, status])
 }
