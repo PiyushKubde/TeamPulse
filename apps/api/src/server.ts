@@ -3,10 +3,13 @@ import { createApp } from './app.js'
 import { env } from './config/env.js'
 import { logger } from './config/logger.js'
 import { prisma, tuneDatabase } from './lib/prisma.js'
+import { migrate } from './lib/migrate.js'
 import './jobs/processors.js'
 import { startClock } from './jobs/clock.js'
 import { reconcileSubscriptions } from './integrations/connections.js'
 
+// Migrations first, waiting out brief locks (Embarko replicates the SQLite file), then the app.
+await migrate(env.DATABASE_URL)
 await tuneDatabase()
 const server = createApp().listen(env.PORT, '0.0.0.0', () => logger.info(`KONVO on http://localhost:${env.PORT}`))
 startClock()

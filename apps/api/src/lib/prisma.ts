@@ -10,8 +10,8 @@ export const prisma = new PrismaClient({ adapter: new PrismaLibSql({ url: env.DA
 
 /** WAL lets reads run during a write; the busy timeout makes a second writer wait instead of failing. */
 export async function tuneDatabase() {
+  await prisma.$queryRawUnsafe('PRAGMA busy_timeout = 15000')
   await prisma.$queryRawUnsafe('PRAGMA journal_mode = WAL')
-  await prisma.$queryRawUnsafe('PRAGMA busy_timeout = 5000')
   await prisma.$queryRawUnsafe('PRAGMA foreign_keys = ON')
 }
 /** A JSON column that holds a list of strings (SQLite has no list columns). */

@@ -9,7 +9,7 @@ One Node process (Embarko hosts one process per app, 256 MB of memory):
 
 | Part | Where |
 |---|---|
-| API | `apps/api` (`npm start` → `prisma migrate deploy`, then `node dist/server.js`) |
+| API | `apps/api` (`npm start` → `node dist/server.js`, which applies pending migrations first; see below) |
 | Web app | `apps/web/dist`, served by the same process (SPA fallback to `index.html`) |
 | Database | SQLite at `<DATA_DIR>/konvo.db` (Embarko keeps `DATA_DIR` across redeploys and replicates it) |
 | Uploads | `<DATA_DIR>/uploads` |
@@ -20,6 +20,13 @@ One Node process (Embarko hosts one process per app, 256 MB of memory):
 Memory: the process is started with `--max-old-space-size=112 --max-semi-space-size=2`; measured locally (macOS) at about
 150 MB settled and about 240 MB peak during sign-up and the scheduled jobs. The S3 SDK and the PDF library load only when
 used. If Embarko reports OOM restarts, look there first.
+
+## Migrations
+
+The server applies pending migrations itself at start-up (`src/lib/migrate.ts`), with a 30 s busy timeout and retries,
+writing Prisma's own `_prisma_migrations` table and checksums. `prisma migrate deploy` is not used in production: it
+fails at once with "database is locked" when anything holds the SQLite file for a moment, which crash-looped the second
+deploy (2026-11-15).
 
 ## Deploying
 
