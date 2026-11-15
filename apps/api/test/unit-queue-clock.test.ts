@@ -50,3 +50,14 @@ describe('scheduler route', () => {
     expect(ok.text).toBe('tick: ok')
   })
 })
+
+describe('security headers', () => {
+  it('let viaSocket’s Connect window load, open its popups and report back', async () => {
+    const r = await request(createApp()).get('/health')
+    const csp = r.headers['content-security-policy']
+    expect(csp).toContain("script-src 'self' https://flow.viasocket.com")
+    expect(csp).toContain('frame-src')
+    expect(csp).toMatch(/connect-src [^;]*https:\/\/\*\.viasocket\.com/)
+    expect(r.headers['cross-origin-opener-policy']).toBe('same-origin-allow-popups')
+  })
+})

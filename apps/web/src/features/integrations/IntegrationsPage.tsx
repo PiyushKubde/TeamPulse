@@ -153,25 +153,33 @@ const Notice = ({ tone, children }: { tone: 'amber' | 'red' | 'blue'; children: 
 
 function useConnect(slug: string) {
   const qc = useQueryClient()
+  const done = () => {
+    qc.invalidateQueries({ queryKey: ['integrations'] })
+    toast.success('Connected. Now choose what to sync.')
+  }
   return useMutation({
     mutationFn: async (reconnectAuth?: string) => {
       const setup = await api<{ embedToken: string; serviceId: string; actions: string[] }>('/integrations/connect-setup', { body: { provider: slug } })
+      const save = (authId: string) => api('/integrations/connect', { body: { provider: slug, authId } })
       const result = await connect({
         embedToken: setup.embedToken,
         serviceId: setup.serviceId,
         actions: setup.actions,
         skipActionSelection: true,
         ...(reconnectAuth ? { authId: reconnectAuth } : {}),
+        // Sign-in pages such as Linear's cut the popup's link to this page, so "closed" can be reported while the person is
+        // still signing in. The finished connection then arrives later through viaSocket's relay: save it then.
+        onLateSuccess: (late) =>
+          void save(late.authId)
+            .then(done)
+            .catch((e) => toast.error(errorMessage(e))),
       })
-      return api('/integrations/connect', { body: { provider: slug, authId: result.authId } })
+      return save(result.authId)
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['integrations'] })
-      toast.success('Connected. Now choose what to sync.')
-    },
+    onSuccess: done,
     onError: (e) => {
       const code = (e as { code?: string }).code
-      if (code === 'closed') toast('Connection window closed before finishing.')
+      if (code === 'closed') toast('Finish signing in in the window that opened. KONVO connects the app as soon as you’re done.', { duration: 10000 })
       else toast.error(errorMessage(e))
     },
   })

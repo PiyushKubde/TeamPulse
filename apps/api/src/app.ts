@@ -34,7 +34,23 @@ export function createApp() {
   const app = express()
   app.set('trust proxy', 1)
   app.disable('x-powered-by')
-  app.use(helmet())
+  // viaSocket's Connect window: connect.js (script) opens an iframe and sign-in popups, and reports back by postMessage.
+  // The popups need the opener kept (same-origin-allow-popups), or a finished sign-in can never return its result.
+  const viasocket = ['https://*.viasocket.com', 'https://flow.sokt.io']
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          scriptSrc: ["'self'", 'https://flow.viasocket.com'],
+          frameSrc: ["'self'", ...viasocket],
+          connectSrc: ["'self'", ...viasocket],
+          // App logos come from their brands' CDNs.
+          imgSrc: ["'self'", 'data:', 'https:'],
+        },
+      },
+      crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+    }),
+  )
 
   // CORS: only the configured web origins, with credentials.
   app.use((req, res, next) => {
