@@ -20,7 +20,7 @@ describe('authentication', () => {
     const c = client()
     expect((await c.post('/api/auth/register').send({ name: 'A', email: 'a@x.com', password: 'short' })).status).toBe(400)
     const { email } = await signUp('Dup')
-    expect((await client().post('/api/auth/register').send({ name: 'B', email, password: 'Password123' })).status).toBe(409)
+    expect((await client().post('/api/auth/register').send({ name: 'B', email, password: 'Password123', phone: '+91 90000 00001' })).status).toBe(409)
   })
 
   it('stores only argon2id password hashes', async () => {
@@ -76,11 +76,11 @@ describe('organizations and invitations', () => {
       organization: 'Acme',
       hasAccount: false,
     })
-    await guest.post('/api/invitations/accept').send({ token, name: 'New Hire', password: 'Password123' }).expect(200)
+    await guest.post('/api/invitations/accept').send({ token, name: 'New Hire', password: 'Password123', phone: '+91 90000 00002' }).expect(200)
     const me = (await guest.get('/api/auth/me')).body
     expect(me.role).toBe('MEMBER')
     expect(await prisma.teamMember.count({ where: { teamId: team.id, user: { email: 'new.hire@example.com' } } })).toBe(1)
-    expect((await guest.post('/api/invitations/accept').send({ token, name: 'X', password: 'Password123' })).status).toBe(400)
+    expect((await guest.post('/api/invitations/accept').send({ token, name: 'X', password: 'Password123', phone: '+91 90000 00003' })).status).toBe(400)
   })
 
   it('lets managers invite members only into their own teams', async () => {

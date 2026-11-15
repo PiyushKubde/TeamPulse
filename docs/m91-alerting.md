@@ -33,10 +33,16 @@ one LOW test alert).
 
 ## People: their own phone
 
-Each person adds their number on the **Phone alerts (M91)** page (also in Settings → Profile). WorkPulse invites it through M91; they accept the
-invitation in the M91 app ([iPhone](https://apps.apple.com/app/id6759090472) ·
-[Android](https://play.google.com/store/apps/details?id=com.msg91.m91)) and press **Send a test alert**. Every moment
-can be switched off there.
+Every new account gives a mobile number (required at sign-up and when accepting a team invitation), and WorkPulse
+invites it to M91 straight away. People who signed up earlier see a banner until they add one on the **Phone alerts
+(M91)** page. The only manual step is the person accepting the invitation once in the M91 app
+([iPhone](https://apps.apple.com/app/id6759090472) ·
+[Android](https://play.google.com/store/apps/details?id=com.msg91.m91)); the worker checks pending invitations every
+5 minutes, re-sends any that failed, and notifies the person when alerts are on. Every moment can be switched off on
+that page.
+
+Tests never reach real phones: `M91_API_KEY` and `M91_SEND_LINK` are blanked in `vitest.config.ts` and
+`playwright.config.ts`, and the M91 tests use a fake transport.
 
 | Moment | Who | Answers | What WorkPulse does with the answer |
 |---|---|---|---|

@@ -6,6 +6,7 @@ export interface Me {
   role: Role | null
   organizations: { id: string; name: string; slug: string; role: Role }[]
   mailConfigured: boolean
+  phoneAlerts: { available: boolean; hasPhone: boolean; state: 'pending' | 'accepted' | 'declined' | null }
 }
 
 export interface Task {

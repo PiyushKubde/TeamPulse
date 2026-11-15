@@ -522,3 +522,48 @@ export async function processPersonalAlerts() {
     }
   }
 }
+
+// ───────────── Invitations (automatic) ─────────────
+
+/** Saves a number and sends the M91 invitation right away. Returns the invitation state, or null when not possible. */
+export async function connectPhone(userId: string, raw: string) {
+  const phone = m91.normalizePhone(raw)
+  if (!phone) return null
+  await prisma.user.update({ where: { id: userId }, data: { phone, phoneAlertState: 'pending' } })
+  if (!m91.platformConfigured()) return 'pending'
+  try {
+    const r = await m91.invite(phone)
+    await prisma.user.update({ where: { id: userId }, data: { phoneAlertState: r.state } })
+    return r.state
+  } catch (e) {
+    logger.warn({ err: e instanceof Error ? e.message : e }, 'M91 invitation not sent yet; the worker retries')
+    return 'pending'
+  }
+}
+
+/** Every 5 minutes in the worker: (re)send invitations and pick up acceptances, so nobody has to press anything. */
+export async function syncPhoneInvitations() {
+  if (!m91.platformConfigured()) return
+  const users = await prisma.user.findMany({ where: { phone: { not: null }, OR: [{ phoneAlertState: null }, { phoneAlertState: 'pending' }] }, take: 200 })
+  for (const u of users) {
+    try {
+      const r = await m91.invite(u.phone!)
+      if (r.state === u.phoneAlertState) continue
+      await prisma.user.update({ where: { id: u.id }, data: { phoneAlertState: r.state } })
+      if (r.state === 'accepted') {
+        const m = await prisma.organizationMember.findFirst({ where: { userId: u.id, status: 'ACTIVE' }, select: { orgId: true } })
+        if (m)
+          await notify({
+            orgId: m.orgId,
+            userId: u.id,
+            kind: 'phone_connected',
+            title: 'Phone alerts are on: urgent things will now ring your phone',
+            link: '/alerts',
+            dedupeKey: `phone-connected:${u.id}:${u.phone}`,
+          })
+      }
+    } catch (e) {
+      logger.warn({ err: e instanceof Error ? e.message : e }, 'phone invitation sync failed for one user')
+    }
+  }
+}

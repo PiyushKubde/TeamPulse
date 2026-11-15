@@ -24,6 +24,9 @@ export default defineConfig({
       PUBLIC_API_URL: 'https://workpulse.test',
       AI_PROVIDER: 'viasocket',
       SMTP_HOST: '',
+      // Never reach real phones from tests; the M91 tests install a fake transport and set their own values.
+      M91_API_KEY: '',
+      M91_SEND_LINK: '',
       S3_BUCKET: '',
       DATA_DIR: './data-test',
     },

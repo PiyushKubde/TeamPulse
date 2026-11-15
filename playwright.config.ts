@@ -30,6 +30,9 @@ export default defineConfig({
         LOG_LEVEL: 'warn',
         SMTP_HOST: '',
         AI_PROVIDER: '',
+        // Never reach real phones from tests: the journey signs up with made-up numbers.
+        M91_API_KEY: '',
+        M91_SEND_LINK: '',
       },
       timeout: 60_000,
     },

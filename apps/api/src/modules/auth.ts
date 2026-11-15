@@ -7,6 +7,8 @@ import { randomToken, sha256 } from '../lib/crypto.js'
 import { HttpError, badRequest, conflict, forbidden, unauthorized } from '../lib/errors.js'
 import { env, isProd } from '../config/env.js'
 import { mailConfigured, sendMail } from '../lib/mailer.js'
+import { connectPhone } from '../services/phone-alerts.js'
+import { platformConfigured } from '../lib/m91.js'
 import { SESSION_COOKIE, requireAuth, userOf } from '../middleware/auth.js'
 
 export const auth = Router()
@@ -53,6 +55,8 @@ auth.post('/register', async (req, res) => {
   if (await prisma.user.findUnique({ where: { email: input.email } })) throw conflict('An account with this email already exists.')
   const user = await prisma.user.create({ data: { email: input.email, name: input.name, passwordHash: await hashPassword(input.password) } })
   await sendVerification(user.id, user.email)
+  // The number (if given) is invited to M91 right away, so urgent alerts can reach this person.
+  await connectPhone(user.id, input.phone)
   await startSession(res, user.id)
   res.status(201).json({ user: { id: user.id, email: user.email, name: user.name, emailVerified: false } })
 })
@@ -132,5 +136,8 @@ auth.get('/me', requireAuth, async (req, res) => {
     role: active?.role ?? null,
     organizations: memberships.map((m) => ({ ...m.org, role: m.role })),
     mailConfigured: await mailConfigured(),
+    phoneAlerts: await prisma.user
+      .findUniqueOrThrow({ where: { id: user.id }, select: { phone: true, phoneAlertState: true } })
+      .then((u) => ({ available: platformConfigured(), hasPhone: Boolean(u.phone), state: u.phoneAlertState })),
   })
 })

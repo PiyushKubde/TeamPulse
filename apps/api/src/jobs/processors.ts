@@ -3,7 +3,7 @@ import { processSyncEvent } from '../integrations/ingest.js'
 import { pushOutbound } from '../integrations/outbound.js'
 import { runBackfill } from '../integrations/backfill.js'
 import { hourly, nightly, weeklyReports } from './scheduled.js'
-import { phoneAlertFromNotification, processPersonalAlerts } from '../services/phone-alerts.js'
+import { phoneAlertFromNotification, processPersonalAlerts, syncPhoneInvitations } from '../services/phone-alerts.js'
 
 /** Job name → handler. The worker routes BullMQ jobs here; tests call them inline. */
 export const PROCESSORS = {
@@ -15,6 +15,7 @@ export const PROCESSORS = {
   'reports:weekly': () => weeklyReports(),
   'delivery:phone': (d: Parameters<typeof phoneAlertFromNotification>[0]) => phoneAlertFromNotification(d),
   'reminders:phone-answers': () => processPersonalAlerts(),
+  'reminders:phone-invites': () => syncPhoneInvitations(),
 } as const
 
 for (const [k, fn] of Object.entries(PROCESSORS)) {

@@ -2,8 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { env } from '../src/config/env.js'
 import { prisma } from '../src/lib/prisma.js'
-import { checkOps, processPersonalAlerts } from '../src/services/phone-alerts.js'
-import { orgWithPeople } from './helpers.js'
+import { checkOps, processPersonalAlerts, syncPhoneInvitations } from '../src/services/phone-alerts.js'
+import { client, orgWithPeople } from './helpers.js'
 
 interface Call {
   method: string
@@ -54,9 +54,30 @@ async function connectPhone(c: Awaited<ReturnType<typeof orgWithPeople>>['member
   return (await c.post('/api/me/phone/refresh').expect(200)).body
 }
 
+describe('automatic invitation at sign-up', () => {
+  it('requires a number, invites it to M91 on sign-up, and notices acceptance in the background', async () => {
+    const c = client()
+    const email = `ring-${Date.now()}@x.com`
+    expect((await c.post('/api/auth/register').send({ name: 'Ring', email, password: 'Password123' })).status).toBe(400)
+    await c.post('/api/auth/register').send({ name: 'Ring', email, password: 'Password123', phone: '+91 98765 11111' }).expect(201)
+    expect(calls.find((x) => x.url.endsWith('/recipients'))?.body).toMatchObject({ phone: '919876511111' })
+    expect((await c.get('/api/auth/me')).body.phoneAlerts).toMatchObject({ available: true, hasPhone: true, state: 'pending' })
+
+    const { member } = await orgWithPeople() // signed up with a number too, so their invitation is pending
+    inviteState = 'accepted'
+    await syncPhoneInvitations()
+    expect((await c.get('/api/auth/me')).body.phoneAlerts.state).toBe('accepted')
+    const notices = () => prisma.notification.count({ where: { userId: member.user.id, kind: 'phone_connected' } })
+    expect(await notices()).toBe(1)
+    await syncPhoneInvitations() // accepted numbers are left alone: no second notice
+    expect(await notices()).toBe(1)
+  })
+})
+
 describe('personal phone alerts', () => {
   it('invites the number (normalised) and reports acceptance', async () => {
     const { member } = await orgWithPeople()
+    calls = []
     const r = await member.c.put('/api/me/phone').send({ phone: '+91 98765 43210' }).expect(200)
     expect(r.body).toMatchObject({ available: true, phone: '919876543210', state: 'pending' })
     expect(calls[0]).toMatchObject({ method: 'POST', body: { phone: '919876543210', label: 'WorkPulse' } })

@@ -57,10 +57,19 @@ export const passwordSchema = z
   .regex(/[A-Za-z]/, 'Include a letter')
   .regex(/\d/, 'Include a number')
 
+/** Mobile number for urgent phone alerts (M91), with the country code. Required for every new account. */
+export const requiredPhoneSchema = z
+  .string()
+  .trim()
+  .max(20)
+  .regex(/^\+?[\d\s()-]{10,20}$/, 'Enter a mobile number with the country code, e.g. +91 98765 43210')
+export const phoneSchema = requiredPhoneSchema.optional()
+
 export const registerSchema = z.object({
   name,
   email: z.string().trim().toLowerCase().email(),
   password: passwordSchema,
+  phone: requiredPhoneSchema,
 })
 export const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
@@ -89,6 +98,7 @@ export const acceptInviteSchema = z.object({
   token: z.string().min(20).max(200),
   name: name.optional(),
   password: passwordSchema.optional(),
+  phone: phoneSchema,
 })
 export const updateMemberSchema = z.object({
   role: z.enum(ROLES).optional(),
@@ -158,7 +168,10 @@ export const taskCreateSchema = z.object({
   projectId: id.nullable().optional(),
   parentId: id.nullable().optional(),
   /** A member id, null for unassigned, or "auto": WorkPulse picks the best fit (named person, else AI or rules). */
-  assigneeId: z.union([id, z.literal('auto')]).nullable().optional(),
+  assigneeId: z
+    .union([id, z.literal('auto')])
+    .nullable()
+    .optional(),
   dueAt: isoDate.nullable().optional(),
   estimateMins: z.number().int().min(0).max(100000).nullable().optional(),
   impactLevel: z.enum(IMPACT_LEVELS).optional(),
@@ -329,7 +342,10 @@ export const connectionSettingsSchema = z.object({
     })
     .optional(),
   /** Slack channel whose messages become tasks. */
-  intake: z.object({ channelId: z.string().max(100), label: z.string().max(200).optional() }).nullable().optional(),
+  intake: z
+    .object({ channelId: z.string().max(100), label: z.string().max(200).optional() })
+    .nullable()
+    .optional(),
   statusMap: z.partialRecord(z.enum(TASK_STATUSES), z.string().max(200)).optional(),
   userMap: z.record(z.string().max(200), z.string().uuid()).optional(),
 })

@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
 import { z } from 'zod'
-import { createOrgSchema, forgotPasswordSchema, loginSchema, passwordSchema, registerSchema } from '@workpulse/shared'
+import { createOrgSchema, forgotPasswordSchema, loginSchema, passwordSchema, registerSchema, requiredPhoneSchema } from '@workpulse/shared'
 import { api, errorMessage } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { Button, Card, Field, Input, Spinner } from '@/components/ui'
@@ -26,6 +26,20 @@ function AuthLayout({ title, subtitle, children, footer }: { title: string; subt
         <p className="mt-6 text-center text-xs text-muted">One workspace. Every task. Measurable impact.</p>
       </div>
     </div>
+  )
+}
+
+/** Required mobile number: WorkPulse invites it to M91 so urgent things ring this person's phone. */
+function PhoneField({ error, register }: { error?: string; register: ReturnType<ReturnType<typeof useForm>['register']> }) {
+  return (
+    <Field
+      label="Mobile number"
+      htmlFor="phone"
+      error={error}
+      hint="For urgent alerts only, like a critical task assigned to you. You’ll accept the invitation in the M91 app."
+    >
+      <Input id="phone" type="tel" autoComplete="tel" placeholder="+91 98765 43210" {...register} />
+    </Field>
   )
 }
 
@@ -124,6 +138,7 @@ export function RegisterPage() {
         <Field label="Password" htmlFor="password" error={f.formState.errors.password?.message} hint="At least 10 characters with a letter and a number.">
           <Input id="password" type="password" autoComplete="new-password" {...f.register('password')} />
         </Field>
+        <PhoneField error={f.formState.errors.phone?.message} register={f.register('phone')} />
         <Button type="submit" className="w-full" loading={f.formState.isSubmitting}>
           Create account
         </Button>
@@ -246,8 +261,8 @@ export function AcceptInvitePage() {
     queryFn: () => api<{ email: string; organization: string; role: string; hasAccount: boolean }>('/invitations/lookup', { query: { token } }),
     retry: false,
   })
-  const f = useForm<{ name: string; password: string }>({
-    resolver: zodResolver(z.object({ name: z.string().trim().min(1, 'Required'), password: passwordSchema })),
+  const f = useForm<{ name: string; password: string; phone: string }>({
+    resolver: zodResolver(z.object({ name: z.string().trim().min(1, 'Required'), password: passwordSchema, phone: requiredPhoneSchema })),
   })
   const accept = async (body: Record<string, string>) => {
     setError(null)
@@ -297,6 +312,7 @@ export function AcceptInvitePage() {
           <Field label="Choose a password" htmlFor="password" error={f.formState.errors.password?.message}>
             <Input id="password" type="password" autoComplete="new-password" {...f.register('password')} />
           </Field>
+          <PhoneField error={f.formState.errors.phone?.message} register={f.register('phone')} />
           <Button type="submit" className="w-full" loading={f.formState.isSubmitting}>
             Create account and join
           </Button>

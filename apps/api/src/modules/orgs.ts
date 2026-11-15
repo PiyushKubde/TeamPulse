@@ -21,6 +21,7 @@ import { sendMail } from '../lib/mailer.js'
 import { env } from '../config/env.js'
 import { ctxOf, requireAuth, requireOrg, userOf } from '../middleware/auth.js'
 import { hashPassword, startSession } from './auth.js'
+import { connectPhone } from '../services/phone-alerts.js'
 
 export const orgs = Router()
 
@@ -218,14 +219,16 @@ orgs.post('/invitations/accept', async (req, res) => {
   if (req.auth) {
     if (req.auth.user.email !== inv.email) throw forbidden(`This invitation is for ${inv.email}. Sign in with that email to accept it.`)
     userId = req.auth.user.id
+    if (input.phone) await connectPhone(userId, input.phone)
   } else {
     if (await prisma.user.findUnique({ where: { email: inv.email } })) throw forbidden('Sign in to accept this invitation.')
-    if (!input.name || !input.password) throw badRequest('Name and password are required to create your account.')
+    if (!input.name || !input.password || !input.phone) throw badRequest('Name, password and mobile number are required to create your account.')
     // The invite link reached this inbox, so the email counts as verified.
     const user = await prisma.user.create({
       data: { email: inv.email, name: input.name, passwordHash: await hashPassword(input.password), emailVerifiedAt: new Date() },
     })
     userId = user.id
+    await connectPhone(user.id, input.phone)
   }
   await prisma.$transaction(async (tx) => {
     await tx.organizationMember.upsert({

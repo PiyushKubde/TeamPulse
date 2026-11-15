@@ -378,6 +378,7 @@ export function AppShell() {
           </div>
         </header>
         {me && !me.user.emailVerified && <VerifyBanner />}
+        {me?.phoneAlerts?.available && me.phoneAlerts.state !== 'accepted' && <PhoneBanner />}
         <main className="min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
             <Suspense fallback={<Spinner />}>
@@ -420,6 +421,42 @@ function VerifyBanner() {
         }
       >
         {state === 'sent' ? 'Sent: check your inbox' : state === 'error' ? 'Could not send, try again' : 'Send verification link'}
+      </button>
+    </div>
+  )
+}
+
+/** Nudges everyone to connect a phone for urgent alerts; disappears once connected (or dismissed for this session). */
+function PhoneBanner() {
+  const { me } = useAuth()
+  const [hidden, setHidden] = useState(() => sessionStorage.getItem('wp-phone-banner') === 'hidden')
+  if (hidden || !me) return null
+  const pending = me.phoneAlerts.hasPhone && me.phoneAlerts.state !== 'declined'
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-2 border-b border-primary/15 bg-primary-soft px-4 py-1.5 text-xs text-primary">
+      {pending ? (
+        <span>Almost there: open the M91 app on your phone and accept the WorkPulse invitation to get urgent alerts.</span>
+      ) : (
+        <>
+          <span>Get urgent alerts on your phone, like a critical task assigned to you.</span>
+          <Link to="/alerts" className="font-medium underline">
+            Add your number
+          </Link>
+        </>
+      )}
+      <button
+        className="ml-2 opacity-70 hover:opacity-100"
+        aria-label="Hide"
+        onClick={() => {
+          try {
+            sessionStorage.setItem('wp-phone-banner', 'hidden')
+          } catch {
+            // storage unavailable: hide for this render only
+          }
+          setHidden(true)
+        }}
+      >
+        ×
       </button>
     </div>
   )

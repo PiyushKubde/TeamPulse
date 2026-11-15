@@ -6,7 +6,7 @@ import { prisma } from '../lib/prisma.js'
 import { body, param, query } from '../lib/validate.js'
 import { HttpError, badRequest, forbidden, notFound } from '../lib/errors.js'
 import * as m91 from '../lib/m91.js'
-import { MOMENTS, ON_CALL_CONDITIONS, type Moment } from '../services/phone-alerts.js'
+import { MOMENTS, ON_CALL_CONDITIONS, connectPhone, type Moment } from '../services/phone-alerts.js'
 import { assertAdmin, assertCanSeeUser, canManageUser, findVisibleTask, type Ctx } from '../lib/scope.js'
 import { audit } from '../lib/audit.js'
 import { isValidTz } from '../lib/dates.js'
@@ -301,13 +301,7 @@ people.put('/me/phone', async (req, res) => {
   const { phone: raw } = body(req, z.object({ phone: z.string().min(6).max(20) }))
   const phone = m91.normalizePhone(raw)
   if (!phone) throw badRequest('Enter your mobile number with the country code, for example +91 98765 43210.')
-  let state: string
-  try {
-    state = (await m91.invite(phone)).state
-  } catch (e) {
-    throw new HttpError(502, 'm91_invite_failed', `Couldn’t send the M91 invitation: ${m91Message(e)}`)
-  }
-  await prisma.user.update({ where: { id: user.id }, data: { phone, phoneAlertState: state } })
+  await connectPhone(user.id, phone)
   res.json(await phoneStatus(user.id))
 })
 

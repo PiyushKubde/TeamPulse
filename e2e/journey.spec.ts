@@ -20,6 +20,7 @@ test('1–2. register and create an organization', async ({ page }) => {
   await page.getByLabel('Full name').fill(owner.name)
   await page.getByLabel('Work email').fill(owner.email)
   await page.getByLabel('Password').fill(owner.password)
+  await page.getByLabel('Mobile number').fill('+91 90000 00010')
   await page.getByRole('button', { name: /create account/i }).click()
   await expect(page.getByRole('heading', { name: /create your organization/i })).toBeVisible()
   await page.getByLabel('Organization name').fill('E2E Corp')
@@ -57,6 +58,7 @@ test('3. create a team and invite a member who accepts', async ({ page, browser 
   await expect(guest.getByRole('heading', { name: /join e2e corp/i })).toBeVisible()
   await guest.getByLabel('Full name').fill(member.name)
   await guest.getByLabel('Choose a password').fill(member.password)
+  await guest.getByLabel('Mobile number').fill('+91 90000 00011')
   await guest.getByRole('button', { name: /create account and join/i }).click()
   await expect(guest.getByRole('heading', { name: /good (morning|afternoon|evening), max/i })).toBeVisible()
   // Members do not see team navigation.

@@ -18,7 +18,7 @@ let n = 0
 export async function signUp(name = 'User') {
   const c = client()
   const email = `${name.toLowerCase().replace(/\W/g, '')}${++n}@example.com`
-  const res = await c.post('/api/auth/register').send({ name, email, password: 'Password123' })
+  const res = await c.post('/api/auth/register').send({ name, email, password: 'Password123', phone: '+91 90000 00000' })
   if (res.status !== 201) throw new Error(`register failed: ${res.status} ${JSON.stringify(res.body)}`)
   return { c, user: res.body.user as { id: string; email: string; name: string }, email }
 }

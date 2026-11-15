@@ -29,6 +29,8 @@ await queue('snapshots').upsertJobScheduler('nightly', { pattern: '0 2 * * *' },
 await queue('reports').upsertJobScheduler('weekly', { pattern: '0 8 * * 1' }, { name: 'weekly' })
 // Answers to personal phone alerts are read back every minute (no public URL needed).
 await queue('reminders').upsertJobScheduler('phone-answers', { pattern: '* * * * *' }, { name: 'phone-answers' })
+// Invitations are (re)sent and acceptances picked up automatically.
+await queue('reminders').upsertJobScheduler('phone-invites', { pattern: '*/5 * * * *' }, { name: 'phone-invites' })
 // Lets the API's on-call monitor notice a dead worker.
 await heartbeat('worker')
 setInterval(() => void heartbeat('worker'), 60_000).unref()
