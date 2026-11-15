@@ -690,6 +690,8 @@ model IntegrationSubscription {
   inputData     Json
   /// sha256 of the handler string sent to viaSocket (the handler embeds a secret, so it is not stored).
   handlerHash   String?
+  /// The PUBLIC_API_URL the handler posts to; when it changes (a new tunnel), handlers are re-pointed on start-up.
+  handlerBase   String?
   /// sha256 of the bearer token the handler presents to /api/integrations/events.
   tokenHash     String                @unique
   status        String                @default("ACTIVE")

@@ -26,6 +26,7 @@ interface Connection {
     repos?: string[]
     importIssues?: boolean
     delivery?: { messageto: string; channelId?: string; userId?: string; label?: string }
+    intake?: { channelId: string; label?: string } | null
     statusMap?: Record<string, string>
     userMap?: Record<string, string>
   }
@@ -221,7 +222,7 @@ function ConnectionPanel({ p, conn, onReconnect }: { p: Provider; conn: Connecti
         : p.slug === 'github'
           ? Boolean(settings.repos?.length)
           : p.slug === 'slack'
-            ? Boolean(settings.delivery?.channelId || settings.delivery?.userId)
+            ? Boolean(settings.intake?.channelId || settings.delivery?.channelId || settings.delivery?.userId)
             : true
 
   return (
@@ -236,11 +237,14 @@ function ConnectionPanel({ p, conn, onReconnect }: { p: Provider; conn: Connecti
             {active} live subscription{active > 1 ? 's' : ''}
           </Badge>
         )}
-        {conn.status === 'EXPIRED' && (
-          <Button size="sm" onClick={() => onReconnect(undefined)}>
-            Reconnect
-          </Button>
-        )}
+        <Button
+          size="sm"
+          variant={conn.status === 'EXPIRED' ? 'primary' : 'ghost'}
+          onClick={() => onReconnect(undefined)}
+          title="Sign in again, for an expired connection or to grant permissions a new feature needs. Your choices are kept."
+        >
+          {conn.status === 'EXPIRED' ? 'Reconnect' : 'Reconnect / update permissions'}
+        </Button>
       </div>
       {conn.lastError && <Notice tone="red">{conn.lastError}</Notice>}
 
@@ -290,6 +294,28 @@ function ConnectionPanel({ p, conn, onReconnect }: { p: Provider; conn: Connecti
             Pull requests, commits and releases arrive as evidence. They attach to a task when they mention its key (e.g. ENG-42); otherwise they wait in
             Reviews for you to match them.
           </p>
+        </div>
+      )}
+      {p.slug === 'slack' && (
+        <div className="space-y-2 rounded-lg border border-line bg-surface p-3">
+          <Picker
+            conn={conn}
+            fieldKey="channel_id"
+            labelText="Turn messages in this channel into tasks"
+            value={settings.intake?.channelId}
+            display={settings.intake?.label}
+            onPick={(o) => save.mutate({ intake: { channelId: o.value, label: o.label } })}
+          />
+          <p className="text-xs text-muted">
+            Every message people post there is read by AI: work requests become tasks (title, priority, due date and assignee filled in), chatter is skipped,
+            and a confirmation is posted back. Bot messages, including WorkPulse’s own, are ignored. If you connected Slack before this feature, use “Reconnect
+            / update permissions” once.
+          </p>
+          {settings.intake?.channelId && (
+            <Button size="sm" variant="ghost" onClick={() => save.mutate({ intake: null })}>
+              Stop creating tasks from Slack
+            </Button>
+          )}
         </div>
       )}
       {p.slug === 'slack' && (

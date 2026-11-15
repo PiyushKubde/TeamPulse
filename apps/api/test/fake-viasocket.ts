@@ -22,6 +22,11 @@ class FakeUser {
     this.f.subscriptions.push({ user: this.id, app, trigger, ...p, scriptId })
     return { scriptId, hookUrl: 'https://hook', title: trigger, authId: p.authId, inputData: p.inputData, meta: {} }
   }
+  updateSubscription = async (scriptId: string, p: { code?: string }) => {
+    const sub = this.f.subscriptions.find((x) => x.scriptId === scriptId)
+    if (sub && p.code) sub.code = p.code
+    return { scriptId, hookUrl: '', title: '', authId: '', inputData: {}, meta: {} }
+  }
   deleteFlow = async (scriptId: string) => {
     this.f.deleted.push(scriptId)
     return { id: scriptId, status: 'deleted' }

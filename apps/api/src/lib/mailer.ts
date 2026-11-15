@@ -1,6 +1,10 @@
+// System email (verification, password reset, invitations, reports).
+// Order: SMTP when configured → else the Gmail account an owner/admin connected in Integrations (through viaSocket) →
+// else the message is kept in the log/outbox and the UI says email is not set up.
 import nodemailer from 'nodemailer'
 import { env, isTest } from '../config/env.js'
 import { logger } from '../config/logger.js'
+import { prisma } from './prisma.js'
 
 const transport = env.SMTP_HOST
   ? nodemailer.createTransport({
@@ -11,19 +15,42 @@ const transport = env.SMTP_HOST
     })
   : null
 
-/** Mail outbox for tests and local development without SMTP. */
+/** Mail outbox for tests and local development without any sender. */
 export const devOutbox: { to: string; subject: string; text: string }[] = []
 
-export const mailConfigured = Boolean(transport)
+/** The Gmail connection that sends system email: MAIL_VIASOCKET_USER_ID's, else the oldest owner/admin connection. */
+async function systemGmail() {
+  const where = env.MAIL_VIASOCKET_USER_ID
+    ? { provider: 'gmail', status: 'ACTIVE' as const, userId: env.MAIL_VIASOCKET_USER_ID }
+    : {
+        provider: 'gmail',
+        status: 'ACTIVE' as const,
+        user: { memberships: { some: { role: { in: ['OWNER' as const, 'ADMIN' as const] }, status: 'ACTIVE' as const } } },
+      }
+  return prisma.integrationConnection.findFirst({ where, orderBy: { createdAt: 'asc' } })
+}
 
-export async function sendMail(to: string, subject: string, text: string) {
-  if (!transport) {
-    devOutbox.push({ to, subject, text })
-    if (devOutbox.length > 100) devOutbox.shift()
-    // Development only: no SMTP configured, so the message (including its link) goes to the log.
-    if (!isTest) logger.info({ to, subject }, `[mail not sent: SMTP_HOST empty]\n${text}`)
-    return { delivered: false }
+export async function mailConfigured() {
+  return Boolean(transport) || Boolean(await systemGmail())
+}
+
+export async function sendMail(to: string, subject: string, text: string): Promise<{ delivered: boolean; via: 'smtp' | 'gmail' | 'none' }> {
+  if (transport) {
+    await transport.sendMail({ from: env.MAIL_FROM, to, subject, text })
+    return { delivered: true, via: 'smtp' }
   }
-  await transport.sendMail({ from: env.MAIL_FROM, to, subject, text })
-  return { delivered: true }
+  const gmail = isTest ? null : await systemGmail()
+  if (gmail) {
+    try {
+      const { runFlow } = await import('../integrations/flows.js')
+      await runFlow(gmail, 'system_mail', { to, subject, text })
+      return { delivered: true, via: 'gmail' }
+    } catch (e) {
+      logger.error({ err: e instanceof Error ? e.message : e, to }, 'system email through Gmail failed')
+    }
+  }
+  devOutbox.push({ to, subject, text })
+  if (devOutbox.length > 100) devOutbox.shift()
+  if (!isTest) logger.info({ to, subject }, `[mail not sent: no SMTP and no connected Gmail]\n${text}`)
+  return { delivered: false, via: 'none' }
 }

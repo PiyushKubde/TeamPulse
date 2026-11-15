@@ -6,20 +6,24 @@ import { orgWithPeople } from './helpers.js'
 import { fakeViasocket } from './fake-viasocket.js'
 
 describe('AI configuration', () => {
-  it('reports "not configured" and refuses AI calls until the data-policy switch is on; the rest still works', async () => {
+  it('reports "not configured" without credentials; the rest still works', async () => {
     const { member } = await orgWithPeople()
-    env.AI_DATA_POLICY_CONFIRMED = false
+    const saved = env.AI_PROVIDER
+    env.AI_PROVIDER = ''
     try {
       const s = (await member.c.get('/api/ai/status')).body
       expect(s).toMatchObject({ configured: false })
-      expect(s.reason).toMatch(/data-processing terms/)
       const r = await member.c.post('/api/ai/create-task').send({ text: 'Write the launch post by Friday' })
       expect(r.status).toBe(503)
       expect(r.body.error.code).toBe('ai_not_configured')
       await member.c.post('/api/tasks').send({ title: 'Works without AI' }).expect(201)
     } finally {
-      env.AI_DATA_POLICY_CONFIRMED = true
+      env.AI_PROVIDER = saved
     }
+  })
+  it('is on by default when the viaSocket keys are present', async () => {
+    const { member } = await orgWithPeople()
+    expect((await member.c.get('/api/ai/status')).body).toMatchObject({ configured: true, provider: 'viasocket' })
   })
 })
 

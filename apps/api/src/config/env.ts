@@ -29,6 +29,8 @@ const schema = z.object({
   SMTP_USER: optional,
   SMTP_PASS: optional,
   MAIL_FROM: z.string().default('WorkPulse <no-reply@localhost>'),
+  /** Optional: the WorkPulse user whose connected Gmail sends system email (default: the oldest owner/admin connection). */
+  MAIL_VIASOCKET_USER_ID: optional,
   S3_BUCKET: optional,
   S3_REGION: z.string().default('us-east-1'),
   S3_ENDPOINT: optional,
@@ -44,7 +46,6 @@ const schema = z.object({
   AI_SERVICE: z.string().default('openai'),
   AI_MODEL_FAST: z.string().default('gpt-6-luna'),
   AI_MODEL_ASSISTANT: z.string().default('gpt-6.1-terra'),
-  AI_DATA_POLICY_CONFIRMED: bool(false),
   OPENAI_API_KEY: optional,
   VIASOCKET_ORG_ID: optional,
   VIASOCKET_PROJECT_ID: optional,

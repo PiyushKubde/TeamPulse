@@ -13,13 +13,6 @@ export function aiStatus(): { configured: boolean; provider: string | null; reas
     return { configured: false, provider: 'viasocket', reason: 'AI is not configured: the viaSocket keys are missing.' }
   if (env.AI_PROVIDER === 'openai' && !env.OPENAI_API_KEY)
     return { configured: false, provider: 'openai', reason: 'AI is not configured: OPENAI_API_KEY is missing.' }
-  if (!env.AI_DATA_POLICY_CONFIRMED) {
-    return {
-      configured: false,
-      provider: env.AI_PROVIDER,
-      reason: 'AI is not enabled yet: an administrator must confirm the AI provider’s data-processing terms (AI_DATA_POLICY_CONFIRMED).',
-    }
-  }
   return { configured: true, provider: env.AI_PROVIDER, reason: null }
 }
 

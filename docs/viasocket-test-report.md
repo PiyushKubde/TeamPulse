@@ -45,6 +45,15 @@ INFO VIASOCKET_TEST_EMBED_TOKEN not set — token check skipped
 0 FAIL, 0 WARN over 17 files — paste this output in your report
 ```
 
+## A2. Real checks added 2026-11-15 (Slack intake)
+
+| Check | Result |
+|---|---|
+| `user.subscribe('slack', 'New_Message_Posted_in_Channel_Instant', v2)` on the owner's real Slack connection, channel `all-aryans-workspace` | PASS (subscription ACTIVE) |
+| `sampleEvent` for that trigger on the real connection | PASS: an Events API envelope (`event`, `team_id`, `event_id`, …); the adapter normalizes it; `token`, `authorizations` and `viasocketHelp` are stripped before storage |
+| ngrok tunnel → `/health` from the public URL | PASS |
+| A real Slack message arriving and becoming a task | waiting for a human message in the channel |
+
 ## B. BLOCKED: needs connected test accounts and a public URL
 
 None of these ran. Each needs a real test account connected through WorkPulse's own Connect button, and for triggers a

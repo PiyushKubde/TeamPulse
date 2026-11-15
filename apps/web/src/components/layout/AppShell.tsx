@@ -388,12 +388,35 @@ export function AppShell() {
 }
 
 function VerifyBanner() {
-  const [sent, setSent] = useState(false)
+  const { me, isAdmin } = useAuth()
+  const [state, setState] = useState<'idle' | 'sent' | 'error'>('idle')
+  if (!me?.mailConfigured) {
+    return (
+      <div className="flex flex-wrap items-center justify-center gap-2 border-b border-warn/20 bg-warn-soft px-4 py-1.5 text-xs text-warn">
+        WorkPulse can’t send email yet, so verification links can’t be delivered.
+        {isAdmin ? (
+          <Link to="/integrations" className="font-medium underline">
+            Connect Gmail to turn email on
+          </Link>
+        ) : (
+          <span>Ask an owner or admin to connect Gmail in Integrations.</span>
+        )}
+      </div>
+    )
+  }
   return (
     <div className="flex items-center justify-center gap-2 border-b border-warn/20 bg-warn-soft px-4 py-1.5 text-xs text-warn">
-      Please verify your email address.
-      <button className="font-medium underline" disabled={sent} onClick={() => api('/auth/resend-verification', { method: 'POST' }).then(() => setSent(true))}>
-        {sent ? 'Sent' : 'Resend link'}
+      Please verify your email address ({me.user.email}).
+      <button
+        className="font-medium underline"
+        disabled={state === 'sent'}
+        onClick={() =>
+          api('/auth/resend-verification', { method: 'POST' })
+            .then(() => setState('sent'))
+            .catch(() => setState('error'))
+        }
+      >
+        {state === 'sent' ? 'Sent: check your inbox' : state === 'error' ? 'Could not send, try again' : 'Send verification link'}
       </button>
     </div>
   )

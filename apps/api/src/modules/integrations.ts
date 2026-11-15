@@ -155,7 +155,7 @@ integrations.patch('/integrations/connections/:id', async (req, res) => {
   let subscriptions: unknown = []
   let warning: string | null = null
   try {
-    if (def.capabilities.includes('tasks') || def.capabilities.includes('evidence')) subscriptions = await syncSubscriptions(updated)
+    if (def.triggers.length) subscriptions = await syncSubscriptions(updated)
     if (conn.provider === 'slack' && settings.delivery) await ensureFlow(updated, 'slack_delivery', { resave: true })
     if (conn.provider === 'linear' && updated.syncMode === 'TWO_WAY') await ensureFlow(updated, 'linear_status', { resave: true })
   } catch (e) {

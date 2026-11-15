@@ -1,12 +1,12 @@
 // The allowlist. Every viaSocket app, trigger, action, key, version and id WorkPulse uses is here, copied from the
 // app pages on viasocket.com (2026-11-15). Nothing outside this file can be subscribed to or run, by code or by AI.
-export type Capability = 'tasks' | 'evidence' | 'delivery'
+export type Capability = 'tasks' | 'evidence' | 'delivery' | 'intake'
 
 export interface TriggerDef {
   key: string
   version: string
   triggerId: string
-  kind: 'task' | 'comment' | 'evidence_pr' | 'evidence_commit' | 'evidence_release' | 'task_github_issue'
+  kind: 'task' | 'comment' | 'evidence_pr' | 'evidence_commit' | 'evidence_release' | 'task_github_issue' | 'slack_message'
   /** One subscription per resource (a repo, a team), with inputData from the choices made once after Connect. Empty = not configured yet. */
   inputs: (s: ConnectionSettings) => { resource: string; inputData: Record<string, unknown> }[]
   /** Only subscribed when this returns true. */
@@ -48,6 +48,7 @@ export interface ConnectionSettings {
   repos?: string[]
   importIssues?: boolean
   delivery?: { messageto: 'channel' | 'user'; channelId?: string; userId?: string; label?: string }
+  intake?: { channelId: string; label?: string } | null
   statusMap?: Record<string, string>
   userMap?: Record<string, string>
 }
@@ -132,10 +133,27 @@ export const PROVIDERS: Record<string, ProviderDef> = {
     slug: 'slack',
     name: 'Slack',
     icon: 'https://stuff.thingsofbrand.com/slack.com/images/img668216333e_slack.jpg',
-    description: 'Daily and weekly reports and notifications posted to your channel or DM.',
-    capabilities: ['delivery'],
-    triggers: [],
+    description: 'Messages in a channel you choose become tasks automatically (AI reads each one). Reports and alerts post to your channel or DM.',
+    capabilities: ['intake', 'delivery'],
+    triggers: [
+      // channel_id: the one intake channel the user picks once after Connect (PICK).
+      {
+        key: 'New_Message_Posted_in_Channel_Instant',
+        version: 'v2',
+        triggerId: 'rowo0opjzsgk',
+        kind: 'slack_message',
+        inputs: (s) => (s.intake?.channelId ? [{ resource: s.intake.channelId, inputData: { channel_id: [s.intake.channelId] } }] : []),
+      },
+    ],
     pickers: [
+      {
+        setting: 'intake.channelId',
+        label: 'Channel to turn into tasks',
+        app: 'slack',
+        event: 'New_Message_Posted_in_Channel_Instant',
+        version: 'v2',
+        fieldKey: 'channel_id',
+      },
       {
         setting: 'delivery.channelId',
         label: 'Slack channel',
@@ -162,7 +180,8 @@ export const PROVIDERS: Record<string, ProviderDef> = {
     slug: 'gmail',
     name: 'Gmail',
     icon: 'https://stuff.thingsofbrand.com/gmail.com/images/imge_idrA5FDGTH_1763454052978.svg',
-    description: 'Reports emailed from your own Gmail account to you.',
+    description:
+      'Reports emailed from your own Gmail account to you. Connected by an owner or admin, it also sends WorkPulse’s emails (verification, password reset, invitations).',
     capabilities: ['delivery'],
     triggers: [],
     pickers: [],

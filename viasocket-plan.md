@@ -34,12 +34,14 @@ Every key, version and id below is in `apps/api/src/integrations/catalog.ts`. Th
 | github | trigger `New_Commit_Pushed` v6 | `repoFullName` / `sha` | stored repo / constant `main` (the trigger's own default branch) | once |
 | github | trigger `New_Release_Published` v6 | `repoFullName` | stored repo | once |
 | github | trigger `When_a_new_issue_is_created` v7 | `repoFullName` | stored repo; only when the user turns on "import GitHub issues as tasks" | once |
+| slack | trigger `New_Message_Posted_in_Channel_Instant` v2 (added 2026-11-15) | `channel_id` | the user picks the intake channel (PICK, `listOptions` on this trigger) | once, after Connect |
 | slack | action `Send_Message` v107 (per-user webhook flow) | `destination.messageto` | the user: a channel or a DM to themselves | once, at setup |
 | slack | action `Send_Message` v107 | `destination.channel_id` / `destination.userId` | the user (PICK) | once, at setup |
 | slack | action `Send_Message` v107 | `markdown_content` | WorkPulse report or alert text (AI summary paragraph optional, validated, length-capped) | per run |
 | slack | action `Send_Message` v107 | thread keys, `tagged_users`, `buttons`, `schedule_type`, `bot_details`, `preview` | left out on purpose (plain immediate post) | — |
 | gmail | action `Send_Email` v55 (per-user webhook flow) | `to` | WorkPulse: the user's own verified email (constant per user, baked into the flow) | once, at setup |
 | gmail | action `Send_Email` v55 | `subject`, `messageBody` | WorkPulse report content | per run |
+| gmail | action `Send_Email` v55 (system mail flow of the sending owner/admin) | `to`, `subject`, `messageBody` | WorkPulse: the recipient of a verification, reset or invitation email (validated) | per run |
 | gmail | action `Send_Email` v55 | `fromName` | constant `WorkPulse` | — |
 | gmail | action `Send_Email` v55 | `from`, `cc`, `bcc`, `replyTo`, `attachments`, `labelIds` | left out on purpose (sends as the connected account) | — |
 | viaSocket AI | `user.ai.send` (`json_schema`, strict) | message, prompt, schema | WorkPulse code; model `openai/gpt-6-luna` (structured) and `openai/gpt-6.1-terra` (assistant) | per run |

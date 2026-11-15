@@ -4,9 +4,9 @@ import { forgotPasswordSchema, loginSchema, registerSchema, resetPasswordSchema,
 import { prisma } from '../lib/prisma.js'
 import { body } from '../lib/validate.js'
 import { randomToken, sha256 } from '../lib/crypto.js'
-import { badRequest, conflict, forbidden, unauthorized } from '../lib/errors.js'
+import { HttpError, badRequest, conflict, forbidden, unauthorized } from '../lib/errors.js'
 import { env, isProd } from '../config/env.js'
-import { sendMail } from '../lib/mailer.js'
+import { mailConfigured, sendMail } from '../lib/mailer.js'
 import { SESSION_COOKIE, requireAuth, userOf } from '../middleware/auth.js'
 
 export const auth = Router()
@@ -39,7 +39,7 @@ async function consumeToken(token: string, kind: 'VERIFY_EMAIL' | 'RESET_PASSWOR
 
 export async function sendVerification(userId: string, email: string) {
   const token = await issueToken(userId, 'VERIFY_EMAIL', 48)
-  await sendMail(
+  return sendMail(
     email,
     'Verify your WorkPulse email',
     `Confirm your email address:\n\n${env.APP_URL}/verify-email?token=${token}\n\nThis link expires in 48 hours.`,
@@ -107,8 +107,15 @@ auth.post('/verify-email', async (req, res) => {
 
 auth.post('/resend-verification', requireAuth, async (req, res) => {
   const user = userOf(req)
-  if (!user.emailVerifiedAt) await sendVerification(user.id, user.email)
-  res.json({ ok: true })
+  if (user.emailVerifiedAt) return res.json({ ok: true, delivered: true })
+  const r = await sendVerification(user.id, user.email)
+  if (!r.delivered)
+    throw new HttpError(
+      503,
+      'mail_not_configured',
+      'WorkPulse could not send the email: no email sender is set up (connect Gmail in Integrations or configure SMTP).',
+    )
+  res.json({ ok: true, delivered: true })
 })
 
 auth.get('/me', requireAuth, async (req, res) => {
@@ -124,5 +131,6 @@ auth.get('/me', requireAuth, async (req, res) => {
     activeOrgId: active?.orgId ?? null,
     role: active?.role ?? null,
     organizations: memberships.map((m) => ({ ...m.org, role: m.role })),
+    mailConfigured: await mailConfigured(),
   })
 })

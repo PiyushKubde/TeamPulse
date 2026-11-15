@@ -23,6 +23,8 @@ events.post('/:provider/:subscriptionId', async (req, res) => {
   if (sub.status !== 'ACTIVE' || sub.connection.status === 'REVOKED') throw new HttpError(410, 'gone', 'This subscription is no longer active.')
   const payload = (req.body as { event?: unknown })?.event
   if (payload == null || typeof payload !== 'object') throw new HttpError(400, 'bad_request', 'Expected { event: {...} }.')
+  // Provider verification tokens are not needed and are never stored (Slack's Events API envelope carries one).
+  for (const k of ['token', 'authorizations', 'viasocketHelp']) delete (payload as Record<string, unknown>)[k]
 
   const trigger = provider(slug)?.triggers.find((t) => t.key === sub.triggerKey)
   const bodyHash = createHash('sha256').update(JSON.stringify(payload)).digest('hex')

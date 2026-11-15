@@ -23,7 +23,6 @@ export default defineConfig({
       VIASOCKET_EMBED_SECRET: 'test-secret-not-real',
       PUBLIC_API_URL: 'https://workpulse.test',
       AI_PROVIDER: 'viasocket',
-      AI_DATA_POLICY_CONFIRMED: 'true',
       SMTP_HOST: '',
       S3_BUCKET: '',
       DATA_DIR: './data-test',

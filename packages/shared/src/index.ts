@@ -327,6 +327,8 @@ export const connectionSettingsSchema = z.object({
       label: z.string().max(200).optional(),
     })
     .optional(),
+  /** Slack channel whose messages become tasks. */
+  intake: z.object({ channelId: z.string().max(100), label: z.string().max(200).optional() }).nullable().optional(),
   statusMap: z.partialRecord(z.enum(TASK_STATUSES), z.string().max(200)).optional(),
   userMap: z.record(z.string().max(200), z.string().uuid()).optional(),
 })

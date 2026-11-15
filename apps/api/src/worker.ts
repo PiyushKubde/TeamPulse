@@ -5,6 +5,7 @@ import { logger } from './config/logger.js'
 import { prisma } from './lib/prisma.js'
 import { QUEUES, closeQueues, queue, redis } from './jobs/queues.js'
 import { PROCESSORS } from './jobs/processors.js'
+import { reconcileSubscriptions } from './integrations/connections.js'
 
 const workers = QUEUES.map(
   (name) =>
@@ -26,6 +27,8 @@ await queue('reminders').upsertJobScheduler('hourly', { pattern: '5 * * * *' }, 
 await queue('snapshots').upsertJobScheduler('nightly', { pattern: '0 2 * * *' }, { name: 'nightly' })
 await queue('reports').upsertJobScheduler('weekly', { pattern: '0 8 * * 1' }, { name: 'weekly' })
 logger.info('WorkPulse worker started')
+// Point viaSocket handlers at the current public URL (tunnels change address on restart).
+await reconcileSubscriptions().catch((e) => logger.warn({ err: e instanceof Error ? e.message : e }, 'reconcile failed'))
 
 async function shutdown() {
   await Promise.all(workers.map((w) => w.close()))

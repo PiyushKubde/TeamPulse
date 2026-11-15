@@ -29,7 +29,7 @@ export default defineConfig({
         NODE_ENV: 'development',
         LOG_LEVEL: 'warn',
         SMTP_HOST: '',
-        AI_DATA_POLICY_CONFIRMED: 'false',
+        AI_PROVIDER: '',
       },
       timeout: 60_000,
     },

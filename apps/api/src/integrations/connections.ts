@@ -52,12 +52,35 @@ export async function saveConnection(orgId: string, userId: string, slug: string
   const hash = sha256(authId)
   const existing = await prisma.integrationConnection.findUnique({ where: { userId_provider_authIdHash: { userId, provider: slug, authIdHash: hash } } })
   if (existing && existing.orgId !== orgId) throw conflict('This account is already connected in another organization.')
-  return prisma.integrationConnection.upsert({
+  // Connecting the same app again (expired sign-in, more permissions) replaces the previous connection: its choices and
+  // sync mode carry over and its flows are removed, so the user never ends up with two half-configured connections.
+  const previous = await prisma.integrationConnection.findFirst({
+    where: { orgId, userId, provider: slug, authIdHash: { not: hash }, status: { not: 'REVOKED' } },
+    orderBy: { updatedAt: 'desc' },
+  })
+  const conn = await prisma.integrationConnection.upsert({
     where: { userId_provider_authIdHash: { userId, provider: slug, authIdHash: hash } },
-    create: { orgId, userId, provider: slug, authIdEnc: encrypt(authId), authIdHash: hash, label: vs.connection_label ?? null, settings: {} },
+    create: {
+      orgId,
+      userId,
+      provider: slug,
+      authIdEnc: encrypt(authId),
+      authIdHash: hash,
+      label: vs.connection_label ?? null,
+      settings: (previous?.settings ?? {}) as Prisma.InputJsonValue,
+      syncMode: previous?.syncMode ?? 'ONE_WAY',
+    },
     // Reconnect in place: same auth_id, status back to active; choices are kept.
     update: { status: 'ACTIVE', lastError: null, label: vs.connection_label ?? existing?.label ?? null },
   })
+  if (previous) {
+    await prisma.taskSource.updateMany({ where: { connectionId: previous.id }, data: { connectionId: conn.id } })
+    // The old sign-in may be the same viaSocket account; only revoke it when it is a different auth.
+    await disconnect(previous, true).catch((e) => logger.warn({ err: e instanceof Error ? e.message : e }, 'could not retire previous connection'))
+    if (def.triggers.length)
+      await syncSubscriptions(conn).catch((e) => logger.warn({ err: e instanceof Error ? e.message : e }, 'could not subscribe after reconnect'))
+  }
+  return conn
 }
 
 /** Owner-only lookup. Anyone else gets 404, so ids of other people's connections are useless. */
@@ -90,7 +113,8 @@ export async function pickerOptions(conn: IntegrationConnection, fieldKey: strin
 const handlerFor = (providerSlug: string, subscriptionId: string, token: string) => {
   const url = `${env.PUBLIC_API_URL!.replace(/\/$/, '')}/api/integrations/events/${providerSlug}/${subscriptionId}`
   // Runs on viaSocket per event: forwards the raw event to WorkPulse, authenticated with this subscription's token.
-  return `await axios.post(${JSON.stringify(url)}, { event: context.req.body }, { headers: { authorization: ${JSON.stringify(`Bearer ${token}`)} }, timeout: 20000 })\nreturn { forwarded: true }`
+  // ngrok-skip-browser-warning: harmless elsewhere; lets a local ngrok tunnel pass the request straight through.
+  return `await axios.post(${JSON.stringify(url)}, { event: context.req.body }, { headers: { authorization: ${JSON.stringify(`Bearer ${token}`)}, 'ngrok-skip-browser-warning': '1' }, timeout: 20000 })\nreturn { forwarded: true }`
 }
 
 export interface SubscriptionPlan {
@@ -164,7 +188,7 @@ export async function syncSubscriptions(conn: IntegrationConnection) {
       })
       await prisma.integrationSubscription.update({
         where: { id: row.id },
-        data: { scriptIdEnc: encrypt(sub.scriptId), handlerHash: sha256(code), status: 'ACTIVE' },
+        data: { scriptIdEnc: encrypt(sub.scriptId), handlerHash: sha256(code), handlerBase: env.PUBLIC_API_URL ?? null, status: 'ACTIVE' },
       })
       results.push({ triggerKey: w.triggerKey, resource: w.resource, status: 'ACTIVE' })
     } catch (e) {
@@ -179,6 +203,52 @@ export async function syncSubscriptions(conn: IntegrationConnection) {
     data: { lastError: errors.length ? errors.map((e) => `${e.triggerKey}: ${e.error}`).join('; ') : null, status: errors.length ? 'ERROR' : 'ACTIVE' },
   })
   return results
+}
+
+/**
+ * Start-up reconciliation: creates subscriptions that could not be made earlier (no public URL then) and re-points
+ * handlers whose public URL changed (a new tunnel), each with a fresh token. Never throws.
+ */
+export async function reconcileSubscriptions() {
+  if (!env.PUBLIC_API_URL) return { repointed: 0, synced: 0 }
+  let repointed = 0
+  let synced = 0
+  const subs = await prisma.integrationSubscription.findMany({
+    where: {
+      status: 'ACTIVE',
+      scriptIdEnc: { not: null },
+      NOT: { triggerKey: { startsWith: 'flow:' } },
+      OR: [{ handlerBase: null }, { handlerBase: { not: env.PUBLIC_API_URL } }],
+    },
+    include: { connection: true },
+  })
+  for (const sub of subs) {
+    try {
+      const token = randomToken(32)
+      const code = handlerFor(sub.connection.provider, sub.id, token)
+      await viasocket().user(vsUserId(sub.connection.userId)).updateSubscription(decrypt(sub.scriptIdEnc!), { code })
+      await prisma.integrationSubscription.update({
+        where: { id: sub.id },
+        data: { tokenHash: sha256(token), handlerHash: sha256(code), handlerBase: env.PUBLIC_API_URL },
+      })
+      repointed++
+    } catch (e) {
+      logger.warn({ err: e instanceof Error ? e.message : e, subscription: sub.id }, 'could not re-point subscription')
+    }
+  }
+  const conns = await prisma.integrationConnection.findMany({ where: { status: { in: ['ACTIVE', 'ERROR'] } } })
+  for (const c of conns) {
+    const def = provider(c.provider)
+    if (!def || !def.triggers.length) continue
+    const wanted = plannedSubscriptions(def, c.settings as ConnectionSettings, c.syncMode).length
+    const have = await prisma.integrationSubscription.count({ where: { connectionId: c.id, status: 'ACTIVE', NOT: { triggerKey: { startsWith: 'flow:' } } } })
+    if (wanted > have) {
+      await syncSubscriptions(c).catch((e) => logger.warn({ err: e instanceof Error ? e.message : e }, 'could not create subscriptions'))
+      synced++
+    }
+  }
+  if (repointed || synced) logger.info({ repointed, synced, base: env.PUBLIC_API_URL }, 'subscriptions reconciled')
+  return { repointed, synced }
 }
 
 /** Removes every flow WorkPulse made on the connection, then revokes the connection at viaSocket. */

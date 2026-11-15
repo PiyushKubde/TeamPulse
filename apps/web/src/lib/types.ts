@@ -5,6 +5,7 @@ export interface Me {
   activeOrgId: string | null
   role: Role | null
   organizations: { id: string; name: string; slug: string; role: Role }[]
+  mailConfigured: boolean
 }
 
 export interface Task {

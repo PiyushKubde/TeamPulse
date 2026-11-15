@@ -8,6 +8,8 @@ import { notify } from '../services/notify.js'
 import { provider } from './catalog.js'
 import { ADAPTERS } from './providers/index.js'
 import { applyComment, applyEvidence, applyTask, type ApplyResult } from './normalization/normalizer.js'
+import { applyIntake, confirmationText } from './intake.js'
+import { deliverToSlack } from './delivery.js'
 
 export const MAX_ATTEMPTS = 5
 
@@ -38,14 +40,22 @@ export async function processSyncEvent(eventId: string, opts: { attempt?: number
     for (const item of normalized.items) {
       if (normalized.type === 'task') results.push(await applyTask(conn, item as never, { backfill: opts.backfill }))
       else if (normalized.type === 'comment') results.push(await applyComment(conn, item as never))
-      else {
+      else if (normalized.type === 'intake') {
+        const r = await applyIntake(conn, item as never)
+        results.push(r)
+        if (r.outcome === 'created' && r.taskId && r.taskTitle) {
+          await deliverToSlack(conn.userId, conn.orgId, confirmationText(r.taskTitle, r.taskId), `slack-confirm:${r.taskId}`).catch((e) =>
+            logger.info({ err: e?.message }, 'slack confirmation not sent'),
+          )
+        }
+      } else {
         const r = await applyEvidence(conn, item as never)
         results.push(r)
         if (!r.taskId && r.evidenceId) await suggestMatch(conn.userId, conn.orgId, r.evidenceId)
       }
     }
     const stale = results.length > 0 && results.every((r) => r.outcome === 'stale')
-    const needsMapping = results.some((r) => r.flagged.length)
+    const needsMapping = results.some((r) => r.flagged.some((f) => !f.startsWith('created without AI')))
     const note =
       results
         .map((r) => ('reason' in r ? r.reason : r.flagged.length ? `Needs review: ${r.flagged.join(', ')}` : null))

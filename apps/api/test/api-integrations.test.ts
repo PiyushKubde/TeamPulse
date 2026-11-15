@@ -403,3 +403,155 @@ describe('retries and dead letters', () => {
     }
   })
 })
+
+describe('Slack messages become tasks', () => {
+  async function connectSlack(c: Client, userId: string) {
+    fakeViasocket.addConnection(userId, 'slack', 'auth-slack-1')
+    const conn = (await c.post('/api/integrations/connect').send({ provider: 'slack', authId: 'auth-slack-1' }).expect(201)).body.connection
+    await c
+      .patch(`/api/integrations/connections/${conn.id}`)
+      .send({ intake: { channelId: 'C123', label: 'work-requests' } })
+      .expect(200)
+    const sub = fakeViasocket.subscriptions.find((s) => s.trigger === 'New_Message_Posted_in_Channel_Instant')!
+    return { conn, sub, hook: { path: new URL(/"(https:[^"]+)"/.exec(sub.code!)![1]!).pathname, token: /Bearer ([\w-]+)/.exec(sub.code!)![1]! } }
+  }
+  const msg = (text: string, extra: Record<string, unknown> = {}) => ({
+    ts: `${Date.now()}.${Math.floor(Math.random() * 1e6)}`,
+    text,
+    user: 'U1',
+    channel: 'C123',
+    ...extra,
+  })
+
+  it('subscribes to the chosen channel and creates a task from a work request (AI on)', async () => {
+    const { member } = await orgWithPeople()
+    const { sub, hook } = await connectSlack(member.c, member.user.id)
+    expect(sub.inputData).toEqual({ channel_id: ['C123'] })
+    fakeViasocket.aiQueue.push({
+      isTask: true,
+      title: 'Deploy the M91 feature',
+      description: 'Related to Ashish.',
+      priority: 'HIGH',
+      dueDate: null,
+      assigneeName: null,
+      impact: 'MEDIUM',
+      reason: 'asks for a deployment',
+    })
+    const m = msg('i need to deploy one feature on m91 which is related to ashish sir')
+    await deliver(hook, m).expect(202)
+    const t = await prisma.task.findFirstOrThrow({ include: { source: true } })
+    expect(t).toMatchObject({
+      title: 'Deploy the M91 feature',
+      priority: 'HIGH',
+      assigneeId: member.user.id,
+      origin: 'EXTERNAL',
+      needsReview: false,
+      category: 'From Slack',
+    })
+    expect(t.description).toContain('ashish sir')
+    expect(t.source).toMatchObject({ provider: 'slack', externalId: `C123:${m.ts}` })
+    // A redelivery of the same message never creates a second task.
+    expect((await deliver(hook, m)).body.duplicate).toBe(true)
+    expect(await prisma.task.count()).toBe(1)
+  })
+
+  it('assigns to a teammate only when the AI names an actual member', async () => {
+    const { member, manager } = await orgWithPeople()
+    const { hook } = await connectSlack(member.c, member.user.id)
+    fakeViasocket.aiQueue.push({
+      isTask: true,
+      title: 'Review pricing copy',
+      description: null,
+      priority: 'MEDIUM',
+      dueDate: '2026-11-20',
+      assigneeName: 'Manager',
+      impact: 'LOW',
+      reason: 'asks Manager',
+    })
+    await deliver(hook, msg('Manager, can you review the pricing copy by Friday?')).expect(202)
+    expect(await prisma.task.findFirstOrThrow()).toMatchObject({ assigneeId: manager.user.id })
+    fakeViasocket.aiQueue.push({
+      isTask: true,
+      title: 'Call vendor',
+      description: null,
+      priority: 'MEDIUM',
+      dueDate: null,
+      assigneeName: 'Ashish',
+      impact: 'NONE',
+      reason: 'x',
+    })
+    await deliver(hook, msg('ask ashish to call the vendor')).expect(202)
+    expect(await prisma.task.findFirstOrThrow({ where: { title: 'Call vendor' } })).toMatchObject({ assigneeId: member.user.id })
+  })
+
+  it('skips chatter (AI says not a task) and bot messages (no AI call at all)', async () => {
+    const { member } = await orgWithPeople()
+    const { hook } = await connectSlack(member.c, member.user.id)
+    fakeViasocket.aiQueue.push({
+      isTask: false,
+      title: 'Thanks',
+      description: null,
+      priority: 'LOW',
+      dueDate: null,
+      assigneeName: null,
+      impact: 'NONE',
+      reason: 'a thank-you',
+    })
+    await deliver(hook, msg('thanks everyone!')).expect(202)
+    const calls = fakeViasocket.aiCalls.length
+    await deliver(hook, msg(':white_check_mark: Task created in WorkPulse', { bot_id: 'B1', subtype: 'bot_message' })).expect(202)
+    await deliver(hook, msg('edited', { subtype: 'message_changed' })).expect(202)
+    expect(fakeViasocket.aiCalls.length).toBe(calls)
+    expect(await prisma.task.count()).toBe(0)
+    expect(await prisma.syncEvent.count({ where: { status: 'PROCESSED' } })).toBe(3)
+  })
+
+  it('without AI every human message becomes a task flagged for review', async () => {
+    const { member } = await orgWithPeople()
+    const { hook } = await connectSlack(member.c, member.user.id)
+    const { env } = await import('../src/config/env.js')
+    const saved = env.AI_PROVIDER
+    env.AI_PROVIDER = ''
+    try {
+      await deliver(hook, msg('Prepare the board deck\nwith Q4 numbers')).expect(202)
+    } finally {
+      env.AI_PROVIDER = saved
+    }
+    expect(await prisma.task.findFirstOrThrow()).toMatchObject({ title: 'Prepare the board deck', needsReview: true })
+  })
+
+  it('connecting again replaces the old connection and keeps its choices', async () => {
+    const { member } = await orgWithPeople()
+    const { conn } = await connectSlack(member.c, member.user.id)
+    fakeViasocket.addConnection(member.user.id, 'slack', 'auth-slack-2')
+    const second = (await member.c.post('/api/integrations/connect').send({ provider: 'slack', authId: 'auth-slack-2' }).expect(201)).body.connection
+    expect(second.id).not.toBe(conn.id)
+    expect(second.settings).toMatchObject({ intake: { channelId: 'C123' } })
+    expect((await prisma.integrationConnection.findUniqueOrThrow({ where: { id: conn.id } })).status).toBe('REVOKED')
+    expect(fakeViasocket.revoked).toContain('auth-slack-1')
+    expect(await prisma.integrationSubscription.count({ where: { connectionId: second.id, status: 'ACTIVE' } })).toBe(1)
+  })
+})
+
+describe('tunnel address changes', () => {
+  it('re-points handlers to the current PUBLIC_API_URL with a fresh token', async () => {
+    const { member } = await orgWithPeople()
+    const { handlers } = await connectLinear(member.c, member.user.id)
+    const { env } = await import('../src/config/env.js')
+    const { reconcileSubscriptions } = await import('../src/integrations/connections.js')
+    const saved = env.PUBLIC_API_URL
+    env.PUBLIC_API_URL = 'https://new-tunnel.example'
+    try {
+      const r = await reconcileSubscriptions()
+      expect(r.repointed).toBe(3)
+      const sub = fakeViasocket.subscriptions.find((s) => s.trigger === 'New_Issue_Created')!
+      expect(sub.code).toContain('https://new-tunnel.example/api/integrations/events/linear/')
+      // The old token no longer works; the new one does.
+      expect((await deliver(handlers.New_Issue_Created!, issue())).status).toBe(401)
+      const token = /Bearer ([\w-]+)/.exec(sub.code!)![1]!
+      await deliver({ path: handlers.New_Issue_Created!.path, token }, issue()).expect(202)
+    } finally {
+      env.PUBLIC_API_URL = saved
+    }
+  })
+})

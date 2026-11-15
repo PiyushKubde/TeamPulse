@@ -43,7 +43,22 @@ export interface NormalizedEvidence {
   occurredAt: Date | null
 }
 
+/** A chat message that may become a task. */
+export interface NormalizedMessage {
+  provider: string
+  externalId: string
+  channel: string
+  ts: string
+  text: string
+  author: string | null
+  /** Bot posts, edits, joins and other system messages never become tasks (prevents loops with WorkPulse's own posts). */
+  ignore: boolean
+}
+
 export type Normalized =
-  { type: 'task'; items: NormalizedTask[] } | { type: 'comment'; items: NormalizedComment[] } | { type: 'evidence'; items: NormalizedEvidence[] }
+  | { type: 'task'; items: NormalizedTask[] }
+  | { type: 'comment'; items: NormalizedComment[] }
+  | { type: 'evidence'; items: NormalizedEvidence[] }
+  | { type: 'intake'; items: NormalizedMessage[] }
 
 export type { Priority, TaskStatus }

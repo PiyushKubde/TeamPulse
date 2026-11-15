@@ -166,3 +166,14 @@ describe('tenant isolation and role scope', () => {
     expect((await owner.c.get('/api/audit-logs')).body.items.length).toBeGreaterThan(0)
   })
 })
+
+describe('verification email delivery', () => {
+  it('tells the user when no email sender is set up, instead of pretending it was sent', async () => {
+    const { c } = await signUp('NoMail')
+    const me = (await c.get('/api/auth/me')).body
+    expect(me.mailConfigured).toBe(false)
+    const r = await c.post('/api/auth/resend-verification')
+    expect(r.status).toBe(503)
+    expect(r.body.error.code).toBe('mail_not_configured')
+  })
+})

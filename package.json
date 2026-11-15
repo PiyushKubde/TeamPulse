@@ -13,7 +13,7 @@
     "apps/web"
   ],
   "scripts": {
-    "dev": "concurrently -k -n api,worker,web -c blue,magenta,green \"npm run dev -w @workpulse/api\" \"npm run worker:dev -w @workpulse/api\" \"npm run dev -w @workpulse/web\"",
+    "dev": "node scripts/dev.mjs",
     "build": "npm run build -w @workpulse/shared && npm run build -w @workpulse/api && npm run build -w @workpulse/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint . && prettier --check .",
@@ -25,7 +25,8 @@
     "start": "npm run start -w @workpulse/api",
     "db:deploy": "npm run db:deploy -w @workpulse/api",
     "viasocket:selftest": "npm run viasocket:selftest -w @workpulse/api",
-    "worker": "npm run start:worker -w @workpulse/api"
+    "worker": "npm run start:worker -w @workpulse/api",
+    "dev:no-tunnel": "concurrently -k -n api,worker,web -c blue,magenta,green \"npm run dev -w @workpulse/api\" \"npm run worker:dev -w @workpulse/api\" \"npm run dev -w @workpulse/web\""
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

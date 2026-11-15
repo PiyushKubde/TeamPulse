@@ -6,7 +6,7 @@ import { automationToken, createFlow, saveSteps, setTrigger, runWebhookFlow, typ
 import { authIdOf } from './connections.js'
 import { ACTIONS, provider } from './catalog.js'
 
-export type FlowName = 'slack_delivery' | 'gmail_delivery' | 'linear_status' | 'jira_backfill'
+export type FlowName = 'slack_delivery' | 'gmail_delivery' | 'system_mail' | 'linear_status' | 'jira_backfill'
 
 const flowKey = (n: FlowName) => `flow:${n}`
 
@@ -34,6 +34,16 @@ function stepsFor(name: FlowName, conn: IntegrationConnection, email?: string): 
         service_action_functions: [{ name: 'sendEmail', auth_id: auth, action_id: ACTIONS.gmailSendEmail.actionId }],
         // `to` is fixed to the person's own verified email; `from` left out: sends as the connected account.
         code: `const b = context?.req?.body || {}\nif (!b.subject || !b.text) return { skipped: true }\nreturn await sendEmail({ inputData: { to: ${JSON.stringify(email)}, subject: String(b.subject).slice(0, 200), messageBody: String(b.text).slice(0, 100000), fromName: "WorkPulse" } })`,
+      },
+    ]
+  }
+  if (name === 'system_mail') {
+    return [
+      {
+        stepname: 'send',
+        service_action_functions: [{ name: 'sendEmail', auth_id: auth, action_id: ACTIONS.gmailSendEmail.actionId }],
+        // System email: the recipient varies per run (verification, reset, invitation); WorkPulse validated it.
+        code: `const b = context?.req?.body || {}\nconst to = String(b.to || '')\nif (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(to) || !b.subject || !b.text) return { skipped: true }\nreturn await sendEmail({ inputData: { to, subject: String(b.subject).slice(0, 200), messageBody: String(b.text).slice(0, 100000), fromName: "WorkPulse" } })`,
       },
     ]
   }

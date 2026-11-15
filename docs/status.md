@@ -50,7 +50,7 @@ now 404); reliability ignored work finished early; Zod 4 records required every 
 | Linear integration | PARTIAL (live BLOCKED) | mock: 20 tests in `api-integrations.test.ts`; real: catalog keys/ids verified, checker 0 FAIL |
 | GitHub integration | PARTIAL (live BLOCKED) | mock: per-repo subscriptions, PR → evidence, key matching; real: catalog verified |
 | Jira integration | PARTIAL (live BLOCKED) | mock: adapter (envelope, ADF, JQL lists), two-way refused; real: catalog verified |
-| Slack integration | PARTIAL (live BLOCKED) | flow code + real automation round trip (code-only step); `Send_Message` not run live |
+| Slack integration | PARTIAL | message → task: real subscription + real sample event verified, mock-tested (5 tests); live message not yet observed; `Send_Message` not run live |
 | Normalization engine | COMPLETED (mock-verified) | `unit-normalization.test.ts`, ingestion tests (stale, duplicates, internal fields, mappings, reprocess) |
 | Individual analytics | COMPLETED | `unit-performance.test.ts` (11 rules), `api-work.test.ts`; e2e step 9 |
 | Team analytics | COMPLETED | `api-work.test.ts` (scope, filters); e2e steps 10–11; screenshots reviewed |
@@ -67,6 +67,5 @@ now 404); reliability ignored work finished early; Zod 4 records required every 
 1. **Test accounts** for Linear, GitHub, Jira, Slack (and Gmail), connected through WorkPulse's Connect button.
 2. **A public HTTPS URL** for the API (`PUBLIC_API_URL`): a tunnel for local testing, or the production host.
 3. **Production host choice**, then the environment from `docs/deployment.md`.
-4. **AI data policy decision** (`AI_DATA_POLICY_CONFIRMED`).
-5. **SMTP provider** for verification, reset, invitation and report emails.
+5. **Email**: connect Gmail in Integrations as an owner/admin (or set SMTP) so verification, reset and invitation emails are sent.
 6. **Rotate the viaSocket embed secret** before production (it was shared in chat).
