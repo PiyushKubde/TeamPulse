@@ -98,6 +98,8 @@ test('4–8. project, goal, task, complete it, attach evidence', async ({ page }
   const td = page.getByRole('dialog')
   await td.getByLabel('Title', { exact: true }).fill('Migrate pricing page')
   await td.getByLabel('Expected impact').selectOption('HIGH')
+  // Managers default to Auto-assign; this journey follows the owner's own work.
+  await td.getByLabel('Assignee').selectOption({ label: `${owner.name} (me)` })
   await td.getByLabel('Project', { exact: true }).selectOption({ label: 'Launch site' })
   await td.getByLabel('Goal', { exact: true }).selectOption({ label: 'Ship the new site' })
   await td.getByLabel('Due date').fill(new Date(Date.now() + 864e5).toISOString().slice(0, 10))

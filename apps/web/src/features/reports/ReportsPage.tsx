@@ -119,11 +119,15 @@ export function ReportView() {
   const q = useQuery({ queryKey: ['report', id], queryFn: () => api<{ report: Report }>(`/reports/${id}`), select: (d) => d.report })
   const deliver = useMutation({
     mutationFn: (channel: 'EMAIL' | 'SLACK') => api<{ delivery: { status: string } }>(`/reports/${id}/deliver`, { body: { channel } }),
-    onSuccess: (r) => {
+    onSuccess: (_r, channel) => {
       qc.invalidateQueries({ queryKey: ['report', id] })
-      toast.success(r.delivery.status === 'LOGGED' ? 'Email is not configured on this server; the report was written to the server log.' : 'Sent')
+      toast.success(channel === 'SLACK' ? 'Sent to Slack' : 'Emailed to you')
     },
-    onError: (e) => toast.error(errorMessage(e)),
+    // The server explains what went wrong and what to do; keep it on screen long enough to read.
+    onError: (e) => {
+      qc.invalidateQueries({ queryKey: ['report', id] })
+      toast.error(errorMessage(e), { duration: 12000 })
+    },
   })
   if (q.isLoading) return <Skeleton className="h-96" />
   if (q.error || !q.data)

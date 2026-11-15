@@ -11,7 +11,8 @@ import {
 } from '@workpulse/shared'
 import { prisma, type IntegrationConnection, type Prisma } from '../lib/prisma.js'
 import { body, param, query } from '../lib/validate.js'
-import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js'
+import { HttpError, badRequest, conflict, forbidden, notFound } from '../lib/errors.js'
+import { humanize } from '../integrations/messages.js'
 import { assertAdmin, findEditableTask } from '../lib/scope.js'
 import { audit } from '../lib/audit.js'
 import { decrypt } from '../lib/crypto.js'
@@ -182,9 +183,18 @@ integrations.post('/integrations/connections/:id/test-delivery', async (req, res
   const conn = await ownConnection(ctx.userId, ctx.orgId, param(req, 'id'))
   const user = await prisma.user.findUniqueOrThrow({ where: { id: ctx.userId }, select: { email: true, name: true } })
   const text = `WorkPulse test message for ${user.name}. Reports will arrive here.`
-  if (conn.provider === 'slack') await runFlow(conn, 'slack_delivery', { text })
-  else if (conn.provider === 'gmail') await runFlow(conn, 'gmail_delivery', { subject: 'WorkPulse test message', text }, { email: user.email })
-  else throw badRequest('Only Slack and Gmail deliver messages.')
+  if (conn.provider !== 'slack' && conn.provider !== 'gmail') throw badRequest('Only Slack and Gmail send messages.')
+  if (conn.provider === 'slack') {
+    const d = (conn.settings as { delivery?: { channelId?: string; userId?: string } }).delivery
+    if (!d?.channelId && !d?.userId)
+      throw new HttpError(409, 'not_configured', 'Choose where to send first: under “Out of WorkPulse”, pick a channel or yourself.')
+  }
+  try {
+    if (conn.provider === 'slack') await runFlow(conn, 'slack_delivery', { text })
+    else await runFlow(conn, 'gmail_delivery', { subject: 'WorkPulse test message', text }, { email: user.email })
+  } catch (e) {
+    throw humanize(e, conn.provider)
+  }
   res.json({ ok: true })
 })
 

@@ -6,6 +6,22 @@ Each connection works in two directions:
 - **Into WorkPulse:** work and evidence arrive and become tasks or evidence.
 - **Out of WorkPulse:** reports, alerts and status updates go out.
 
+## 0. Who gets each task (automatic, every source)
+
+Every new task, whether from the task form (Auto-assign, the default for managers), the AI assistant, a Slack message,
+or a new open Linear, Jira or GitHub issue without a known assignee, gets an owner automatically:
+
+1. **A named person** ("assign to Neha Gupta", a Linear assignee whose name matches a member) gets it, as long as the
+   requester is allowed to assign them (admins: anyone; managers: their teams; members: themselves).
+2. **Otherwise AI picks the best fit** among the people the requester may assign, weighing role and title, team, recent
+   completed work and current load (open tasks, estimated hours). It prefers individual contributors for execution work.
+3. **Without AI**, a rule decides: overlap between the task's words and each person's recent work, minus their load.
+
+The choice and its reason are written to the task's Activity ("assigned automatically to Rohan Das: recent run-queue
+work and spare capacity"), and the person is notified. Tasks imported as already completed or cancelled stay unassigned,
+because guessing who did past work would give false credit in the scores. The assistant creates tasks immediately; there
+is no review step.
+
 ## 1. Into WorkPulse (event-driven, within seconds)
 
 viaSocket watches the app for you and forwards each event to WorkPulse. WorkPulse saves the event once (duplicates are

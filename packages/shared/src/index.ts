@@ -157,7 +157,8 @@ export const taskCreateSchema = z.object({
   labels: z.array(text(40).min(1)).max(20).optional(),
   projectId: id.nullable().optional(),
   parentId: id.nullable().optional(),
-  assigneeId: id.nullable().optional(),
+  /** A member id, null for unassigned, or "auto": WorkPulse picks the best fit (named person, else AI or rules). */
+  assigneeId: z.union([id, z.literal('auto')]).nullable().optional(),
   dueAt: isoDate.nullable().optional(),
   estimateMins: z.number().int().min(0).max(100000).nullable().optional(),
   impactLevel: z.enum(IMPACT_LEVELS).optional(),

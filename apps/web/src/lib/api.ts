@@ -10,6 +10,21 @@ export class ApiError extends Error {
   }
 }
 
+/** Readable messages when the server answered without an explanation (proxies, timeouts, crashes). */
+const FALLBACK: Record<number, string> = {
+  400: 'That request wasn’t valid. Check the form and try again.',
+  401: 'Your session has ended. Please sign in again.',
+  403: 'You don’t have permission to do that.',
+  404: 'That item no longer exists or you can’t see it.',
+  409: 'That can’t be done right now; it conflicts with the current state.',
+  413: 'That is too large to upload.',
+  429: 'Too many requests. Wait a moment and try again.',
+  500: 'Something went wrong on our side. Please try again.',
+  502: 'A connected app didn’t respond as expected. Please try again in a minute.',
+  503: 'This feature isn’t available right now.',
+  504: 'The server took too long to answer. Please try again.',
+}
+
 type Query = Record<string, string | number | boolean | undefined | null | string[]>
 
 export function qs(query?: Query) {
@@ -38,7 +53,12 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     const e = (data as { error?: { code?: string; message?: string; details?: unknown } }).error
-    throw new ApiError(res.status, e?.code ?? 'error', e?.message ?? `Request failed (${res.status})`, e?.details)
+    throw new ApiError(
+      res.status,
+      e?.code ?? 'error',
+      e?.message ?? FALLBACK[res.status] ?? FALLBACK[Math.floor(res.status / 100) * 100] ?? 'Something went wrong. Please try again.',
+      e?.details,
+    )
   }
   return data as T
 }

@@ -3,7 +3,8 @@ import { z } from 'zod'
 import { deliverReportSchema, generateReportSchema } from '@workpulse/shared'
 import { prisma, type Prisma } from '../lib/prisma.js'
 import { body, param, query } from '../lib/validate.js'
-import { forbidden, notFound } from '../lib/errors.js'
+import { HttpError, forbidden, notFound } from '../lib/errors.js'
+import { humanize } from '../integrations/messages.js'
 import { canSeeUser, type Ctx } from '../lib/scope.js'
 import { audit } from '../lib/audit.js'
 import { sendMail } from '../lib/mailer.js'
@@ -130,22 +131,31 @@ reports.post('/reports/:id/deliver', async (req, res) => {
   if (approval && r.subject.startsWith('team:') && !ctx.orgWide) throw forbidden('Your organization requires an admin to send team reports outside WorkPulse.')
   const content = r.content as unknown as ReportContent
   let status = 'SENT'
-  let error: string | null = null
+  let failure: HttpError | null = null
   let target = ''
   try {
     if (channel === 'EMAIL') {
       target = userOf(req).email
       const sent = await sendMail(target, content.title, toMarkdown(content, r.aiSummary).replace(/\*/g, ''))
-      if (!sent.delivered) status = 'LOGGED'
+      if (!sent.delivered) {
+        status = 'FAILED'
+        failure = new HttpError(
+          409,
+          'mail_not_configured',
+          'Email isn’t set up yet, so nothing was sent. An owner or admin can connect Gmail in Integrations; then try again.',
+        )
+      }
     } else {
       target = 'slack'
       await deliverToSlack(ctx.userId, ctx.orgId, toMarkdown(content, r.aiSummary), `report:${r.id}:${Date.now()}`)
     }
   } catch (e) {
     status = 'FAILED'
-    error = e instanceof Error ? e.message.slice(0, 300) : 'Delivery failed'
+    failure = humanize(e, channel === 'EMAIL' ? 'gmail' : 'slack')
   }
-  const delivery = await prisma.reportDelivery.create({ data: { reportId: r.id, channel, target, status, error } })
+  // The delivery history keeps the plain-language reason, the same one shown on screen.
+  await prisma.reportDelivery.create({ data: { reportId: r.id, channel, target, status, error: failure?.message.slice(0, 300) ?? null } })
   await audit(req, ctx.orgId, 'report.deliver', { type: 'Report', id: r.id }, { channel, status })
-  res.status(status === 'FAILED' ? 502 : 200).json({ delivery })
+  if (failure) throw failure
+  res.json({ delivery: { channel, status } })
 })

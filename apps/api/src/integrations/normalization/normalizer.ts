@@ -5,6 +5,7 @@
 import { prisma, type IntegrationConnection, type Prisma, type TaskStatus } from '../../lib/prisma.js'
 import { statusEffects } from '../../modules/tasks.js'
 import { notify } from '../../services/notify.js'
+import { chooseAssignee, recordAssignment, type AssignmentDecision } from '../../services/assignment.js'
 import type { ConnectionSettings } from '../catalog.js'
 import { mapPriority, mapStatus, normKey } from './status-mapping.js'
 import type { NormalizedComment, NormalizedEvidence, NormalizedTask } from './types.js'
@@ -96,6 +97,18 @@ export async function applyTask(conn: IntegrationConnection, n: NormalizedTask, 
     if (conn.syncMode === 'IMPORT_ONLY' && !opts.backfill)
       return { outcome: 'skipped', taskId: null, reason: 'Import-only connection: live events do not create tasks.', flagged }
     const now = new Date()
+    // No recognised assignee on open work: pick one automatically (the external name first, else best fit).
+    // Work that is already finished stays unassigned: guessing who did past work would hand out false credit.
+    let decision: AssignmentDecision | null = null
+    if (!assignee.id && status.value !== 'COMPLETED' && status.value !== 'CANCELLED') {
+      decision = await chooseAssignee(conn.orgId, conn.userId, {
+        title: n.title,
+        description: n.description,
+        namedPerson: n.assignee?.name ?? n.assignee?.email ?? null,
+      })
+      if (decision.by === 'NAMED') flagged.splice(0, flagged.length, ...flagged.filter((f) => !f.startsWith('assignee')))
+    }
+    const assigneeId = assignee.id ?? decision?.userId ?? null
     const task = await prisma.task.create({
       data: {
         orgId: conn.orgId,
@@ -105,7 +118,7 @@ export async function applyTask(conn: IntegrationConnection, n: NormalizedTask, 
         description: external.description as string | null,
         status: status.value,
         priority: priority.value,
-        assigneeId: assignee.id,
+        assigneeId,
         dueAt: n.dueAt,
         labels: n.labels,
         needsReview: flagged.length > 0,
@@ -117,10 +130,11 @@ export async function applyTask(conn: IntegrationConnection, n: NormalizedTask, 
     await prisma.taskActivity.create({
       data: { taskId: task.id, kind: 'imported', actorType: 'SYNC', toValue: `${n.provider}${n.externalKey ? ` ${n.externalKey}` : ''}` },
     })
-    if (assignee.id && assignee.id !== conn.userId) {
+    if (decision) await recordAssignment(task.id, decision, null)
+    if (assigneeId && assigneeId !== conn.userId) {
       await notify({
         orgId: conn.orgId,
-        userId: assignee.id,
+        userId: assigneeId,
         kind: 'external_task',
         title: `New task from ${n.provider}: ${task.title}`,
         link: `/tasks/${task.id}`,

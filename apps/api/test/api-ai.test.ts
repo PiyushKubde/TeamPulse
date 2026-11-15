@@ -107,29 +107,34 @@ describe('assistant', () => {
     ])
   })
 
-  it('only offers the allowlisted tools and never writes data (draft_task returns a draft)', async () => {
-    const { member } = await orgWithPeople()
+  it('creates the task right away and assigns the named person', async () => {
+    const { manager, member } = await orgWithPeople()
     fakeViasocket.aiQueue.push({
       type: 'tool_call',
-      tool: 'draft_task',
-      arguments: JSON.stringify({
-        title: 'Follow up with vendor',
-        description: null,
-        priority: 'MEDIUM',
-        dueDate: null,
-        category: null,
-        suggestedImpact: 'LOW',
-        estimateMins: 15,
-        subtasks: [],
-        rationale: 'asked',
-      }),
+      tool: 'create_task',
+      arguments: JSON.stringify({ title: 'Deploy the M91 feature', dueDate: '2026-11-16', priority: 'HIGH', assigneeName: 'member' }),
       answer: null,
     })
-    fakeViasocket.aiQueue.push({ type: 'answer', tool: null, arguments: null, answer: 'Here is a draft.' })
-    const r = (await member.c.post('/api/ai/chat').send({ message: 'Create a task to follow up with the vendor' }).expect(200)).body
-    expect(r.draft).toMatchObject({ title: 'Follow up with vendor' })
-    expect(await prisma.task.count()).toBe(0)
-    const prompt = fakeViasocket.aiCalls[0]
-    expect(prompt).toBeDefined()
+    fakeViasocket.aiQueue.push({ type: 'answer', tool: null, arguments: null, answer: 'Created and assigned to Member.' })
+    const r = (await manager.c.post('/api/ai/chat').send({ message: 'deploy the m91 feature today, assign it to member' }).expect(200)).body
+    expect(r.created).toHaveLength(1)
+    expect(r.created[0]).toMatchObject({ title: 'Deploy the M91 feature', assignee: 'Member' })
+    expect(await prisma.task.findFirstOrThrow({ where: { title: 'Deploy the M91 feature' } })).toMatchObject({
+      assigneeId: member.user.id,
+      priority: 'HIGH',
+      creatorId: manager.user.id,
+    })
+  })
+
+  it('picks the best fit when nobody is named, and never someone outside the caller’s reach', async () => {
+    const { manager, member, other } = await orgWithPeople()
+    fakeViasocket.aiQueue.push({ type: 'tool_call', tool: 'create_task', arguments: JSON.stringify({ title: 'Write release notes' }), answer: null })
+    // The model tries to pick someone the manager does not manage: refused, rules decide instead.
+    fakeViasocket.aiQueue.push({ userId: other.user.id, reason: 'x' })
+    fakeViasocket.aiQueue.push({ type: 'answer', tool: null, arguments: null, answer: 'Done.' })
+    await manager.c.post('/api/ai/chat').send({ message: 'someone should write the release notes' }).expect(200)
+    const t = await prisma.task.findFirstOrThrow({ where: { title: 'Write release notes' } })
+    expect([manager.user.id, member.user.id]).toContain(t.assigneeId)
+    expect(t.assigneeId).not.toBe(other.user.id)
   })
 })

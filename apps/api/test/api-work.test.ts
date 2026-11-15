@@ -334,3 +334,25 @@ describe('date ranges', () => {
     expect(a.kpis.completedOutcomes).toBe(1)
   })
 })
+
+describe('delivery errors are explained in plain language', () => {
+  it('Slack not connected, connected in another organization, and email without a sender', async () => {
+    const { member } = await orgWithPeople()
+    const report = (await member.c.post('/api/reports/generate').send({ kind: 'DAILY', subject: `user:${member.user.id}` })).body.report
+    const r1 = await member.c.post(`/api/reports/${report.id}/deliver`).send({ channel: 'SLACK' })
+    expect(r1.status).toBe(409)
+    expect(r1.body.error.message).toMatch(/Slack isn’t connected yet. Open Integrations/)
+    // A Slack connection that belongs to the same person's other organization.
+    const other = await prisma.organization.create({ data: { name: 'Other Org', slug: 'other-org-x' } })
+    await prisma.integrationConnection.create({
+      data: { orgId: other.id, userId: member.user.id, provider: 'slack', authIdEnc: 'x', authIdHash: 'h2', settings: {} },
+    })
+    const r2 = await member.c.post(`/api/reports/${report.id}/deliver`).send({ channel: 'SLACK' })
+    expect(r2.body.error.message).toMatch(/connected in your other organization \(Other Org\), not this one/)
+    const r3 = await member.c.post(`/api/reports/${report.id}/deliver`).send({ channel: 'EMAIL' })
+    expect(r3.status).toBe(409)
+    expect(r3.body.error.message).toMatch(/Email isn’t set up yet/)
+    const history = (await member.c.get(`/api/reports/${report.id}`)).body.report.deliveries
+    expect(history[0].error).toMatch(/Email isn’t set up yet/)
+  })
+})

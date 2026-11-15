@@ -23,6 +23,7 @@ import { logActivity, recordChanges } from '../services/activity.js'
 import { notify } from '../services/notify.js'
 import { deleteFile, putFile, readLocal, signedUrl } from '../lib/storage.js'
 import { queueOutbound } from '../integrations/outbound.js'
+import { chooseAssignee, recordAssignment, type AssignmentDecision } from '../services/assignment.js'
 
 export const tasks = Router()
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: env.UPLOAD_MAX_BYTES, files: 1 } })
@@ -107,9 +108,19 @@ async function assertRefs(
   if (input.assigneeId) await assertAssignable(ctx, input.assigneeId)
 }
 
-export async function createTask(ctx: Ctx, input: z.infer<typeof taskCreateSchema>, actor: 'USER' | 'AI' = 'USER') {
-  await assertRefs(ctx, input)
-  const { goalIds, dependsOnIds, ...fields } = input
+export async function createTask(ctx: Ctx, input: z.infer<typeof taskCreateSchema>, actor: 'USER' | 'AI' = 'USER', opts: { namedPerson?: string | null } = {}) {
+  let decision: AssignmentDecision | null = null
+  if (input.assigneeId === 'auto') {
+    decision = await chooseAssignee(ctx.orgId, ctx.userId, {
+      title: input.title,
+      description: input.description,
+      category: input.category,
+      namedPerson: opts.namedPerson,
+    })
+    input = { ...input, assigneeId: decision.userId }
+  }
+  await assertRefs(ctx, input as { assigneeId?: string | null })
+  const { goalIds, dependsOnIds, ...fields } = input as Omit<typeof input, 'assigneeId'> & { assigneeId?: string | null }
   const status = fields.status ?? 'TODO'
   const now = new Date()
   const task = await prisma.task.create({
@@ -128,6 +139,7 @@ export async function createTask(ctx: Ctx, input: z.infer<typeof taskCreateSchem
     include: taskInclude,
   })
   await logActivity(task.id, 'created', actor, ctx.userId)
+  if (decision) await recordAssignment(task.id, decision, ctx.userId)
   if (task.assigneeId && task.assigneeId !== ctx.userId) {
     await notify({
       orgId: ctx.orgId,
@@ -144,6 +156,15 @@ export async function createTask(ctx: Ctx, input: z.infer<typeof taskCreateSchem
 export async function updateTask(ctx: Ctx, id: string, input: z.infer<typeof taskUpdateSchema>) {
   const before = await findEditableTask(ctx, id)
   if (before.parentId === null && input.parentId === id) throw badRequest('A task cannot be its own parent.')
+  let decision: AssignmentDecision | null = null
+  if (input.assigneeId === 'auto') {
+    decision = await chooseAssignee(ctx.orgId, ctx.userId, {
+      title: input.title ?? before.title,
+      description: input.description ?? before.description,
+      category: input.category ?? before.category,
+    })
+    input = { ...input, assigneeId: decision.userId }
+  }
   await assertRefs(ctx, { ...input, assigneeId: input.assigneeId !== before.assigneeId ? input.assigneeId : undefined })
   const { goalIds, dependsOnIds, archived, ...fields } = input
   // Impact and complexity are planning judgements: the owner may set them, but a manager's verified assessment lives elsewhere.
@@ -164,6 +185,7 @@ export async function updateTask(ctx: Ctx, id: string, input: z.infer<typeof tas
     return tx.task.update({ where: { id }, data, include: taskInclude })
   })
   await recordChanges(id, before, task, 'USER', ctx.userId)
+  if (decision) await recordAssignment(id, decision, ctx.userId)
 
   if (fields.status === 'COMPLETED' && before.status !== 'COMPLETED' && before.recurrenceRule) {
     const due = nextOccurrence(before.recurrenceRule, before.dueAt ?? new Date())

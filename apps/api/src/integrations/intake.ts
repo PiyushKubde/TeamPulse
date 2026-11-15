@@ -11,6 +11,7 @@ import { notify } from '../services/notify.js'
 import type { ApplyResult } from './normalization/normalizer.js'
 import type { NormalizedMessage } from './normalization/types.js'
 import type { ConnectionSettings } from './catalog.js'
+import { chooseAssignee, recordAssignment } from '../services/assignment.js'
 
 const draftSchema = z.object({
   isTask: z.boolean(),
@@ -32,20 +33,6 @@ const firstLine = (text: string) =>
     .replace(/<[@#!][^>]*>/g, '')
     .trim()
     .slice(0, 200) || 'Task from Slack'
-
-/** Exact or partial (either direction) name match against active members; unique matches only. */
-function matchMember(name: string | null, members: { userId: string; name: string }[]) {
-  if (!name) return null
-  const n = name
-    .toLowerCase()
-    .replace(/\b(sir|madam|ma'am|mr|ms|mrs)\b\.?/g, '')
-    .trim()
-  if (!n) return null
-  const exact = members.filter((m) => m.name.toLowerCase() === n)
-  if (exact.length === 1) return exact[0]!.userId
-  const partial = members.filter((m) => m.name.toLowerCase().includes(n) || n.includes(m.name.toLowerCase().split(' ')[0]!))
-  return partial.length === 1 ? partial[0]!.userId : null
-}
 
 export async function applyIntake(conn: IntegrationConnection, m: NormalizedMessage): Promise<ApplyResult & { taskTitle?: string }> {
   if (m.ignore) return { outcome: 'skipped', taskId: null, reason: 'Bot, edited or system message: not turned into a task.', flagged: [] }
@@ -69,7 +56,7 @@ export async function applyIntake(conn: IntegrationConnection, m: NormalizedMess
           `You read one Slack message posted by ${owner.name} and turn it into a task for a work tracker. Today is ${todayIn(owner.timezone)}.`,
           'isTask is false only for messages that ask for no work (greetings, thanks, FYIs, questions answered by yes/no, chatter).',
           'title: short imperative outcome (e.g. "Deploy the M91 feature"). description: the useful details, including people or systems mentioned.',
-          `assigneeName: only when the message clearly asks a specific person to do the work, and only if it is one of: ${members.map((x) => x.name).join(', ') || 'nobody'}. Otherwise null (the poster owns it).`,
+          `assigneeName: only when the message clearly asks a specific person to do the work, and only if it is one of: ${members.map((x) => x.name).join(', ') || 'nobody'}. Otherwise null (WorkPulse then picks the best-fit teammate).`,
           'dueDate: resolve relative dates ("by Friday") against today, else null. priority from urgency words; MEDIUM by default. impact is only a suggestion; NONE if unclear.',
           'Use only what the message says. Never invent people, dates or details.',
         ].join('\n'),
@@ -82,7 +69,9 @@ export async function applyIntake(conn: IntegrationConnection, m: NormalizedMess
   }
   if (draft && !draft.isTask) return { outcome: 'skipped', taskId: null, reason: `Not a task request (AI): ${draft.reason}`, flagged: [] }
 
-  const assigneeId = matchMember(draft?.assigneeName ?? null, members) ?? conn.userId
+  const title = draft?.title ?? firstLine(m.text)
+  const decision = await chooseAssignee(conn.orgId, conn.userId, { title, description: draft?.description ?? m.text, namedPerson: draft?.assigneeName })
+  const assigneeId = decision.userId
   const description = [draft?.description, `From Slack:\n> ${m.text.slice(0, 3000)}`].filter(Boolean).join('\n\n')
   const task = await prisma.task.create({
     data: {
@@ -90,7 +79,7 @@ export async function applyIntake(conn: IntegrationConnection, m: NormalizedMess
       creatorId: conn.userId,
       assigneeId,
       origin: 'EXTERNAL',
-      title: draft?.title ?? firstLine(m.text),
+      title,
       description,
       status: 'TODO',
       priority: draft?.priority ?? 'MEDIUM',
@@ -113,6 +102,7 @@ export async function applyIntake(conn: IntegrationConnection, m: NormalizedMess
     },
   })
   await prisma.taskActivity.create({ data: { taskId: task.id, kind: 'imported', actorType: draft ? 'AI' : 'SYNC', toValue: 'slack message' } })
+  await recordAssignment(task.id, decision, null)
   await notify({
     orgId: conn.orgId,
     userId: assigneeId,

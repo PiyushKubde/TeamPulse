@@ -455,21 +455,22 @@ describe('Slack messages become tasks', () => {
     expect(await prisma.task.count()).toBe(1)
   })
 
-  it('assigns to a teammate only when the AI names an actual member', async () => {
-    const { member, manager } = await orgWithPeople()
-    const { hook } = await connectSlack(member.c, member.user.id)
+  it('assigns the named teammate, or picks the best fit when nobody (or a non-member) is named', async () => {
+    const { manager, member } = await orgWithPeople()
+    const { hook } = await connectSlack(manager.c, manager.user.id)
     fakeViasocket.aiQueue.push({
       isTask: true,
       title: 'Review pricing copy',
       description: null,
       priority: 'MEDIUM',
       dueDate: '2026-11-20',
-      assigneeName: 'Manager',
+      assigneeName: 'Member',
       impact: 'LOW',
-      reason: 'asks Manager',
+      reason: 'names Member',
     })
-    await deliver(hook, msg('Manager, can you review the pricing copy by Friday?')).expect(202)
-    expect(await prisma.task.findFirstOrThrow()).toMatchObject({ assigneeId: manager.user.id })
+    await deliver(hook, msg('Member, can you review the pricing copy by Friday?')).expect(202)
+    expect(await prisma.task.findFirstOrThrow()).toMatchObject({ assigneeId: member.user.id })
+    // "Ashish" is not a member: AI picks among the manager's team.
     fakeViasocket.aiQueue.push({
       isTask: true,
       title: 'Call vendor',
@@ -480,8 +481,28 @@ describe('Slack messages become tasks', () => {
       impact: 'NONE',
       reason: 'x',
     })
-    await deliver(hook, msg('ask ashish to call the vendor')).expect(202)
-    expect(await prisma.task.findFirstOrThrow({ where: { title: 'Call vendor' } })).toMatchObject({ assigneeId: member.user.id })
+    fakeViasocket.aiQueue.push({ userId: member.user.id, reason: 'Member handles vendor follow-ups and has capacity.' })
+    await deliver(hook, msg('ask ashish sir to call the vendor')).expect(202)
+    const t = await prisma.task.findFirstOrThrow({ where: { title: 'Call vendor' }, include: { activity: true } })
+    expect(t.assigneeId).toBe(member.user.id)
+    expect(t.activity.find((a) => a.kind === 'auto_assigned')?.toValue).toContain('vendor follow-ups')
+  })
+
+  it('a member posting can only be assigned their own requests', async () => {
+    const { member } = await orgWithPeople()
+    const { hook } = await connectSlack(member.c, member.user.id)
+    fakeViasocket.aiQueue.push({
+      isTask: true,
+      title: 'Fix login bug',
+      description: null,
+      priority: 'HIGH',
+      dueDate: null,
+      assigneeName: null,
+      impact: 'MEDIUM',
+      reason: 'x',
+    })
+    await deliver(hook, msg('fix the login bug')).expect(202)
+    expect(await prisma.task.findFirstOrThrow()).toMatchObject({ assigneeId: member.user.id })
   })
 
   it('skips chatter (AI says not a task) and bot messages (no AI call at all)', async () => {

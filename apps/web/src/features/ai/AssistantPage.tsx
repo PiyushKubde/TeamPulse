@@ -1,25 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { Bot, Send, Wrench } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Bot, CheckCircle2, Send, Wrench } from 'lucide-react'
 import { api, errorMessage } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useAiStatus } from '@/lib/queries'
 import { Badge, Button, Card, EmptyState, PageHeader, Textarea } from '@/components/ui'
-import { CreateTaskDialog } from '../tasks/TaskForm'
 
 interface Msg {
   role: 'user' | 'assistant'
   content: string
   tools?: { tool: string; ok: boolean }[]
-  draft?: {
-    title: string
-    description: string | null
-    priority: string
-    dueDate: string | null
-    category: string | null
-    suggestedImpact: string
-    estimateMins: number | null
-  } | null
+  created?: { id: string; title: string; assignee: string | null; why: string | null }[]
   error?: boolean
 }
 
@@ -65,14 +57,13 @@ export function AssistantPage() {
   const ai = useAiStatus()
   const [messages, setMessages] = useState<Msg[]>([])
   const [input, setInput] = useState('')
-  const [draft, setDraft] = useState<Msg['draft']>(null)
   const end = useRef<HTMLDivElement>(null)
   useEffect(() => {
     end.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
   const send = useMutation({
     mutationFn: (message: string) =>
-      api<{ answer: string; toolsUsed: { tool: string; ok: boolean }[]; draft: Msg['draft'] }>('/ai/chat', {
+      api<{ answer: string; toolsUsed: { tool: string; ok: boolean }[]; created: NonNullable<Msg['created']> }>('/ai/chat', {
         body: {
           message,
           history: messages
@@ -81,7 +72,7 @@ export function AssistantPage() {
             .map((m) => ({ role: m.role, content: m.content })),
         },
       }),
-    onSuccess: (r) => setMessages((m) => [...m, { role: 'assistant', content: r.answer, tools: r.toolsUsed, draft: r.draft }]),
+    onSuccess: (r) => setMessages((m) => [...m, { role: 'assistant', content: r.answer, tools: r.toolsUsed, created: r.created }]),
     onError: (e) => setMessages((m) => [...m, { role: 'assistant', content: errorMessage(e), error: true }]),
   })
   const ask = (text: string) => {
@@ -94,7 +85,7 @@ export function AssistantPage() {
     <div className="flex h-[calc(100vh-7.5rem)] flex-col">
       <PageHeader
         title="AI assistant"
-        description="Answers come only from your WorkPulse data, through tools that respect your permissions. It can draft tasks; it never changes anything on its own."
+        description="Answers come only from your WorkPulse data, through tools that respect your permissions. Ask it to get something done and it creates the task right away and assigns the best-fit person (or whoever you name)."
       />
       <Card className="flex min-h-0 flex-1 flex-col">
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
@@ -133,15 +124,21 @@ export function AssistantPage() {
                       ))}
                     </div>
                   )}
-                  {m.draft && (
-                    <div className="mt-2 rounded-lg border border-line bg-canvas p-2 text-ink">
-                      <p className="text-xs text-muted">Task draft</p>
-                      <p className="font-medium">{m.draft.title}</p>
-                      <Button size="sm" className="mt-1.5" onClick={() => setDraft(m.draft)}>
-                        Review and create
-                      </Button>
+                  {m.created?.map((c) => (
+                    <div key={c.id} className="mt-2 rounded-lg border border-success/30 bg-success-soft/50 p-2.5 text-ink">
+                      <p className="flex items-center gap-1.5 text-xs font-medium text-success">
+                        <CheckCircle2 className="size-3.5" /> Task created
+                      </p>
+                      <p className="mt-0.5 font-medium">{c.title}</p>
+                      <p className="mt-0.5 text-xs text-ink-soft">
+                        Assigned to <strong>{c.assignee ?? 'nobody'}</strong>
+                        {c.why ? ` · ${c.why.replace(/^[^:]*:\s*/, '')}` : ''}
+                      </p>
+                      <Link to={`/tasks?task=${c.id}&assigneeId=all`} className="mt-1 inline-block text-xs font-medium text-primary hover:underline">
+                        Open task
+                      </Link>
                     </div>
-                  )}
+                  ))}
                 </div>
               </div>
             ))
@@ -180,21 +177,6 @@ export function AssistantPage() {
           </Button>
         </form>
       </Card>
-      {draft && (
-        <CreateTaskDialog
-          open
-          onOpenChange={(o) => !o && setDraft(null)}
-          defaults={{
-            title: draft.title,
-            description: draft.description ?? '',
-            priority: draft.priority,
-            dueAt: draft.dueDate ?? '',
-            category: draft.category ?? '',
-            impactLevel: draft.suggestedImpact,
-            estimateMins: draft.estimateMins ? String(draft.estimateMins) : '',
-          }}
-        />
-      )}
     </div>
   )
 }

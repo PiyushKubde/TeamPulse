@@ -1,11 +1,19 @@
 import { prisma } from '../lib/prisma.js'
-import { badRequest } from '../lib/errors.js'
+import { HttpError } from '../lib/errors.js'
+import { notConnected } from './messages.js'
 import { runFlow } from './flows.js'
 
 /** Posts to the user's own Slack destination (chosen once in Integrations), through their delivery flow. */
 export async function deliverToSlack(userId: string, orgId: string, text: string, dedupeKey: string) {
   const conn = await prisma.integrationConnection.findFirst({ where: { userId, orgId, provider: 'slack', status: 'ACTIVE' }, orderBy: { updatedAt: 'desc' } })
-  if (!conn) throw badRequest('Connect Slack and choose a channel in Integrations first.')
+  if (!conn) throw await notConnected(userId, orgId, 'slack', 'choose a channel under “Out of WorkPulse”')
+  const d = (conn.settings as { delivery?: { channelId?: string; userId?: string } }).delivery
+  if (!d?.channelId && !d?.userId)
+    throw new HttpError(
+      409,
+      'not_configured',
+      'Slack is connected, but no destination is chosen. In Integrations → Slack → “Out of WorkPulse”, pick a channel or yourself.',
+    )
   const exec = await prisma.automationExecution.upsert({
     where: { dedupeKey },
     create: { orgId, userId, automation: 'slack_delivery', status: 'RUNNING', dedupeKey },
@@ -26,7 +34,7 @@ export async function deliverToSlack(userId: string, orgId: string, text: string
 
 export async function deliverToGmail(userId: string, orgId: string, subject: string, text: string, dedupeKey: string) {
   const conn = await prisma.integrationConnection.findFirst({ where: { userId, orgId, provider: 'gmail', status: 'ACTIVE' }, orderBy: { updatedAt: 'desc' } })
-  if (!conn) throw badRequest('Connect Gmail in Integrations first.')
+  if (!conn) throw await notConnected(userId, orgId, 'gmail', 'send the report again')
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })
   const exec = await prisma.automationExecution.upsert({
     where: { dedupeKey },

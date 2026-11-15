@@ -63,7 +63,7 @@ export function CreateTaskDialog({
   onOpenChange: (o: boolean) => void
   defaults?: Partial<FormValues> & { parentId?: string }
 }) {
-  const { me } = useAuth()
+  const { me, isManager } = useAuth()
   const qc = useQueryClient()
   const members = useMembers()
   const projects = useProjects()
@@ -81,7 +81,8 @@ export function CreateTaskDialog({
       impactLevel: 'NONE',
       complexity: '2',
       projectId: '',
-      assigneeId: me?.user.id ?? '',
+      // Managers and admins: WorkPulse picks the best fit by default. Members own what they create.
+      assigneeId: isManager ? 'auto' : (me?.user.id ?? ''),
       dueAt: '',
       estimateMins: '',
       category: '',
@@ -226,6 +227,7 @@ export function CreateTaskDialog({
         </Field>
         <Field label="Assignee" htmlFor="t-assignee">
           <Select id="t-assignee" {...f.register('assigneeId')}>
+            {isManager && <option value="auto">Auto-assign (best fit)</option>}
             <option value="">Unassigned</option>
             {assignable.map((m) => (
               <option key={m.userId} value={m.userId}>

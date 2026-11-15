@@ -1,6 +1,7 @@
 // The assistant. The model never touches the database: each turn it either answers or asks for ONE tool from the
 // fixed list below; WorkPulse validates the arguments, runs the tool under the caller's own permissions and sends
-// the result back. Tools only read (draft_task returns a draft the person must confirm in the UI).
+// the result back. All tools read, except create_task, which creates a task under the caller's own permissions and
+// assigns it automatically (named person, else best fit).
 import { z } from 'zod'
 import { TASK_STATUSES, type ScoreDimension } from '@workpulse/shared'
 import { prisma, type Prisma } from '../lib/prisma.js'
@@ -8,7 +9,7 @@ import { assertCanSeeUser, scopedUserIds, taskScope, type Ctx } from '../lib/sco
 import { HttpError } from '../lib/errors.js'
 import { computeScore, impactTarget, loadScoreInput, modelFor } from '../services/performance.js'
 import { structured } from './provider.js'
-import { taskDraftSchema } from './features.js'
+import { createTask } from '../modules/tasks.js'
 
 const uuid = z.string().uuid()
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -202,10 +203,59 @@ export const TOOLS = {
         take: a.limit,
       }),
   },
-  draft_task: {
-    description: 'Prepare a task draft from the conversation. It is NOT created; the person confirms it in the app.',
-    args: taskDraftSchema,
-    run: async (_ctx: Ctx, a: z.infer<typeof taskDraftSchema>) => ({ draft: a, note: 'Draft shown to the person for confirmation.' }),
+  create_task: {
+    description:
+      'Create a task now (it is saved immediately) and assign it automatically. Put a person in assigneeName only if the user named who should do it; otherwise leave it null and WorkPulse picks the best-fit teammate. Use one call per task.',
+    args: z.object({
+      title: z.string().min(1).max(200),
+      description: z.string().max(4000).nullable().default(null),
+      priority: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']).default('MEDIUM'),
+      dueDate: date.nullable().default(null),
+      category: z.string().max(60).nullable().default(null),
+      impact: z.enum(['NONE', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).default('NONE'),
+      estimateMins: z.number().int().min(0).max(10000).nullable().default(null),
+      assigneeName: z.string().max(200).nullable().default(null),
+    }),
+    run: async (
+      ctx: Ctx,
+      a: {
+        title: string
+        description: string | null
+        priority: 'MEDIUM'
+        dueDate: string | null
+        category: string | null
+        impact: 'NONE'
+        estimateMins: number | null
+        assigneeName: string | null
+      },
+    ) => {
+      const task = await createTask(
+        ctx,
+        {
+          title: a.title,
+          description: a.description,
+          priority: a.priority,
+          dueAt: a.dueDate ? new Date(`${a.dueDate}T17:00:00`) : null,
+          category: a.category,
+          impactLevel: a.impact,
+          estimateMins: a.estimateMins,
+          assigneeId: 'auto',
+        },
+        'AI',
+        { namedPerson: a.assigneeName },
+      )
+      const why = await prisma.taskActivity.findFirst({ where: { taskId: task.id, kind: 'auto_assigned' }, select: { toValue: true } })
+      return {
+        created: {
+          id: task.id,
+          title: task.title,
+          assignee: task.assignee?.name ?? null,
+          dueAt: task.dueAt,
+          priority: task.priority,
+          why: why?.toValue ?? null,
+        },
+      }
+    },
   },
 } as const
 
@@ -234,23 +284,24 @@ export async function runAssistant(ctx: Ctx, history: ChatMessage[], message: st
     'Each turn return either {type:"tool_call", tool, arguments (JSON string)} or {type:"answer", answer}. One tool per turn. Use "me" for the current user.',
     'Tools:',
     ...TOOL_NAMES.map((n) => `- ${n}: ${TOOLS[n].description} Arguments JSON schema: ${JSON.stringify(z.toJSONSchema(TOOLS[n].args))}`),
+    'When the user asks for work to be done ("I need to…", "create a task…", "assign…"), call create_task right away without asking for confirmation; split clearly separate pieces of work into separate tasks. Afterwards say what was created, who it was assigned to and why.',
     'Answer in short markdown. Mention task titles, not ids.',
   ].join('\n')
 
   const transcript: string[] = history.slice(-10).map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content.slice(0, 2000)}`)
   transcript.push(`User: ${message}`)
   const toolsUsed: { tool: string; ok: boolean }[] = []
-  let draft: unknown = null
+  const created: { id: string; title: string; assignee: string | null; why: string | null }[] = []
 
   for (let step = 0; step < 6; step++) {
     const turn = await structured({ userId: ctx.userId, name: 'assistant_turn', tier: 'assistant', system, input: transcript.join('\n\n'), schema: turnSchema })
-    if (turn.type === 'answer' || !turn.tool) return { answer: turn.answer ?? 'I could not produce an answer.', toolsUsed, draft }
+    if (turn.type === 'answer' || !turn.tool) return { answer: turn.answer ?? 'I could not produce an answer.', toolsUsed, created }
     const tool = TOOLS[turn.tool]
     let result: unknown
     try {
       const args = tool.args.parse(JSON.parse(turn.arguments ?? '{}'))
       result = await (tool.run as (c: Ctx, a: unknown) => Promise<unknown>)(ctx, args)
-      if (turn.tool === 'draft_task') draft = (result as { draft: unknown }).draft
+      if (turn.tool === 'create_task') created.push((result as { created: (typeof created)[number] }).created)
       toolsUsed.push({ tool: turn.tool, ok: true })
     } catch (e) {
       // Out-of-scope people answer "not found": the assistant can never reach data the caller cannot.
@@ -259,5 +310,5 @@ export async function runAssistant(ctx: Ctx, history: ChatMessage[], message: st
     }
     transcript.push(`Assistant called ${turn.tool}(${turn.arguments})`, `Tool result: ${JSON.stringify(result).slice(0, 12000)}`)
   }
-  return { answer: 'I needed too many steps to answer that. Try a narrower question.', toolsUsed, draft }
+  return { answer: 'I needed too many steps to answer that. Try a narrower question.', toolsUsed, created }
 }

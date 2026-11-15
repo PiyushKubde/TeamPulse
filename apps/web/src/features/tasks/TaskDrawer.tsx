@@ -1016,6 +1016,7 @@ const ACTIVITY_TEXT: Record<string, string> = {
   deleted: 'deleted the task',
   pushed_to_source: 'pushed to source',
   conflict_resolved: 'resolved a conflict',
+  auto_assigned: 'assigned automatically to',
 }
 
 function ActivityList({ taskId }: { taskId: string }) {
