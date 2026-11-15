@@ -1,6 +1,6 @@
 # Phone alerts (M91)
 
-M91 rings phones at full volume, through silent mode, until somebody answers. WorkPulse uses both of its credentials:
+M91 rings phones at full volume, through silent mode, until somebody answers. KONVO uses both of its credentials:
 
 | | Credential | Who rings | Set up by |
 |---|---|---|---|
@@ -11,7 +11,7 @@ Every alert has two answers. Each one is named after its condition (`customId`),
 open, and it is closed when the condition clears, which re-arms it. Nothing is wired into a generic error handler or a
 logger: only the conditions below ring anybody.
 
-## On-call: when WorkPulse itself breaks
+## On-call: when KONVO itself breaks
 
 Checked every minute by the API process (so a dead worker is still noticed). Answers: **I'll handle it** · **Seen**.
 
@@ -33,8 +33,9 @@ one LOW test alert).
 
 ## People: their own phone
 
-Every new account gives a mobile number (required at sign-up and when accepting a team invitation), and WorkPulse
-invites it to M91 straight away. People who signed up earlier see a banner until they add one on the **Phone alerts
+Everyone gives a mobile number: at sign-up, when joining from a team invitation, and, for Google sign-ups and older
+accounts, in a required step right after signing in. KONVO invites it to M91 straight away. An inviter can also add the
+teammate's number to the invitation: their M91 invitation goes out at once and the number is pre-filled when they join. People who signed up earlier see a banner until they add one on the **Phone alerts
 (M91)** page. The only manual step is the person accepting the invitation once in the M91 app
 ([iPhone](https://apps.apple.com/app/id6759090472) ·
 [Android](https://play.google.com/store/apps/details?id=com.msg91.m91)); the worker checks pending invitations every
@@ -44,7 +45,7 @@ that page.
 Tests never reach real phones: `M91_API_KEY` and `M91_SEND_LINK` are blanked in `vitest.config.ts` and
 `playwright.config.ts`, and the M91 tests use a fake transport.
 
-| Moment | Who | Answers | What WorkPulse does with the answer |
+| Moment | Who | Answers | What KONVO does with the answer |
 |---|---|---|---|
 | A critical task, or one due within 24 h, is assigned to you | assignee | **On it** · **Can't take it** (asks why) | starts the task / re-assigns it to the next best fit and records the reason |
 | A task you manage is blocked for over 48 h | their managers | **I'll unblock it** · **Seen** | records who is unblocking and tells the assignee |

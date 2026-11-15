@@ -1,5 +1,5 @@
 // Initial import. Jira through a per-user flow running Find_Issue_via_JQL; Linear through runCode on the user's
-// enabled app (Linear's catalog has no "list issues" action: this code is WorkPulse's to maintain if Linear's API changes).
+// enabled app (Linear's catalog has no "list issues" action: this code is KONVO's to maintain if Linear's API changes).
 import { prisma, type IntegrationConnection, type Prisma } from '../lib/prisma.js'
 import { badRequest } from '../lib/errors.js'
 import { viasocket } from './viasocket/client.js'
@@ -11,7 +11,7 @@ import { applyTask } from './normalization/normalizer.js'
 import type { NormalizedTask } from './normalization/types.js'
 import type { ConnectionSettings } from './catalog.js'
 
-const LINEAR_QUERY = `query WorkPulseBackfill($team: String!, $after: String, $since: DateTimeOrDuration) {
+const LINEAR_QUERY = `query KONVOBackfill($team: String!, $after: String, $since: DateTimeOrDuration) {
   team(id: $team) { issues(first: 50, after: $after, filter: { updatedAt: { gte: $since } }, orderBy: updatedAt) {
     nodes { id identifier title description url priority dueDate updatedAt archivedAt state { name type } assignee { id name email } labels { nodes { name } } }
     pageInfo { hasNextPage endCursor } } } }`

@@ -9,7 +9,7 @@ export function Tip({ content, children }: { content: ReactNode; children: React
       <T.Root>
         <T.Trigger asChild>{children}</T.Trigger>
         <T.Portal>
-          <T.Content sideOffset={6} className="z-50 max-w-xs rounded-md bg-ink px-2.5 py-1.5 text-xs leading-relaxed text-white shadow-lg">
+          <T.Content sideOffset={6} className="z-50 max-w-xs rounded-md bg-ink px-2.5 py-1.5 text-xs leading-relaxed text-canvas shadow-lg">
             {content}
             <T.Arrow className="fill-ink" />
           </T.Content>
@@ -39,28 +39,28 @@ export function Modal({
   return (
     <D.Root open={open} onOpenChange={onOpenChange}>
       <D.Portal>
-        <D.Overlay className="fixed inset-0 z-40 bg-ink/30 backdrop-blur-[1px]" />
+        <D.Overlay className="fixed inset-0 z-40 bg-overlay backdrop-blur-[1px]" />
         <D.Content
           className={cn(
-            'fixed left-1/2 top-[8vh] z-50 max-h-[84vh] w-[calc(100vw-2rem)] -translate-x-1/2 overflow-y-auto rounded-xl border border-line bg-surface shadow-xl',
+            'fixed left-1/2 top-[8vh] z-50 max-h-[84vh] w-[calc(100vw-2rem)] -translate-x-1/2 overflow-y-auto rounded-lg border border-line bg-surface shadow-xl',
             wide ? 'max-w-3xl' : 'max-w-lg',
           )}
         >
           <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
             <div>
-              <D.Title className="text-base font-semibold text-ink">{title}</D.Title>
+              <D.Title className="text-[17px] font-semibold tracking-[-0.015em] text-ink">{title}</D.Title>
               {description ? (
                 <D.Description className="mt-1 text-sm text-muted">{description}</D.Description>
               ) : (
                 <D.Description className="sr-only">{title}</D.Description>
               )}
             </div>
-            <D.Close className="rounded-md p-1 text-muted hover:bg-canvas hover:text-ink" aria-label="Close">
+            <D.Close className="rounded-md p-1 text-muted hover:bg-hover hover:text-ink" aria-label="Close">
               <X className="size-4" />
             </D.Close>
           </div>
           <div className="px-5 py-4">{children}</div>
-          {footer && <div className="flex justify-end gap-2 border-t border-line bg-canvas/60 px-5 py-3">{footer}</div>}
+          {footer && <div className="flex justify-end gap-2 border-t border-line bg-surface-2 px-5 py-3">{footer}</div>}
         </D.Content>
       </D.Portal>
     </D.Root>
@@ -72,7 +72,7 @@ export function Sheet({ open, onOpenChange, title, children }: { open: boolean; 
   return (
     <D.Root open={open} onOpenChange={onOpenChange}>
       <D.Portal>
-        <D.Overlay className="fixed inset-0 z-40 bg-ink/20" />
+        <D.Overlay className="fixed inset-0 z-40 bg-overlay" />
         <D.Content className="fixed inset-y-0 right-0 z-50 flex w-full max-w-2xl flex-col border-l border-line bg-surface shadow-2xl">
           <D.Title className="sr-only">{title}</D.Title>
           <D.Description className="sr-only">{title}</D.Description>
@@ -110,11 +110,17 @@ export function Confirm({
         title={title}
         footer={
           <>
-            <button className="h-9 rounded-lg border border-line-strong bg-surface px-3.5 text-sm" onClick={() => setOpen(false)}>
+            <button
+              className="h-9 rounded-md border border-line-strong bg-surface px-3.5 text-sm font-semibold shadow-xs hover:bg-hover"
+              onClick={() => setOpen(false)}
+            >
               Cancel
             </button>
             <button
-              className={cn('h-9 rounded-lg px-3.5 text-sm font-medium text-white disabled:opacity-50', danger ? 'bg-danger' : 'bg-primary')}
+              className={cn(
+                'h-9 rounded-md px-3.5 text-sm font-semibold disabled:opacity-55',
+                danger ? 'bg-danger-solid text-white' : 'bg-primary text-on-primary',
+              )}
               disabled={busy}
               onClick={async () => {
                 setBusy(true)
@@ -182,7 +188,7 @@ export function Tabs({
           <TB.Trigger
             key={t.value}
             value={t.value}
-            className="-mb-px whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm font-medium text-muted hover:text-ink data-[state=active]:border-primary data-[state=active]:text-primary"
+            className="-mb-px whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm font-semibold text-muted hover:text-ink data-[state=active]:border-primary data-[state=active]:text-ink"
           >
             {t.label}
           </TB.Trigger>

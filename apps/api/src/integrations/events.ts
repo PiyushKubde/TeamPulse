@@ -1,4 +1,4 @@
-// POST /api/integrations/events/:provider/:subscriptionId — called by the handler WorkPulse installed on viaSocket.
+// POST /api/integrations/events/:provider/:subscriptionId — called by the handler KONVO installed on viaSocket.
 // Authenticated by a per-subscription bearer token (stored as a hash). Never trusts the payload: it is stored as
 // data and validated by the provider adapter in the background. Duplicates (retries, replays) are absorbed by the
 // unique (orgId, provider, idempotencyKey) constraint.

@@ -96,7 +96,7 @@ export function ReportsPage() {
           <ul className="divide-y divide-line">
             {list.data.items.map((r) => (
               <li key={r.id}>
-                <button className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-canvas" onClick={() => navigate(`/reports/${r.id}`)}>
+                <button className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-hover" onClick={() => navigate(`/reports/${r.id}`)}>
                   <Badge tone={r.kind === 'WEEKLY' ? 'blue' : 'neutral'}>{label(r.kind)}</Badge>
                   <span className="flex-1">
                     {r.kind === 'WEEKLY' ? `Week of ${fmtDate(r.periodStart, 'd MMM yyyy')}` : fmtDate(r.periodStart, 'EEE d MMM yyyy')}

@@ -68,6 +68,7 @@ export function createApp() {
       '/api/auth/reset-password',
       '/api/auth/verify-email',
       '/api/auth/resend-verification',
+      '/api/auth/google',
     ],
     authLimit,
   )

@@ -47,7 +47,7 @@ export function AutomationCenter() {
     <div>
       <PageHeader
         title="Automation Center"
-        description="Everything WorkPulse runs for you: live event subscriptions, delivery flows and scheduled automations."
+        description="Everything KONVO runs for you: live event subscriptions, delivery flows and scheduled automations."
         actions={
           <Link to="/integrations">
             <Button variant="secondary">Manage connections</Button>
@@ -141,10 +141,7 @@ export function AutomationCenter() {
           </Card>
           <div className="grid gap-4 lg:grid-cols-2">
             <Card>
-              <CardHeader
-                title="Scheduled automations"
-                info="Run by WorkPulse’s worker. External delivery only goes to destinations you connected and chose."
-              />
+              <CardHeader title="Scheduled automations" info="Run by KONVO’s worker. External delivery only goes to destinations you connected and chose." />
               <ul className="divide-y divide-line">
                 {q.data.scheduled.map((s) => (
                   <li key={s.key} className="flex items-start gap-3 px-4 py-2.5">

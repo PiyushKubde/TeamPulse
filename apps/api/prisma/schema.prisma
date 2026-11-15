@@ -1,4 +1,4 @@
-// WorkPulse data model. Every tenant-owned row carries orgId; queries go through scoped helpers (src/lib/scope.ts).
+// KONVO data model. Every tenant-owned row carries orgId; queries go through scoped helpers (src/lib/scope.ts).
 generator client {
   provider               = "prisma-client"
   output                 = "../src/generated/prisma"
@@ -30,6 +30,8 @@ model User {
   email           String    @unique
   name            String
   passwordHash    String?
+  /// Google's stable account id (OpenID `sub`) when the person signs in with Google.
+  googleSub       String?   @unique
   emailVerifiedAt DateTime?
   timezone        String    @default("UTC")
   /// Phone for M91 alerts: digits with country code, no "+" (e.g. 919876543210).
@@ -144,6 +146,8 @@ model Invitation {
   email      String
   role       Role         @default(MEMBER)
   teamId     String?
+  /// Mobile number given by the inviter (digits with country code); invited to M91 at once, pre-filled on accept.
+  phone      String?
   invitedBy  String
   tokenHash  String       @unique
   expiresAt  DateTime
@@ -1006,7 +1010,7 @@ model AuditLog {
 
 // ───────────── Phone alerts (M91) ─────────────
 
-/// Every M91 alert WorkPulse raised: to the on-call channel (userId null) or to one person's phone.
+/// Every M91 alert KONVO raised: to the on-call channel (userId null) or to one person's phone.
 model PhoneAlert {
   id         String    @id @default(uuid())
   orgId      String?

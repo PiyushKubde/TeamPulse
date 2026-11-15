@@ -3,7 +3,17 @@ import { lazy, type ReactNode } from 'react'
 import { useAuth } from '@/lib/auth'
 import { Spinner } from '@/components/ui'
 import { AppShell } from '@/components/layout/AppShell'
-import { AcceptInvitePage, ForgotPasswordPage, LoginPage, OnboardingPage, RegisterPage, ResetPasswordPage, VerifyEmailPage } from '@/features/auth/AuthPages'
+import { LandingPage } from '@/features/landing/LandingPage'
+import {
+  AcceptInvitePage,
+  ForgotPasswordPage,
+  LoginPage,
+  OnboardingPage,
+  PhoneStep,
+  RegisterPage,
+  ResetPasswordPage,
+  VerifyEmailPage,
+} from '@/features/auth/AuthPages'
 
 // Each area loads on demand, so the first page does not download every chart and form.
 const MyAnalytics = lazy(() => import('@/features/dashboard/DashboardPages').then((m) => ({ default: m.MyAnalytics })))
@@ -31,7 +41,11 @@ function RequireAuth({ children, needsOrg = true }: { children: ReactNode; needs
   const { me, loading } = useAuth()
   const location = useLocation()
   if (loading) return <Spinner />
+  // Signed out on the home page: the public KONVO landing page. Anywhere else: sign in first, then come back.
+  if (!me && location.pathname === '/') return <LandingPage />
   if (!me) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />
+  // Everyone gives a mobile number before anything else (Google sign-ups and older accounts arrive without one).
+  if (me.phoneAlerts && !me.phoneAlerts.hasPhone) return <PhoneStep />
   if (needsOrg && !me.activeOrgId) return <Navigate to="/onboarding" replace />
   return <>{children}</>
 }

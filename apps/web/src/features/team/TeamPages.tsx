@@ -273,7 +273,7 @@ function Health({ d }: { d: TeamData }) {
         <ul className="divide-y divide-line">
           {signals.map((s) => (
             <li key={s.key}>
-              <button disabled={!s.onClick} onClick={s.onClick} className="flex w-full items-start gap-3 px-4 py-2.5 text-left enabled:hover:bg-canvas">
+              <button disabled={!s.onClick} onClick={s.onClick} className="flex w-full items-start gap-3 px-4 py-2.5 text-left enabled:hover:bg-hover">
                 <span
                   className={`mt-0.5 rounded-md p-1.5 [&_svg]:size-3.5 ${s.tone === 'red' ? 'bg-danger-soft text-danger' : s.tone === 'amber' ? 'bg-warn-soft text-warn' : 'bg-canvas text-ink-soft'}`}
                 >
@@ -613,7 +613,7 @@ function MemberTable({ rows, compact }: { rows: MemberRow[]; compact?: boolean }
               <tr
                 key={m.userId}
                 onClick={() => navigate(`/team/members/${m.userId}`)}
-                className="cursor-pointer border-b border-line/70 last:border-0 hover:bg-canvas/70"
+                className="cursor-pointer border-b border-line/70 last:border-0 hover:bg-hover/70"
               >
                 <td className="px-3 py-2">
                   <Link

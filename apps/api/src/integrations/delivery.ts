@@ -7,13 +7,13 @@ import { runFlow } from './flows.js'
 /** Posts to the user's own Slack destination (chosen once in Integrations), through their delivery flow. */
 export async function deliverToSlack(userId: string, orgId: string, text: string, dedupeKey: string) {
   const conn = await prisma.integrationConnection.findFirst({ where: { userId, orgId, provider: 'slack', status: 'ACTIVE' }, orderBy: { updatedAt: 'desc' } })
-  if (!conn) throw await notConnected(userId, orgId, 'slack', 'choose a channel under “Out of WorkPulse”')
+  if (!conn) throw await notConnected(userId, orgId, 'slack', 'choose a channel under “Out of KONVO”')
   const d = (conn.settings as { delivery?: { channelId?: string; userId?: string } }).delivery
   if (!d?.channelId && !d?.userId)
     throw new HttpError(
       409,
       'not_configured',
-      'Slack is connected, but no destination is chosen. In Integrations → Slack → “Out of WorkPulse”, pick a channel or yourself.',
+      'Slack is connected, but no destination is chosen. In Integrations → Slack → “Out of KONVO”, pick a channel or yourself.',
     )
   const exec = await prisma.automationExecution.upsert({
     where: { dedupeKey },

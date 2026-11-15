@@ -84,10 +84,7 @@ export function normalizePhone(input: string) {
   return /^\d{11,15}$/.test(full) ? full : null
 }
 export const invite = (phone: string) =>
-  call<{ phone: string; state: 'pending' | 'accepted' | 'declined'; reachable: boolean }>(
-    `${API}/recipients`,
-    json('POST', { phone, label: 'WorkPulse' }, key()),
-  )
+  call<{ phone: string; state: 'pending' | 'accepted' | 'declined'; reachable: boolean }>(`${API}/recipients`, json('POST', { phone, label: 'KONVO' }, key()))
 export const uninvite = (phone: string) =>
   call<{ phone: string; state: string }>(`${API}/recipients/${phone}`, { method: 'DELETE', headers: { Authorization: `Bearer ${key()}` } })
 export const personAlert = (phone: string, p: AlertPayload) =>

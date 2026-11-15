@@ -64,7 +64,7 @@ now 404); reliability ignored work finished early; Zod 4 records required every 
 
 ## Waiting on you
 
-1. **Test accounts** for Linear, GitHub, Jira, Slack (and Gmail), connected through WorkPulse's Connect button.
+1. **Test accounts** for Linear, GitHub, Jira, Slack (and Gmail), connected through KONVO's Connect button.
 2. **A public HTTPS URL** for the API (`PUBLIC_API_URL`): a tunnel for local testing, or the production host.
 3. **Production host choice**, then the environment from `docs/deployment.md`.
 5. **Email**: connect Gmail in Integrations as an owner/admin (or set SMTP) so verification, reset and invitation emails are sent.

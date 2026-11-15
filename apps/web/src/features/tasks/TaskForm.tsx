@@ -81,7 +81,7 @@ export function CreateTaskDialog({
       impactLevel: 'NONE',
       complexity: '2',
       projectId: '',
-      // Managers and admins: WorkPulse picks the best fit by default. Members own what they create.
+      // Managers and admins: KONVO picks the best fit by default. Members own what they create.
       assigneeId: isManager ? 'auto' : (me?.user.id ?? ''),
       dueAt: '',
       estimateMins: '',

@@ -223,7 +223,7 @@ export async function suggestMapping(userId: string, provider: string, kind: 'ST
   return structured({
     userId,
     name: 'mapping_suggestion',
-    system: `Map a ${provider} ${kind.toLowerCase()} value to WorkPulse's fixed set: ${targets.join(', ')}. confidence 0-1; below 0.6 when the value is ambiguous. ${GROUNDING}`,
+    system: `Map a ${provider} ${kind.toLowerCase()} value to KONVO's fixed set: ${targets.join(', ')}. confidence 0-1; below 0.6 when the value is ambiguous. ${GROUNDING}`,
     input: JSON.stringify({ provider, kind, value: fromValue }),
     schema: z.object({ toValue: z.enum(targets as unknown as [string, ...string[]]), confidence: z.number().min(0).max(1), reason: z.string().max(300) }),
   })

@@ -1,5 +1,5 @@
 // Chat message → task. AI (when configured) decides whether a message asks for work and extracts its fields;
-// WorkPulse validates everything and creates the task. Without AI every human message becomes a task flagged for review.
+// KONVO validates everything and creates the task. Without AI every human message becomes a task flagged for review.
 import { z } from 'zod'
 import { IMPACT_LEVELS, PRIORITIES } from '@workpulse/shared'
 import { prisma, type IntegrationConnection } from '../lib/prisma.js'
@@ -56,7 +56,7 @@ export async function applyIntake(conn: IntegrationConnection, m: NormalizedMess
           `You read one Slack message posted by ${owner.name} and turn it into a task for a work tracker. Today is ${todayIn(owner.timezone)}.`,
           'isTask is false only for messages that ask for no work (greetings, thanks, FYIs, questions answered by yes/no, chatter).',
           'title: short imperative outcome (e.g. "Deploy the M91 feature"). description: the useful details, including people or systems mentioned.',
-          `assigneeName: only when the message clearly asks a specific person to do the work, and only if it is one of: ${members.map((x) => x.name).join(', ') || 'nobody'}. Otherwise null (WorkPulse then picks the best-fit teammate).`,
+          `assigneeName: only when the message clearly asks a specific person to do the work, and only if it is one of: ${members.map((x) => x.name).join(', ') || 'nobody'}. Otherwise null (KONVO then picks the best-fit teammate).`,
           'dueDate: resolve relative dates ("by Friday") against today, else null. priority from urgency words; MEDIUM by default. impact is only a suggestion; NONE if unclear.',
           'Use only what the message says. Never invent people, dates or details.',
         ].join('\n'),
@@ -116,5 +116,5 @@ export async function applyIntake(conn: IntegrationConnection, m: NormalizedMess
 
 /** Confirmation in the user's Slack destination (a bot message, so it is never re-ingested). */
 export function confirmationText(title: string, taskId: string) {
-  return `:white_check_mark: Task created in WorkPulse: *${title}*\n${env.APP_URL}/tasks?task=${taskId}`
+  return `:white_check_mark: Task created in KONVO: *${title}*\n${env.APP_URL}/tasks?task=${taskId}`
 }

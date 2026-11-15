@@ -1,4 +1,4 @@
-// Per-user flows for actions fixed in WorkPulse's code: one webhook-triggered flow per saved action, as the skill
+// Per-user flows for actions fixed in KONVO's code: one webhook-triggered flow per saved action, as the skill
 // requires. The flow's script_id is stored encrypted on an IntegrationSubscription row with triggerKey "flow:<name>".
 import { prisma, type IntegrationConnection, type Prisma } from '../lib/prisma.js'
 import { decrypt, encrypt, randomToken, sha256 } from '../lib/crypto.js'
@@ -33,7 +33,7 @@ function stepsFor(name: FlowName, conn: IntegrationConnection, email?: string): 
         stepname: 'send',
         service_action_functions: [{ name: 'sendEmail', auth_id: auth, action_id: ACTIONS.gmailSendEmail.actionId }],
         // `to` is fixed to the person's own verified email; `from` left out: sends as the connected account.
-        code: `const b = context?.req?.body || {}\nif (!b.subject || !b.text) return { skipped: true }\nreturn await sendEmail({ inputData: { to: ${JSON.stringify(email)}, subject: String(b.subject).slice(0, 200), messageBody: String(b.text).slice(0, 100000), fromName: "WorkPulse" } })`,
+        code: `const b = context?.req?.body || {}\nif (!b.subject || !b.text) return { skipped: true }\nreturn await sendEmail({ inputData: { to: ${JSON.stringify(email)}, subject: String(b.subject).slice(0, 200), messageBody: String(b.text).slice(0, 100000), fromName: "KONVO" } })`,
       },
     ]
   }
@@ -42,8 +42,8 @@ function stepsFor(name: FlowName, conn: IntegrationConnection, email?: string): 
       {
         stepname: 'send',
         service_action_functions: [{ name: 'sendEmail', auth_id: auth, action_id: ACTIONS.gmailSendEmail.actionId }],
-        // System email: the recipient varies per run (verification, reset, invitation); WorkPulse validated it.
-        code: `const b = context?.req?.body || {}\nconst to = String(b.to || '')\nif (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(to) || !b.subject || !b.text) return { skipped: true }\nreturn await sendEmail({ inputData: { to, subject: String(b.subject).slice(0, 200), messageBody: String(b.text).slice(0, 100000), fromName: "WorkPulse" } })`,
+        // System email: the recipient varies per run (verification, reset, invitation); KONVO validated it.
+        code: `const b = context?.req?.body || {}\nconst to = String(b.to || '')\nif (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(to) || !b.subject || !b.text) return { skipped: true }\nreturn await sendEmail({ inputData: { to, subject: String(b.subject).slice(0, 200), messageBody: String(b.text).slice(0, 100000), fromName: "KONVO" } })`,
       },
     ]
   }
@@ -78,8 +78,8 @@ export async function ensureFlow(conn: IntegrationConnection, name: FlowName, op
   let scriptId = existing?.scriptIdEnc ? decrypt(existing.scriptIdEnc) : null
   if (!scriptId) {
     scriptId = await createFlow(token, {
-      title: `WorkPulse · ${name.replace('_', ' ')}`,
-      description: `Created by WorkPulse for ${provider(conn.provider)?.name ?? conn.provider}. Do not edit; change it in WorkPulse.`,
+      title: `KONVO · ${name.replace('_', ' ')}`,
+      description: `Created by KONVO for ${provider(conn.provider)?.name ?? conn.provider}. Do not edit; change it in KONVO.`,
     })
     await setTrigger(token, scriptId, { triggerType: 'webhook' })
   }

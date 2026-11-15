@@ -7,7 +7,7 @@ export interface NormalizedTask {
   externalKey: string | null
   title: string
   description: string | null
-  /** Provider's own status words, mapped to WorkPulse by status-mapping. */
+  /** Provider's own status words, mapped to KONVO by status-mapping. */
   rawStatus: string | null
   /** Provider's status category when it has one (Linear state.type, Jira statusCategory.key). */
   rawStatusCategory: string | null
@@ -51,7 +51,7 @@ export interface NormalizedMessage {
   ts: string
   text: string
   author: string | null
-  /** Bot posts, edits, joins and other system messages never become tasks (prevents loops with WorkPulse's own posts). */
+  /** Bot posts, edits, joins and other system messages never become tasks (prevents loops with KONVO's own posts). */
   ignore: boolean
 }
 

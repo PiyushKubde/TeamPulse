@@ -72,7 +72,7 @@ export function ChartCard({
               <button
                 type="button"
                 onClick={() => setAsTable((v) => !v)}
-                className="rounded-md p-1.5 text-muted hover:bg-canvas hover:text-ink"
+                className="rounded-md p-1.5 text-muted hover:bg-hover hover:text-ink"
                 aria-label={asTable ? 'Show chart' : 'Show as table'}
                 title={asTable ? 'Show chart' : 'Show as table'}
               >
@@ -262,7 +262,7 @@ export function DonutChart({
               type="button"
               disabled={!onSelect || s.name === 'Other'}
               onClick={() => onSelect?.(s)}
-              className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left enabled:hover:bg-canvas"
+              className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left enabled:hover:bg-hover"
             >
               <span className="size-2.5 shrink-0 rounded-sm" style={{ background: SERIES[i] }} aria-hidden />
               <span className="min-w-0 flex-1 truncate text-ink-soft">{s.name}</span>
@@ -309,7 +309,7 @@ export function BarList({
         return (
           <li key={r.key}>
             {onSelect ? (
-              <button type="button" onClick={() => onSelect(r.key)} className="block w-full rounded px-1 py-0.5 text-left hover:bg-canvas">
+              <button type="button" onClick={() => onSelect(r.key)} className="block w-full rounded px-1 py-0.5 text-left hover:bg-hover">
                 {inner}
               </button>
             ) : (

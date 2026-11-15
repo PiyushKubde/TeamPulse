@@ -1,6 +1,6 @@
 // Phone alerts through M91.
 //  • On-call: named conditions checked every minute in the API process → the on-call channel (send link).
-//  • People: chosen moments → that person's own phone (API key), answered with buttons that WorkPulse acts on.
+//  • People: chosen moments → that person's own phone (API key), answered with buttons that KONVO acts on.
 // Every alert has two answers and a customId naming the condition; it is closed when the condition clears, which
 // re-arms it. Nothing here is wired into a generic error handler: only the conditions below ring anybody.
 import { prisma } from '../lib/prisma.js'
@@ -132,14 +132,14 @@ export async function checkOps() {
     streak.db >= 3,
     'workpulse-database-down',
     'CRITICAL',
-    'WorkPulse database unreachable',
+    'KONVO database unreachable',
     `The API has not reached PostgreSQL for ${streak.db} checks in a row. Every page and sync is failing.`,
   )
   await set(
     streak.redis >= 3,
     'workpulse-redis-down',
     'CRITICAL',
-    'WorkPulse Redis unreachable',
+    'KONVO Redis unreachable',
     `The API has not reached Redis for ${streak.redis} checks in a row. Background jobs, imports and reminders are stopped.`,
   )
   if (!dbOk || !redisOk) return
@@ -154,7 +154,7 @@ export async function checkOps() {
     workerDown || hourlyLate,
     'workpulse-worker-stalled',
     'HIGH',
-    'WorkPulse background worker stopped',
+    'KONVO background worker stopped',
     workerDown
       ? 'No heartbeat from the worker for over 10 minutes: imports, reminders and reports are not running.'
       : 'The hourly job has not run for over 2 hours: reminders, escalations and daily reports are not going out.',
@@ -169,7 +169,7 @@ export async function checkOps() {
     streak.backlog >= 10,
     'workpulse-ingest-backlog',
     'HIGH',
-    'WorkPulse sync backlog growing',
+    'KONVO sync backlog growing',
     `${waiting} app events have been waiting for over 10 minutes. New tasks from Slack, Linear, Jira and GitHub are delayed.`,
   )
 
@@ -181,7 +181,7 @@ export async function checkOps() {
       n >= 3,
       `workpulse-sync-dead-${p}`,
       'HIGH',
-      `${p} sync failing in WorkPulse`,
+      `${p} sync failing in KONVO`,
       `${n} ${p} events failed after all retries in the last hour. Tasks from ${p} are missing; see Sync History.`,
     )
   }
@@ -194,7 +194,7 @@ export async function checkOps() {
     errors > 20,
     'workpulse-api-errors',
     'HIGH',
-    'WorkPulse API returning errors',
+    'KONVO API returning errors',
     `${errors} server errors in the last 5 minutes. People are seeing “Something went wrong”.`,
   )
 
@@ -205,7 +205,7 @@ export async function checkOps() {
     email >= 3,
     'workpulse-email-failing',
     'HIGH',
-    'WorkPulse cannot send email',
+    'KONVO cannot send email',
     `${email} emails in a row failed. Verification, password reset and invitations are not arriving.`,
   )
   const ai = await fail('ai')
@@ -213,11 +213,11 @@ export async function checkOps() {
     ai >= 5,
     'workpulse-ai-failing',
     'MEDIUM',
-    'WorkPulse AI calls failing',
+    'KONVO AI calls failing',
     `${ai} AI calls in a row failed. Tasks are still created and assigned, without AI.`,
   )
   const delivery = await fail('delivery')
-  await set(delivery >= 5, 'workpulse-delivery-failing', 'MEDIUM', 'WorkPulse report delivery failing', `${delivery} Slack/Gmail deliveries in a row failed.`)
+  await set(delivery >= 5, 'workpulse-delivery-failing', 'MEDIUM', 'KONVO report delivery failing', `${delivery} Slack/Gmail deliveries in a row failed.`)
 }
 
 export function startOpsMonitor() {
@@ -385,7 +385,7 @@ export async function phoneAlertConnectionExpired(conn: { id: string; orgId: str
     refId: conn.id,
     customId: `connection-${conn.id}`,
     payload: {
-      title: `Your ${conn.provider} connection to WorkPulse expired`,
+      title: `Your ${conn.provider} connection to KONVO expired`,
       description: `Tasks from ${conn.provider} have stopped arriving. Reconnect: ${env.APP_URL}/integrations`,
       severity: 'LOW',
       responseOptions: [

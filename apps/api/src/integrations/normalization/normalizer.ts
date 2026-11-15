@@ -1,4 +1,4 @@
-// Applies normalized external records to WorkPulse. The only code that writes external data into tasks.
+// Applies normalized external records to KONVO. The only code that writes external data into tasks.
 // Rules: only EXTERNAL_FIELDS are ever written; impactLevel, complexity, assessments, evidence verification and
 // feedback are internal-only. Stale events (older than what is stored) are skipped. In TWO_WAY mode a field changed
 // on both sides since the last sync becomes a SyncConflict instead of being overwritten.
@@ -182,9 +182,9 @@ export async function applyTask(conn: IntegrationConnection, n: NormalizedTask, 
   for (const f of EXTERNAL_FIELDS) {
     if (same(external[f], internal[f])) continue
     const externalChanged = !(f in last) || !same(external[f], last[f])
-    if (!externalChanged) continue // the external side did not change this field; keep WorkPulse's value
+    if (!externalChanged) continue // the external side did not change this field; keep KONVO's value
     const internalChanged = f in last && !same(internal[f], last[f])
-    // An unmapped assignee never clears a WorkPulse assignee.
+    // An unmapped assignee never clears a KONVO assignee.
     if (f === 'assigneeId' && external[f] === null && assignee.unmapped) continue
     if (conn.syncMode === 'TWO_WAY' && internalChanged) {
       conflicts.push({ field: f, internalValue: JSON.stringify(internal[f] ?? null), externalValue: JSON.stringify(external[f] ?? null) })
@@ -219,7 +219,7 @@ export async function applyTask(conn: IntegrationConnection, n: NormalizedTask, 
       userId: conn.userId,
       kind: 'sync_conflict',
       title: `Sync conflict on "${task.title}"`,
-      body: `Changed in WorkPulse and ${n.provider}: ${conflicts.map((c) => c.field).join(', ')}`,
+      body: `Changed in KONVO and ${n.provider}: ${conflicts.map((c) => c.field).join(', ')}`,
       link: `/tasks/${task.id}`,
       dedupeKey: `conflict:${task.id}:${n.externalUpdatedAt?.toISOString() ?? Date.now()}`,
     })
@@ -243,7 +243,7 @@ export async function applyComment(conn: IntegrationConnection, c: NormalizedCom
   const src = await prisma.taskSource.findUnique({
     where: { orgId_provider_externalId: { orgId: conn.orgId, provider: c.provider, externalId: c.issueExternalId } },
   })
-  if (!src) return { outcome: 'skipped', taskId: null, reason: 'Comment on an issue that is not in WorkPulse.', flagged: [] }
+  if (!src) return { outcome: 'skipped', taskId: null, reason: 'Comment on an issue that is not in KONVO.', flagged: [] }
   await prisma.taskComment.upsert({
     where: { taskId_externalId: { taskId: src.taskId, externalId: c.externalId } },
     create: {

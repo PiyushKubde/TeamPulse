@@ -93,6 +93,7 @@ export const inviteSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   role: z.enum(ROLES).exclude(['OWNER']),
   teamId: id.optional(),
+  phone: phoneSchema,
 })
 export const acceptInviteSchema = z.object({
   token: z.string().min(20).max(200),
@@ -167,7 +168,7 @@ export const taskCreateSchema = z.object({
   labels: z.array(text(40).min(1)).max(20).optional(),
   projectId: id.nullable().optional(),
   parentId: id.nullable().optional(),
-  /** A member id, null for unassigned, or "auto": WorkPulse picks the best fit (named person, else AI or rules). */
+  /** A member id, null for unassigned, or "auto": KONVO picks the best fit (named person, else AI or rules). */
   assigneeId: z
     .union([id, z.literal('auto')])
     .nullable()

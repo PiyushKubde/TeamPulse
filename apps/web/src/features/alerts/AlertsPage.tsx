@@ -29,7 +29,7 @@ export function AlertsPage() {
     <div>
       <PageHeader
         title="Phone alerts"
-        description="Through M91, WorkPulse rings phones at full volume (even on silent) when something needs a person now, and acts on the answer given from the alert."
+        description="Through M91, KONVO rings phones at full volume (even on silent) when something needs a person now, and acts on the answer given from the alert."
       />
       <div className="grid gap-4 xl:grid-cols-2">
         <div className="space-y-4">
@@ -65,7 +65,7 @@ function OnCallCard() {
               <PhoneCall className="size-4 text-primary" /> On-call channel
             </span>
           }
-          description="Rings your team’s M91 channel when WorkPulse itself breaks. Checked every minute."
+          description="Rings your team’s M91 channel when KONVO itself breaks. Checked every minute."
           action={
             d.configured &&
             d.channel && (
@@ -82,7 +82,7 @@ function OnCallCard() {
               <ol className="list-decimal space-y-1 pl-5">
                 <li>In the M91 app, create a channel and add whoever should be woken.</li>
                 <li>On that channel, tap the paper-plane icon and copy the link.</li>
-                <li>Give it to whoever runs WorkPulse’s server, to add as its on-call link.</li>
+                <li>Give it to whoever runs KONVO’s server, to add as its on-call link.</li>
               </ol>
             </div>
           ) : d.error ? (
@@ -145,7 +145,7 @@ function OnCallCard() {
           <p className="font-medium">Personal phone alerts are off</p>
           <p className="mt-1 text-ink-soft">
             To let people get their own alerts (for example a critical task assigned to them), create an API key in the M91 app (Settings → API keys) and give
-            it to whoever runs WorkPulse’s server, to add as the M91 API key.
+            it to whoever runs KONVO’s server, to add as the M91 API key.
           </p>
         </Card>
       )}

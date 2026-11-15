@@ -296,7 +296,6 @@ people.get('/me/phone-alerts', async (req, res) => {
 
 /** Saves the number and sends the M91 invitation; the person accepts it in the M91 app. */
 people.put('/me/phone', async (req, res) => {
-  if (!m91.platformConfigured()) throw unavailable()
   const user = userOf(req)
   const { phone: raw } = body(req, z.object({ phone: z.string().min(6).max(20) }))
   const phone = m91.normalizePhone(raw)
@@ -325,8 +324,8 @@ people.post('/me/phone/test', async (req, res) => {
   if (!user.phone) throw badRequest('Add your number first.')
   try {
     const r = await m91.personAlert(user.phone, {
-      title: 'WorkPulse test: your phone alerts work',
-      description: 'This is the kind of alert WorkPulse sends for the moments you chose. Nothing to do.',
+      title: 'KONVO test: your phone alerts work',
+      description: 'This is the kind of alert KONVO sends for the moments you chose. Nothing to do.',
       severity: 'LOW',
       customId: `test-${user.id}-${Date.now()}`,
       isAutoClose: true,
@@ -336,13 +335,13 @@ people.post('/me/phone/test', async (req, res) => {
       ],
     })
     if (r.delivered === 0)
-      throw new HttpError(409, 'not_reachable', 'Nobody was reached: open the M91 app on your phone and accept the WorkPulse invitation, then try again.')
+      throw new HttpError(409, 'not_reachable', 'Nobody was reached: open the M91 app on your phone and accept the KONVO invitation, then try again.')
     res.json({ delivered: r.delivered })
   } catch (e) {
     if (e instanceof HttpError) throw e
     if (e instanceof m91.M91Error && e.status === 409) {
       await prisma.user.update({ where: { id: user.id }, data: { phoneAlertState: 'pending' } })
-      throw new HttpError(409, 'not_accepted', 'Your phone hasn’t accepted the WorkPulse invitation yet. Open the M91 app, accept it, then try again.')
+      throw new HttpError(409, 'not_accepted', 'Your phone hasn’t accepted the KONVO invitation yet. Open the M91 app, accept it, then try again.')
     }
     throw new HttpError(502, 'm91_failed', m91Message(e))
   }
@@ -405,7 +404,7 @@ people.post('/alerts/on-call/test', async (req, res) => {
     throw new HttpError(409, 'not_configured', 'No on-call channel yet: add the channel’s send link to the server as M91_SEND_LINK.')
   try {
     const r = await m91.channelAlert({
-      title: 'WorkPulse on-call test',
+      title: 'KONVO on-call test',
       description: `Sent by ${userOf(req).name} from the Phone alerts page. Nothing is wrong.`,
       severity: 'LOW',
       customId: `workpulse-test-${Date.now()}`,

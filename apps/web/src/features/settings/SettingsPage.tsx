@@ -122,17 +122,20 @@ function Members() {
     queryFn: () => api<{ invitations: { id: string; email: string; role: string; expiresAt: string }[] }>('/invitations'),
   })
   const [inviting, setInviting] = useState(false)
-  const [inv, setInv] = useState({ email: '', role: 'MEMBER', teamId: '' })
+  const [inv, setInv] = useState({ email: '', role: 'MEMBER', teamId: '', phone: '' })
   const [link, setLink] = useState<string | null>(null)
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['members'] })
     qc.invalidateQueries({ queryKey: ['invitations'] })
   }
   const invite = useMutation({
-    mutationFn: () => api<{ link: string | null }>('/invitations', { body: { email: inv.email, role: inv.role, teamId: inv.teamId || undefined } }),
+    mutationFn: () =>
+      api<{ link: string | null }>('/invitations', {
+        body: { email: inv.email, role: inv.role, teamId: inv.teamId || undefined, phone: inv.phone || undefined },
+      }),
     onSuccess: (r) => {
       refresh()
-      setInv({ email: '', role: 'MEMBER', teamId: '' })
+      setInv({ email: '', role: 'MEMBER', teamId: '', phone: '' })
       if (r.link) setLink(r.link)
       else {
         setInviting(false)
@@ -294,6 +297,13 @@ function Members() {
           <div className="space-y-3">
             <Field label="Email" htmlFor="inv-email">
               <Input id="inv-email" type="email" value={inv.email} onChange={(e) => setInv({ ...inv, email: e.target.value })} />
+            </Field>
+            <Field
+              label="Mobile number"
+              htmlFor="inv-phone"
+              hint="Optional. Their M91 invitation goes out now, so urgent alerts reach them from day one. They can add it when they join instead."
+            >
+              <Input id="inv-phone" type="tel" placeholder="+91 98765 43210" value={inv.phone} onChange={(e) => setInv({ ...inv, phone: e.target.value })} />
             </Field>
             <Field label="Role" htmlFor="inv-role">
               <Select id="inv-role" value={inv.role} onChange={(e) => setInv({ ...inv, role: e.target.value })} disabled={!isAdmin}>
@@ -485,7 +495,7 @@ function TeamMembersDialog({
       <ul className="max-h-80 space-y-1 overflow-y-auto">
         {allMembers.map((m) => (
           <li key={m.userId}>
-            <label className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-canvas">
+            <label className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-hover">
               <input
                 type="checkbox"
                 checked={ids.has(m.userId)}
@@ -545,7 +555,7 @@ function Organization() {
         </Field>
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" className="mt-1" checked={v.requireReportApproval} onChange={(e) => setV({ ...v, requireReportApproval: e.target.checked })} />
-          <span>Only admins may send team reports outside WorkPulse (email, Slack)</span>
+          <span>Only admins may send team reports outside KONVO (email, Slack)</span>
         </label>
         <Button onClick={() => save.mutate()} loading={save.isPending}>
           Save
@@ -818,23 +828,32 @@ interface PhoneAlertsState {
 /** The person's own phone alerts through M91. Says only what rings, why, and what to do. */
 export function PhoneAlerts() {
   const qc = useQueryClient()
-  const q = useQuery({ queryKey: ['phone-alerts'], queryFn: () => api<PhoneAlertsState>('/me/phone-alerts') })
+  // While the invitation is waiting, KONVO asks M91 every 20 s whether it was accepted: nobody has to press anything.
+  const q = useQuery({
+    queryKey: ['phone-alerts'],
+    queryFn: async () => {
+      const d = await api<PhoneAlertsState>('/me/phone-alerts')
+      return d.available && d.phone && d.state === 'pending' ? api<PhoneAlertsState>('/me/phone/refresh', { method: 'POST' }).catch(() => d) : d
+    },
+    refetchInterval: (query) => (query.state.data?.phone && query.state.data.state === 'pending' ? 20_000 : false),
+  })
   const [phone, setPhone] = useState('')
+  const [changing, setChanging] = useState(false)
   const done = (d: PhoneAlertsState) => qc.setQueryData(['phone-alerts'], d)
   const save = useMutation({
     mutationFn: () => api<PhoneAlertsState>('/me/phone', { method: 'PUT', body: { phone } }),
     onSuccess: (d) => {
       done(d)
-      toast.success('Invitation sent to your M91 app')
+      setChanging(false)
+      setPhone('')
+      qc.invalidateQueries({ queryKey: ['me'] })
+      toast.success(d.available ? 'Saved. We sent the invitation to your M91 app.' : 'Saved.')
     },
     onError: (e) => toast.error(errorMessage(e), { duration: 10000 }),
   })
-  const refresh = useMutation({
+  const resend = useMutation({
     mutationFn: () => api<PhoneAlertsState>('/me/phone/refresh', { method: 'POST' }),
-    onSuccess: (d) => {
-      done(d)
-      toast(d.state === 'accepted' ? 'Connected: your phone will ring' : 'Not accepted yet: open the M91 app and accept the invitation')
-    },
+    onSuccess: done,
     onError: (e) => toast.error(errorMessage(e)),
   })
   const test = useMutation({
@@ -846,69 +865,82 @@ export function PhoneAlerts() {
     mutationFn: (b: Record<string, boolean>) => api<PhoneAlertsState>('/me/alert-prefs', { method: 'PATCH', body: b }),
     onSuccess: done,
   })
-  const remove = useMutation({ mutationFn: () => api<PhoneAlertsState>('/me/phone', { method: 'DELETE' }), onSuccess: done })
   if (q.isLoading) return <Skeleton className="h-60" />
   const d = q.data
   if (!d) return null
   return (
     <Card>
-      <CardHeader
-        title="Your phone"
-        description="WorkPulse rings your phone, even on silent, when something needs you now: you can answer right from the alert."
-      />
+      <CardHeader title="Your phone" description="KONVO rings your phone, even on silent, when something needs you now: you can answer right from the alert." />
       <div className="space-y-4 p-5 text-sm">
-        {!d.available ? (
-          <p className="text-muted">Phone alerts aren’t set up on this server yet. An administrator needs to add the M91 API key.</p>
+        {!d.available && (
+          <p className="text-muted">
+            Phone alerts aren’t switched on for this server yet. Your number is saved; KONVO sends the M91 invitation as soon as an administrator adds the M91
+            API key.
+          </p>
+        )}
+        {d.phone && !changing ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg bg-canvas p-3">
+            <span className="font-medium">+{d.phone}</span>
+            {d.available && (
+              <Badge tone={d.state === 'accepted' ? 'green' : d.state === 'declined' ? 'red' : 'amber'}>
+                {d.state === 'accepted' ? 'Connected' : d.state === 'declined' ? 'Invitation declined' : 'Invitation sent: accept it in the M91 app'}
+              </Badge>
+            )}
+            {d.available && d.state === 'declined' && (
+              <Button size="sm" variant="secondary" onClick={() => resend.mutate()} loading={resend.isPending}>
+                Send the invitation again
+              </Button>
+            )}
+            {d.state === 'accepted' && (
+              <Button size="sm" variant="secondary" onClick={() => test.mutate()} loading={test.isPending}>
+                Send a test alert
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setChanging(true)}>
+              Change number
+            </Button>
+          </div>
         ) : (
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              save.mutate()
+            }}
+          >
+            <Input aria-label="Mobile number" placeholder="+91 98765 43210" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <Button type="submit" loading={save.isPending} disabled={phone.replace(/\D/g, '').length < 10}>
+              Save
+            </Button>
+            {d.phone && (
+              <Button type="button" variant="ghost" onClick={() => setChanging(false)}>
+                Cancel
+              </Button>
+            )}
+          </form>
+        )}
+        {d.available && (
           <>
-            <ol className="list-decimal space-y-1 pl-5 text-ink-soft">
-              <li>
-                Install M91 on your phone:{' '}
-                <a className="text-primary hover:underline" href="https://apps.apple.com/app/id6759090472" target="_blank" rel="noreferrer">
-                  iPhone
-                </a>{' '}
-                ·{' '}
-                <a className="text-primary hover:underline" href="https://play.google.com/store/apps/details?id=com.msg91.m91" target="_blank" rel="noreferrer">
-                  Android
-                </a>
-                , and sign in with your number.
-              </li>
-              <li>Enter the same number below.</li>
-              <li>Accept the WorkPulse invitation that appears in the M91 app.</li>
-            </ol>
-            {d.phone ? (
-              <div className="flex flex-wrap items-center gap-2 rounded-lg bg-canvas p-3">
-                <span className="font-medium">+{d.phone}</span>
-                <Badge tone={d.state === 'accepted' ? 'green' : d.state === 'declined' ? 'red' : 'amber'}>
-                  {d.state === 'accepted' ? 'Connected' : d.state === 'declined' ? 'Invitation declined' : 'Waiting for you to accept in the M91 app'}
-                </Badge>
-                {d.state !== 'accepted' && (
-                  <Button size="sm" variant="secondary" onClick={() => refresh.mutate()} loading={refresh.isPending}>
-                    I’ve accepted it
-                  </Button>
-                )}
-                {d.state === 'accepted' && (
-                  <Button size="sm" variant="secondary" onClick={() => test.mutate()} loading={test.isPending}>
-                    Send a test alert
-                  </Button>
-                )}
-                <Button size="sm" variant="ghost" className="ml-auto" onClick={() => remove.mutate()}>
-                  Remove
-                </Button>
-              </div>
-            ) : (
-              <form
-                className="flex gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  save.mutate()
-                }}
-              >
-                <Input aria-label="Mobile number" placeholder="+91 98765 43210" value={phone} onChange={(e) => setPhone(e.target.value)} />
-                <Button type="submit" loading={save.isPending} disabled={phone.replace(/\D/g, '').length < 10}>
-                  Send invitation
-                </Button>
-              </form>
+            {d.state !== 'accepted' && (
+              <ol className="list-decimal space-y-1 pl-5 text-ink-soft">
+                <li>
+                  Install M91 on your phone:{' '}
+                  <a className="text-primary hover:underline" href="https://apps.apple.com/app/id6759090472" target="_blank" rel="noreferrer">
+                    iPhone
+                  </a>{' '}
+                  ·{' '}
+                  <a
+                    className="text-primary hover:underline"
+                    href="https://play.google.com/store/apps/details?id=com.msg91.m91"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Android
+                  </a>
+                  , and sign in with this number.
+                </li>
+                <li>Accept the KONVO invitation waiting there. This page notices by itself.</li>
+              </ol>
             )}
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Your phone rings when…</p>

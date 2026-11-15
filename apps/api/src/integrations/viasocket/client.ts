@@ -17,5 +17,5 @@ export function setViasocketForTests(fake: ViaSocket | null) {
   client = fake
 }
 
-/** viaSocket's end-user id for a WorkPulse user: our stable user id, never the email. */
+/** viaSocket's end-user id for a KONVO user: our stable user id, never the email. */
 export const vsUserId = (userId: string) => String(userId)

@@ -128,7 +128,7 @@ reports.post('/reports/:id/deliver', async (req, res) => {
   const { channel } = body(req, deliverReportSchema)
   const org = await prisma.organization.findUniqueOrThrow({ where: { id: ctx.orgId }, select: { settings: true } })
   const approval = (org.settings as Record<string, unknown>).requireReportApproval === true
-  if (approval && r.subject.startsWith('team:') && !ctx.orgWide) throw forbidden('Your organization requires an admin to send team reports outside WorkPulse.')
+  if (approval && r.subject.startsWith('team:') && !ctx.orgWide) throw forbidden('Your organization requires an admin to send team reports outside KONVO.')
   const content = r.content as unknown as ReportContent
   let status = 'SENT'
   let failure: HttpError | null = null

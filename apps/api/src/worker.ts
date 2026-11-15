@@ -34,7 +34,7 @@ await queue('reminders').upsertJobScheduler('phone-invites', { pattern: '*/5 * *
 // Lets the API's on-call monitor notice a dead worker.
 await heartbeat('worker')
 setInterval(() => void heartbeat('worker'), 60_000).unref()
-logger.info('WorkPulse worker started')
+logger.info('KONVO worker started')
 // Point viaSocket handlers at the current public URL (tunnels change address on restart).
 await reconcileSubscriptions().catch((e) => logger.warn({ err: e instanceof Error ? e.message : e }, 'reconcile failed'))
 

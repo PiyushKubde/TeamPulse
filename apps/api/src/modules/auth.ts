@@ -10,6 +10,7 @@ import { mailConfigured, sendMail } from '../lib/mailer.js'
 import { connectPhone } from '../services/phone-alerts.js'
 import { platformConfigured } from '../lib/m91.js'
 import { SESSION_COOKIE, requireAuth, userOf } from '../middleware/auth.js'
+import { finishGoogle, googleConfigured, startGoogle } from './google.js'
 
 export const auth = Router()
 
@@ -43,7 +44,7 @@ export async function sendVerification(userId: string, email: string) {
   const token = await issueToken(userId, 'VERIFY_EMAIL', 48)
   return sendMail(
     email,
-    'Verify your WorkPulse email',
+    'Verify your KONVO email',
     `Confirm your email address:\n\n${env.APP_URL}/verify-email?token=${token}\n\nThis link expires in 48 hours.`,
   )
 }
@@ -71,6 +72,11 @@ auth.post('/login', async (req, res) => {
   res.json({ user: { id: user.id, email: user.email, name: user.name } })
 })
 
+// Sign in with Google: also creates the account on first use. Public: the page needs to know whether to show the button.
+auth.get('/google', startGoogle)
+auth.get('/google/callback', (req, res) => finishGoogle(req, res, startSession))
+auth.get('/providers', (_req, res) => res.json({ google: googleConfigured() }))
+
 auth.post('/logout', async (req: Request, res) => {
   if (req.auth) await prisma.session.delete({ where: { id: req.auth.sessionId } }).catch(() => undefined)
   res.clearCookie(SESSION_COOKIE, { path: '/' })
@@ -84,7 +90,7 @@ auth.post('/forgot-password', async (req, res) => {
     const token = await issueToken(user.id, 'RESET_PASSWORD', 1)
     await sendMail(
       email,
-      'Reset your WorkPulse password',
+      'Reset your KONVO password',
       `Choose a new password:\n\n${env.APP_URL}/reset-password?token=${token}\n\nThis link expires in 1 hour. If you did not ask for it, ignore this email.`,
     )
   }
@@ -117,7 +123,7 @@ auth.post('/resend-verification', requireAuth, async (req, res) => {
     throw new HttpError(
       503,
       'mail_not_configured',
-      'WorkPulse could not send the email: no email sender is set up (connect Gmail in Integrations or configure SMTP).',
+      'KONVO could not send the email: no email sender is set up (connect Gmail in Integrations or configure SMTP).',
     )
   res.json({ ok: true, delivered: true })
 })

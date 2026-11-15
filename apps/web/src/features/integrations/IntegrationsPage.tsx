@@ -61,7 +61,7 @@ function directions(p: Provider) {
     p.capabilities.includes('intake') && 'tasks from messages',
   ].filter(Boolean) as string[]
   const out = [
-    p.capabilities.includes('delivery') && (p.slug === 'gmail' ? 'reports, WorkPulse system emails' : 'reports, alerts, task confirmations'),
+    p.capabilities.includes('delivery') && (p.slug === 'gmail' ? 'reports, KONVO system emails' : 'reports, alerts, task confirmations'),
     p.supportsTwoWay && 'status updates (optional)',
   ].filter(Boolean) as string[]
   return { into, out }
@@ -91,7 +91,7 @@ export function IntegrationsPage() {
     <div>
       <PageHeader
         title="Integrations"
-        description="Each connection works in two directions: into WorkPulse (new tasks and evidence arrive by themselves) and out of WorkPulse (reports, alerts and status updates are sent by themselves). Each connection belongs to you and only acts for you."
+        description="Each connection works in two directions: into KONVO (new tasks and evidence arrive by themselves) and out of KONVO (reports, alerts and status updates are sent by themselves). Each connection belongs to you and only acts for you."
       />
       <Tabs
         value={tab}
@@ -192,14 +192,13 @@ function ProviderCard({ p, disabled }: { p: Provider; disabled: boolean }) {
             <p className="flex items-start gap-1.5">
               <ArrowDownToLine className="mt-0.5 size-3.5 shrink-0 text-teal" />
               <span>
-                <span className="font-medium text-ink">Into WorkPulse:</span>{' '}
-                <span className="text-ink-soft">{directions(p).into.join(', ') || 'nothing'}</span>
+                <span className="font-medium text-ink">Into KONVO:</span> <span className="text-ink-soft">{directions(p).into.join(', ') || 'nothing'}</span>
               </span>
             </p>
             <p className="flex items-start gap-1.5">
               <ArrowUpFromLine className="mt-0.5 size-3.5 shrink-0 text-primary" />
               <span>
-                <span className="font-medium text-ink">Out of WorkPulse:</span>{' '}
+                <span className="font-medium text-ink">Out of KONVO:</span>{' '}
                 <span className="text-ink-soft">{directions(p).out.join(', ') || 'nothing (read only)'}</span>
               </span>
             </p>
@@ -290,7 +289,7 @@ function ConnectionPanel({ p, conn, onReconnect }: { p: Provider; conn: Connecti
       </div>
       {conn.lastError && <Notice tone="red">{conn.lastError}</Notice>}
 
-      <Direction dir="in" title="Into WorkPulse" subtitle={`What ${p.name} creates here, automatically`}>
+      <Direction dir="in" title="Into KONVO" subtitle={`What ${p.name} creates here, automatically`}>
         {(p.slug === 'linear' || p.slug === 'jira-software-cloud') && (
           <>
             <Picker
@@ -307,7 +306,7 @@ function ConnectionPanel({ p, conn, onReconnect }: { p: Provider; conn: Connecti
               hint={
                 mode === 'IMPORT_ONLY'
                   ? 'Only what you import with the button below. Later changes in ' + p.name + ' are ignored.'
-                  : `New issues become tasks automatically, and edits, status changes and comments keep them up to date. Your impact ratings, assessments and evidence in WorkPulse are never overwritten.`
+                  : `New issues become tasks automatically, and edits, status changes and comments keep them up to date. Your impact ratings, assessments and evidence in KONVO are never overwritten.`
               }
             >
               <Select
@@ -373,7 +372,7 @@ function ConnectionPanel({ p, conn, onReconnect }: { p: Provider; conn: Connecti
             />
             <p className="text-xs text-muted">
               AI reads every message posted there: work requests become tasks (title, priority, due date, assignee), chatter is skipped. Bot messages, including
-              WorkPulse’s own, are ignored.
+              KONVO’s own, are ignored.
             </p>
             {settings.intake?.channelId && (
               <Button size="sm" variant="ghost" onClick={() => save.mutate({ intake: null })}>
@@ -382,10 +381,10 @@ function ConnectionPanel({ p, conn, onReconnect }: { p: Provider; conn: Connecti
             )}
           </>
         )}
-        {p.slug === 'gmail' && <p className="text-xs text-muted">Nothing: Gmail does not create tasks in WorkPulse.</p>}
+        {p.slug === 'gmail' && <p className="text-xs text-muted">Nothing: Gmail does not create tasks in KONVO.</p>}
       </Direction>
 
-      <Direction dir="out" title="Out of WorkPulse" subtitle={`What WorkPulse sends to ${p.name}, automatically`}>
+      <Direction dir="out" title="Out of KONVO" subtitle={`What KONVO sends to ${p.name}, automatically`}>
         {p.slug === 'linear' && (
           <>
             <label className="flex items-start gap-2 text-sm">
@@ -402,7 +401,7 @@ function ConnectionPanel({ p, conn, onReconnect }: { p: Provider; conn: Connecti
                 }}
               />
               <span>
-                Update the Linear issue when its status changes in WorkPulse
+                Update the Linear issue when its status changes in KONVO
                 <span className="block text-xs text-muted">
                   {mode === 'IMPORT_ONLY'
                     ? 'Needs “Keep in sync automatically” above.'
@@ -416,7 +415,7 @@ function ConnectionPanel({ p, conn, onReconnect }: { p: Provider; conn: Connecti
           </>
         )}
         {(p.slug === 'jira-software-cloud' || p.slug === 'github') && (
-          <p className="text-xs text-muted">Nothing: WorkPulse only reads from {p.name}; it never changes anything there.</p>
+          <p className="text-xs text-muted">Nothing: KONVO only reads from {p.name}; it never changes anything there.</p>
         )}
         {p.slug === 'slack' && (
           <>
@@ -461,7 +460,7 @@ function ConnectionPanel({ p, conn, onReconnect }: { p: Provider; conn: Connecti
         {p.slug === 'gmail' && (
           <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted">
             <li>Reports you send with “Email me”, to your own address</li>
-            <li>When you are an owner or admin: WorkPulse’s own emails (verification, password reset, invitations) to anyone in the organization</li>
+            <li>When you are an owner or admin: KONVO’s own emails (verification, password reset, invitations) to anyone in the organization</li>
           </ul>
         )}
         {p.capabilities.includes('delivery') && (
@@ -491,7 +490,7 @@ function ConnectionPanel({ p, conn, onReconnect }: { p: Provider; conn: Connecti
         </Link>
         <Confirm
           title={`Disconnect ${p.name}?`}
-          description="WorkPulse removes its automations on this account and revokes access. Tasks already imported stay, but stop syncing."
+          description="KONVO removes its automations on this account and revokes access. Tasks already imported stay, but stop syncing."
           confirmLabel="Disconnect"
           danger
           onConfirm={() => disconnect.mutateAsync()}
@@ -573,7 +572,7 @@ function Picker({
           id={`pick-${conn.id}-${fieldKey}`}
           type="button"
           onClick={() => setOpen(true)}
-          className="flex h-9 w-full items-center justify-between rounded-lg border border-line-strong bg-surface px-3 text-left text-sm hover:bg-canvas"
+          className="flex h-9 w-full items-center justify-between rounded-lg border border-line-strong bg-surface px-3 text-left text-sm hover:bg-hover"
         >
           <span className={value ? '' : 'text-muted'}>{display ?? value ?? 'Choose…'}</span>
           <span className="text-xs text-primary">{value ? 'Change' : 'Choose'}</span>
@@ -591,7 +590,7 @@ function Picker({
               {options.map((o) => (
                 <li key={o.value}>
                   <button
-                    className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-canvas"
+                    className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-hover"
                     onClick={() => {
                       onPick(o)
                       setOpen(false)
@@ -632,7 +631,7 @@ function StatusMapDialog({ conn, onClose, onSave }: { conn: Connection; onClose:
       open
       onOpenChange={(o) => !o && onClose()}
       title="Status mapping for two-way sync"
-      description="When a task changes status in WorkPulse, Linear is set to the state you choose here. Unmapped statuses are not pushed."
+      description="When a task changes status in KONVO, Linear is set to the state you choose here. Unmapped statuses are not pushed."
       footer={
         <>
           <Button
@@ -717,7 +716,7 @@ function PeopleDialog({ conn, onClose, onSave }: { conn: Connection; onClose: ()
               onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, ext: e.target.value } : x)))}
               placeholder="External user id"
             />
-            <Select aria-label="WorkPulse member" value={r.user} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, user: e.target.value } : x)))}>
+            <Select aria-label="KONVO member" value={r.user} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, user: e.target.value } : x)))}>
               <option value="">Member…</option>
               {(members.data ?? []).map((m) => (
                 <option key={m.userId} value={m.userId}>
@@ -776,8 +775,8 @@ function Mappings() {
     <div className="space-y-4">
       <Notice tone="blue">
         <p>
-          WorkPulse has a fixed set of statuses (Backlog, To do, In progress, In review, Blocked, Completed, Cancelled) and priorities. Linear and Jira let
-          teams invent their own, like a status called “QA Ready”. WorkPulse understands the common ones by itself (“In Progress”, “Done”, “Won’t Do”…).
+          KONVO has a fixed set of statuses (Backlog, To do, In progress, In review, Blocked, Completed, Cancelled) and priorities. Linear and Jira let teams
+          invent their own, like a status called “QA Ready”. KONVO understands the common ones by itself (“In Progress”, “Done”, “Won’t Do”…).
         </p>
         <p className="mt-1.5">
           When it meets one it doesn’t know, the task is still imported (as “To do”) and marked “Needs review”, and the value is listed here. AI suggests what
@@ -786,7 +785,7 @@ function Mappings() {
         </p>
       </Notice>
       <Card>
-        <CardHeader title="Waiting for a decision" description="Each row is a value from one of your apps that WorkPulse has not seen before." />
+        <CardHeader title="Waiting for a decision" description="Each row is a value from one of your apps that KONVO has not seen before." />
         {pending.length === 0 ? (
           <EmptyState title="Nothing waiting" />
         ) : (

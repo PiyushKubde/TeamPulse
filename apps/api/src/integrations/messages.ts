@@ -22,7 +22,7 @@ const KNOWN: [RegExp, string][] = [
   [/channel_not_found/i, 'Slack can’t find that channel any more (it may have been deleted or renamed to private). Choose the channel again in Integrations.'],
   [
     /not_in_channel|is_archived/i,
-    'WorkPulse isn’t a member of that Slack channel or it is archived. Invite the app to the channel, or choose another one in Integrations.',
+    'KONVO isn’t a member of that Slack channel or it is archived. Invite the app to the channel, or choose another one in Integrations.',
   ],
   [
     /invalid_auth|token_revoked|account_inactive|Auth data not found|unauthori[sz]ed|401/i,

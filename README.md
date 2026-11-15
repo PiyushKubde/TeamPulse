@@ -1,8 +1,8 @@
-# WorkPulse
+# KONVO
 
 **One workspace. Every task. Measurable impact.**
 
-WorkPulse brings tasks from Linear, Jira and GitHub together with native tasks, then measures the *value* of the work:
+KONVO brings tasks from Linear, Jira and GitHub together with native tasks, then measures the *value* of the work:
 impact, execution quality, delivery reliability, goal alignment and evidence. It never counts raw task volume or hours.
 
 | | |

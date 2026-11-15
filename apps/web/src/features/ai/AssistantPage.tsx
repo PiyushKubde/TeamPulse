@@ -85,7 +85,7 @@ export function AssistantPage() {
     <div className="flex h-[calc(100vh-7.5rem)] flex-col">
       <PageHeader
         title="AI assistant"
-        description="Answers come only from your WorkPulse data, through tools that respect your permissions. Ask it to get something done and it creates the task right away and assigns the best-fit person (or whoever you name)."
+        description="Answers come only from your KONVO data, through tools that respect your permissions. Ask it to get something done and it creates the task right away and assigns the best-fit person (or whoever you name)."
       />
       <Card className="flex min-h-0 flex-1 flex-col">
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
@@ -111,7 +111,7 @@ export function AssistantPage() {
             messages.map((m, i) => (
               <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
                 <div
-                  className={`max-w-[85%] rounded-xl px-4 py-2.5 text-sm ${m.role === 'user' ? 'bg-primary text-white' : m.error ? 'bg-danger-soft text-danger' : 'border border-line bg-surface text-ink'}`}
+                  className={`max-w-[85%] rounded-lg px-4 py-2.5 text-sm ${m.role === 'user' ? 'bg-primary text-on-primary' : m.error ? 'bg-danger-soft text-danger' : 'border border-line bg-surface text-ink'}`}
                 >
                   {m.role === 'assistant' ? <Markdown text={m.content} /> : m.content}
                   {m.tools && m.tools.length > 0 && (
@@ -145,7 +145,7 @@ export function AssistantPage() {
           )}
           {send.isPending && (
             <div className="flex justify-start">
-              <div className="rounded-xl border border-line bg-surface px-4 py-2.5 text-sm text-muted">Looking at your data…</div>
+              <div className="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm text-muted">Looking at your data…</div>
             </div>
           )}
           <div ref={end} />

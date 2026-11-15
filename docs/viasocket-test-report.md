@@ -58,7 +58,7 @@ INFO VIASOCKET_TEST_EMBED_TOKEN not set — token check skipped
 
 ## B. BLOCKED: needs connected test accounts and a public URL
 
-None of these ran. Each needs a real test account connected through WorkPulse's own Connect button, and for triggers a
+None of these ran. Each needs a real test account connected through KONVO's own Connect button, and for triggers a
 public HTTPS `PUBLIC_API_URL` where viaSocket can deliver events (locally, for example, `cloudflared tunnel --url http://localhost:4000`).
 
 | Item | Why it's blocked | How to run it |
@@ -75,7 +75,7 @@ a live account" until `verifiedLiveAt` is set in `catalog.ts` after these checks
 
 ## C. Mocked tests (deterministic, `apps/api/test/api-integrations.test.ts`)
 
-A fake transport stands in for viaSocket. These prove WorkPulse's own logic, not viaSocket's behaviour. 24 tests, all
+A fake transport stands in for viaSocket. These prove KONVO's own logic, not viaSocket's behaviour. 24 tests, all
 passing: the connection ownership check, encryption at rest, subscription per catalog trigger and per repo, cross-user
 404s, provider failure (rate limit / downtime) recorded on the connection, disconnect + revoke, expired connections,
 bad/unknown tokens (401), malformed bodies (400), the spec's Linear example normalized, duplicate deliveries absorbed,
@@ -91,9 +91,9 @@ archive on delete, comment sync, GitHub evidence matched by task key, and unmatc
 | Line | Status | How |
 |---|---|---|
 | Confirmed | DONE | plan shown 2026-11-15, approved the same day; table in `viasocket-plan.md` (AI via viaSocket added at the person's request) |
-| Who connects | DONE in code, **UNTESTED live** | each WorkPulse user, Connect button with the app's icon; `auth_id` per user, ownership-checked, encrypted; Reconnect in place |
-| Where and when each value comes from | DONE | every `inputData` key decided in the table: once after Connect (PICK), per run (WorkPulse data), constant with a reason, or left out on purpose |
-| Who picks the action | DONE | WorkPulse code only; fixed actions are per-user flows; the only enabled app is Linear's, for backfill `runCode`; AI never picks |
+| Who connects | DONE in code, **UNTESTED live** | each KONVO user, Connect button with the app's icon; `auth_id` per user, ownership-checked, encrypted; Reconnect in place |
+| Where and when each value comes from | DONE | every `inputData` key decided in the table: once after Connect (PICK), per run (KONVO data), constant with a reason, or left out on purpose |
+| Who picks the action | DONE | KONVO code only; fixed actions are per-user flows; the only enabled app is Linear's, for backfill `runCode`; AI never picks |
 | Where it runs | DONE | actions from the server; script_ids owner-checked and encrypted; events via handler → authenticated endpoint, each saved as a SyncEvent; the browser holds only the embed token |
 | Tested | **BLOCKED** | no action ran on a test connection and no subscription saw a real event (section B). Automations and AI did run for real (section A) |
 | Proof | PARTIAL | checker output above (0 FAIL); one real call's response: the webhook flow `{"echoed":"workpulse"}` and the AI `json_schema` answer above. No real app action response yet |
@@ -104,7 +104,7 @@ archive on delete, comment sync, GitHub evidence matched by task key, and unmatc
 |---|---|
 | 1. `automationToken` for the test user | DONE |
 | 2. `createFlow`/`setTrigger`/`saveSteps` without throwing; `readFlow` shows trigger and steps | DONE (code-only step) |
-| 3. Plugin trigger `sampleEvent` | not applicable (WorkPulse flows use webhook triggers; app events use `subscribe`) |
+| 3. Plugin trigger `sampleEvent` | not applicable (KONVO flows use webhook triggers; app events use `subscribe`) |
 | 4. It ran once and `runHistory` shows it | DONE for the self-test flow; **BLOCKED** for `Send_Message`/`Send_Email`/`Update_Issue_Status`/`Find_Issue_via_JQL` flows (need connections) |
 | 5. Checker 0 FAIL, resolving every action_id | DONE |
 

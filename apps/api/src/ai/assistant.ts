@@ -1,5 +1,5 @@
 // The assistant. The model never touches the database: each turn it either answers or asks for ONE tool from the
-// fixed list below; WorkPulse validates the arguments, runs the tool under the caller's own permissions and sends
+// fixed list below; KONVO validates the arguments, runs the tool under the caller's own permissions and sends
 // the result back. All tools read, except create_task, which creates a task under the caller's own permissions and
 // assigns it automatically (named person, else best fit).
 import { z } from 'zod'
@@ -205,7 +205,7 @@ export const TOOLS = {
   },
   create_task: {
     description:
-      'Create a task now (it is saved immediately) and assign it automatically. Put a person in assigneeName only if the user named who should do it; otherwise leave it null and WorkPulse picks the best-fit teammate. Use one call per task.',
+      'Create a task now (it is saved immediately) and assign it automatically. Put a person in assigneeName only if the user named who should do it; otherwise leave it null and KONVO picks the best-fit teammate. Use one call per task.',
     args: z.object({
       title: z.string().min(1).max(200),
       description: z.string().max(4000).nullable().default(null),
@@ -278,9 +278,9 @@ export interface ChatMessage {
 export async function runAssistant(ctx: Ctx, history: ChatMessage[], message: string, userName: string) {
   const today = new Date().toISOString().slice(0, 10)
   const system = [
-    `You are WorkPulse's work assistant for ${userName} (role ${ctx.role}). Today is ${today}.`,
+    `You are KONVO's work assistant for ${userName} (role ${ctx.role}). Today is ${today}.`,
     'Answer only from tool results. Never invent tasks, people, numbers or dates; if the data is missing, say exactly what is missing.',
-    'WorkPulse measures value, not volume: weigh impact and outcomes over task counts; hours are effort, not productivity. Blockers and workload signals are prompts to investigate, never verdicts on a person. You never rate people.',
+    'KONVO measures value, not volume: weigh impact and outcomes over task counts; hours are effort, not productivity. Blockers and workload signals are prompts to investigate, never verdicts on a person. You never rate people.',
     'Each turn return either {type:"tool_call", tool, arguments (JSON string)} or {type:"answer", answer}. One tool per turn. Use "me" for the current user.',
     'Tools:',
     ...TOOL_NAMES.map((n) => `- ${n}: ${TOOLS[n].description} Arguments JSON schema: ${JSON.stringify(z.toJSONSchema(TOOLS[n].args))}`),

@@ -1,4 +1,4 @@
-// MOCKED AI: the fake viaSocket transport answers with queued JSON. These tests prove WorkPulse's guardrails.
+// MOCKED AI: the fake viaSocket transport answers with queued JSON. These tests prove KONVO's guardrails.
 import { describe, expect, it } from 'vitest'
 import { env } from '../src/config/env.js'
 import { prisma } from '../src/lib/prisma.js'

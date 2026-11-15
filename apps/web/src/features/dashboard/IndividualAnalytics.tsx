@@ -323,7 +323,7 @@ export function IndividualCharts({ d, taskLink, compact }: { d: IndividualData; 
 export function WorkLists({ d, openTask }: { d: IndividualData; openTask: (id: string) => void }) {
   const Row = ({ t, right }: { t: MiniTask; right: React.ReactNode }) => (
     <li>
-      <button onClick={() => openTask(t.id)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-canvas">
+      <button onClick={() => openTask(t.id)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-hover">
         <span className="min-w-0 flex-1 truncate">{t.title}</span>
         {right}
       </button>

@@ -1,4 +1,4 @@
-# WorkPulse — Implementation Plan (awaiting approval)
+# KONVO — Implementation Plan (awaiting approval)
 
 Status: **APPROVED 2026-11-15 and implemented. Current state: [status.md](status.md).** (Original proposal kept below for reference.)
 viaSocket skill: `viasocket-integrations/SKILL.md` updated to version `2026-11-14.1` (downloaded from
@@ -12,7 +12,7 @@ pages `app-integrations`, `actions-and-events`, `automations`, `setup` and `jour
 | Area | Finding |
 |---|---|
 | Repo | `TeamPulse/`, git branch `claude/teampulse-mvp` (clean, in sync with `origin`), remote `github.com/PiyushKubde/TeamPulse`. The parent folder is not a git repo. |
-| Product | "KONVO / TeamPulse": multi-tenant work-intelligence app: tasks, requests, evidence, AI contribution assessment, work signals, weekly reports, viaSocket Automation Center, M91 alerts. Conceptually ~60% overlap with WorkPulse. |
+| Product | "KONVO / TeamPulse": multi-tenant work-intelligence app: tasks, requests, evidence, AI contribution assessment, work signals, weekly reports, viaSocket Automation Center, M91 alerts. Conceptually ~60% overlap with KONVO. |
 | Backend | Node ≥22 ESM **JavaScript** (no TS), Express 5, `node:sqlite` (SQLite, 12 hand-written SQL migrations), hand-rolled validation, cookie sessions, Google OIDC + email/password, nodemailer. |
 | Frontend | Vanilla JS SPA in `public/` (no framework, no build), one 1,256-line CSS file. |
 | AI | Anthropic SDK, viaSocket AI gateway, Google Gemini (behind privacy gates). No OpenAI. |
@@ -153,16 +153,16 @@ back to TODO and is flagged); AI may **suggest** a mapping + confidence → a pe
 **Assignee mapping:** external user → member, by verified email match, else a manual mapping table in the
 connection's settings. Unmapped = unassigned + flagged.
 
-**Sync modes:** `IMPORT_ONLY` (one-time backfill), `ONE_WAY` (default: external → WorkPulse), `TWO_WAY` (opt-in, Linear
-first): a WorkPulse status change → `Update_Issue_Status`. Conflict = both sides changed since `lastSyncedAt` →
+**Sync modes:** `IMPORT_ONLY` (one-time backfill), `ONE_WAY` (default: external → KONVO), `TWO_WAY` (opt-in, Linear
+first): a KONVO status change → `Update_Issue_Status`. Conflict = both sides changed since `lastSyncedAt` →
 `SyncConflict` row, the external value is not applied, the user resolves it in the UI.
 
 ## 5. viaSocket plan
 
 **Three-line version:**
-> Reply yes and I'll build this: each person clicks **Connect** on Linear, GitHub, Jira or Slack inside WorkPulse.
+> Reply yes and I'll build this: each person clicks **Connect** on Linear, GitHub, Jira or Slack inside KONVO.
 > Right after connecting they pick, once, which Linear team / Jira project / GitHub repos to bring in and which Slack
-> channel gets their reports. From then on new and updated issues appear in WorkPulse automatically, PRs/commits/releases arrive as evidence, and reports post to Slack on schedule.
+> channel gets their reports. From then on new and updated issues appear in KONVO automatically, PRs/commits/releases arrive as evidence, and reports post to Slack on schedule.
 
 Feature: `app-integrations` (connect + triggers) and `automations` (webhook flows for outbound Slack/Gmail). SDK
 `viasocket-apps` (installed 0.19.0; upgrade to latest and read its `.d.ts` before the first call). Every key and
@@ -175,13 +175,13 @@ version below was copied from the app pages on viasocket.com on 2026-11-15; each
 | linear | trigger `Updated_Issue` v2 | `team_id` | same stored choice | once, after Connect |
 | linear | trigger `New_Issue_Comment` v1 | `team_id` | same stored choice | once, after Connect |
 | linear | action `Update_Issue_Status` v3 (TWO_WAY only) | `teams` | stored team choice | once, after Connect |
-| linear | action `Update_Issue_Status` v3 | `issue` | WorkPulse: the task's stored external id (the record names it) | per run |
+| linear | action `Update_Issue_Status` v3 | `issue` | KONVO: the task's stored external id (the record names it) | per run |
 | linear | action `Update_Issue_Status` v3 | `stateID` | the user's status map (internal status → a Linear state, PICK), set once when enabling two-way | once, at two-way setup |
 | linear | backfill: `runCode` (Linear GraphQL with the connection) | team id, `updatedAfter` cursor | stored team + `SyncCheckpoint` | per run (import) |
 | jira-software-cloud | trigger `New_Issue` v2 | `project` | the user picks a Jira project (PICK) | once, after Connect |
 | jira-software-cloud | trigger `New_Issue` v2 | `status` | left out on purpose (all statuses) | — |
 | jira-software-cloud | trigger `Updated_Issue` v4 | `project` / `status` | stored project / left out | once |
-| jira-software-cloud | action `Find_Issue_via_JQL` v1 (backfill) | `jql` | WorkPulse builds `project = "<stored key>" AND updated >= "<checkpoint>"` from validated values only | per run |
+| jira-software-cloud | action `Find_Issue_via_JQL` v1 (backfill) | `jql` | KONVO builds `project = "<stored key>" AND updated >= "<checkpoint>"` from validated values only | per run |
 | github | trigger `Pull_Request_Opens_or_Closes` v22 | `repoFullName` | the user picks repos (PICK) | once, after Connect |
 | github | trigger `New_Commit_Pushed` v6 | `repoFullName`, `sha` | stored repo / `sha` (branch) decided from the trigger page before build | once |
 | github | trigger `New_Release_Published` v6 | `repoFullName` | stored repo | once |
@@ -189,15 +189,15 @@ version below was copied from the app pages on viasocket.com on 2026-11-15; each
 | github | action `List_Pull_Requests` v4 (evidence backfill) | `repoFullName` / `updatedAfter` | stored repo / checkpoint | per run |
 | slack | action `Send_Message` v107 (inside a per-user webhook flow) | `destination.messageto` | the user: "DM me" or "a channel" | once, at report setup |
 | slack | action `Send_Message` v107 | `destination.channel_id` or `destination.userId` | the user (PICK) | once, at report setup |
-| slack | action `Send_Message` v107 | `markdown_content` | WorkPulse report/notification text; AI may write the summary paragraph, which is validated and length-capped | per run |
+| slack | action `Send_Message` v107 | `markdown_content` | KONVO report/notification text; AI may write the summary paragraph, which is validated and length-capped | per run |
 | slack | action `Send_Message` v107 | threads, `tagged_users`, `buttons`, `schedule_type`, `bot_details` | left out on purpose | — |
-| gmail | action `Send_Email` v55 (webhook flow) | `to` | WorkPulse: the user's verified email, or recipients the manager picks from org members | once, at setup |
-| gmail | action `Send_Email` v55 | `subject`, `messageBody` | WorkPulse report content (AI summary validated) | per run |
+| gmail | action `Send_Email` v55 (webhook flow) | `to` | KONVO: the user's verified email, or recipients the manager picks from org members | once, at setup |
+| gmail | action `Send_Email` v55 | `subject`, `messageBody` | KONVO report content (AI summary validated) | per run |
 
-**Who picks each action:** always WorkPulse's code, from a fixed allowlist (the table above). Outbound actions are
+**Who picks each action:** always KONVO's code, from a fixed allowlist (the table above). Outbound actions are
 fixed in code, so each one is a **flow per user** (webhook trigger → one `Send_Message`/`Send_Email` step), as the
-skill requires. WorkPulse's scheduler (BullMQ) decides *when* and POSTs the content. Inbound triggers are
-`user.subscribe` with a handler that forwards to WorkPulse's events endpoint. **The AI never picks an action and no
+skill requires. KONVO's scheduler (BullMQ) decides *when* and POSTs the content. Inbound triggers are
+`user.subscribe` with a handler that forwards to KONVO's events endpoint. **The AI never picks an action and no
 app is enabled for AI tool use** (no enabled-app `script_id` given to the model).
 
 **Where it runs:** all from the server; `auth_id` and every `script_id` stored encrypted, per user, with an ownership check
@@ -211,7 +211,7 @@ an app whose adapter exists and has passed a real test.**
 
 **Setup steps after your yes:** `npx -y viasocket-apps setup --no-open` prints a link → you click **Allow** → `.env`
 gets the keys (I never see the secret) → `listConnections('apps-api-test-user')` check → you connect **test** Linear /
-GitHub / Jira / Slack accounts through WorkPulse's own Connect button → each trigger sees one real event, each
+GitHub / Jira / Slack accounts through KONVO's own Connect button → each trigger sees one real event, each
 action runs once on test data → `npx -y viasocket-apps check apps/api/src/integrations` → report every "Finished
 when" line.
 
@@ -295,7 +295,7 @@ payload size limit; audit log on role, scoring, assessment and integration chang
 | M0 | Branch, scaffold monorepo, docker-compose, env schema, CI scripts | `npm run dev` serves api and web; empty test suites pass |
 | M1 | Prisma schema + migrations + seed; auth, orgs, invites, teams, roles, RBAC middleware | auth/RBAC/tenant tests pass; Playwright register → org → invite |
 | M2 | Projects, tasks (all views, subtasks, deps, comments, attachments, recurrence, templates, bulk), goals/OKRs | CRUD tests + e2e steps 4-7 |
-| M3 | viaSocket setup, Connect UI, **Linear** ingestion end-to-end (real), normalization engine, Sync History, retry/DLQ | a real Linear issue appears and updates in WorkPulse |
+| M3 | viaSocket setup, Connect UI, **Linear** ingestion end-to-end (real), normalization engine, Sync History, retry/DLQ | a real Linear issue appears and updates in KONVO |
 | M4 | GitHub evidence + Jira ingestion (real); evidence module + S3 uploads + verification | real PR → evidence on the matched task |
 | M5 | Daily planner, focus sessions, performance engine, snapshots, individual dashboard | scoring unit tests; dashboard reads DB |
 | M6 | Team/manager dashboard, member profiles, team health, interactive charts | e2e steps 10-11 |

@@ -7,18 +7,18 @@ import { Tip } from './overlay'
 // ───────────── Button ─────────────
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-lg text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0',
+  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent text-sm font-semibold transition-colors active:translate-y-px disabled:pointer-events-none disabled:opacity-55 [&_svg]:size-4 [&_svg]:shrink-0',
   {
     variants: {
       variant: {
-        primary: 'bg-primary text-white shadow-sm hover:bg-primary/90',
-        secondary: 'border border-line-strong bg-surface text-ink hover:bg-canvas',
-        ghost: 'text-ink-soft hover:bg-canvas hover:text-ink',
-        danger: 'bg-danger text-white hover:bg-danger/90',
-        teal: 'bg-teal text-white hover:bg-teal/90',
-        link: 'text-primary underline-offset-4 hover:underline px-0',
+        primary: 'border-primary bg-primary text-on-primary shadow-xs hover:bg-primary-hover',
+        secondary: 'border-line-strong bg-surface text-ink shadow-xs hover:bg-hover',
+        ghost: 'text-ink-soft hover:bg-hover hover:text-ink',
+        danger: 'border-danger-solid bg-danger-solid text-white hover:bg-danger-solid/90',
+        teal: 'bg-primary-soft text-primary hover:bg-primary-soft/70',
+        link: 'border-0 px-0 text-primary underline-offset-4 hover:underline',
       },
-      size: { sm: 'h-8 px-2.5 text-xs', md: 'h-9 px-3.5', lg: 'h-10 px-5', icon: 'size-9' },
+      size: { sm: 'h-[30px] px-[11px] text-[13px] [&_svg]:size-3.5', md: 'h-9 px-3.5', lg: 'h-11 px-[22px] text-[15px]', icon: 'size-9' },
     },
     defaultVariants: { variant: 'primary', size: 'md' },
   },
@@ -38,20 +38,20 @@ Button.displayName = 'Button'
 // ───────────── Form controls ─────────────
 
 const control =
-  'w-full rounded-lg border border-line-strong bg-surface px-3 text-sm text-ink placeholder:text-muted focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:bg-canvas aria-[invalid=true]:border-danger'
+  'w-full rounded-md border border-line-strong bg-surface px-[11px] text-sm text-ink transition-[border-color,box-shadow] placeholder:text-muted hover:border-muted/60 focus:border-primary focus:outline-none focus:ring-[3px] focus:ring-primary/30 disabled:bg-canvas aria-[invalid=true]:border-danger'
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(({ className, ...p }, ref) => (
-  <input ref={ref} className={cn(control, 'h-9', className)} {...p} />
+  <input ref={ref} className={cn(control, 'h-[38px]', className)} {...p} />
 ))
 Input.displayName = 'Input'
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(({ className, ...p }, ref) => (
-  <textarea ref={ref} className={cn(control, 'min-h-20 py-2', className)} {...p} />
+  <textarea ref={ref} className={cn(control, 'min-h-[84px] py-2', className)} {...p} />
 ))
 Textarea.displayName = 'Textarea'
 
 export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(({ className, children, ...p }, ref) => (
-  <select ref={ref} className={cn(control, 'h-9 pr-8', className)} {...p}>
+  <select ref={ref} className={cn(control, 'h-[38px] pr-8', className)} {...p}>
     {children}
   </select>
 ))
@@ -74,7 +74,7 @@ export function Field({
 }) {
   return (
     <div className={cn('space-y-1.5', className)}>
-      <label htmlFor={htmlFor} className="block text-xs font-medium text-ink-soft">
+      <label htmlFor={htmlFor} className="block text-[13px] font-medium text-ink">
         {label}
       </label>
       {children}
@@ -93,7 +93,7 @@ export function Field({
 
 export function Card({ className, children, ...p }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn('rounded-xl border border-line bg-surface shadow-[0_1px_2px_rgba(15,27,51,0.04)]', className)} {...p}>
+    <div className={cn('rounded-lg border border-line bg-surface shadow-xs', className)} {...p}>
       {children}
     </div>
   )
@@ -101,13 +101,13 @@ export function Card({ className, children, ...p }: React.HTMLAttributes<HTMLDiv
 
 export function CardHeader({ title, description, action, info }: { title: ReactNode; description?: ReactNode; action?: ReactNode; info?: string }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
+    <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-3.5">
       <div className="min-w-0">
-        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-ink">
+        <h2 className="flex items-center gap-1.5 text-[15px] font-semibold tracking-[-0.015em] text-ink">
           {title}
           {info && <InfoTip text={info} />}
         </h2>
-        {description && <p className="mt-0.5 text-xs text-muted">{description}</p>}
+        {description && <p className="mt-0.5 text-[13px] text-muted">{description}</p>}
       </div>
       {action}
     </div>
@@ -127,13 +127,13 @@ export function InfoTip({ text }: { text: string }) {
 // ───────────── Status ─────────────
 
 const badgeTones = {
-  neutral: 'bg-canvas text-ink-soft border-line',
-  blue: 'bg-primary-soft text-primary border-primary/15',
-  teal: 'bg-teal-soft text-teal border-teal/15',
-  green: 'bg-success-soft text-success border-success/15',
-  amber: 'bg-warn-soft text-warn border-warn/20',
-  red: 'bg-danger-soft text-danger border-danger/15',
-  violet: 'bg-violet-50 text-violet-700 border-violet-200',
+  neutral: 'bg-teal-soft text-ink-soft',
+  blue: 'bg-primary-soft text-primary',
+  teal: 'bg-teal-soft text-teal',
+  green: 'bg-success-soft text-success',
+  amber: 'bg-warn-soft text-warn',
+  red: 'bg-danger-soft text-danger',
+  violet: 'bg-violet-soft text-violet',
 } as const
 export type Tone = keyof typeof badgeTones
 
@@ -141,7 +141,7 @@ export function Badge({ tone = 'neutral', children, className }: { tone?: Tone; 
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium leading-4 whitespace-nowrap',
+        'inline-flex min-h-[22px] items-center gap-1 rounded-sm border border-transparent px-2 text-xs font-semibold leading-4 whitespace-nowrap',
         badgeTones[tone],
         className,
       )}
@@ -168,7 +168,10 @@ export function Avatar({ name, className }: { name: string; className?: string }
   return (
     <span
       aria-hidden
-      className={cn('inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[11px] font-semibold text-primary', className)}
+      className={cn(
+        'inline-flex size-[30px] shrink-0 items-center justify-center rounded-full bg-primary-soft text-[11.5px] font-semibold tracking-[0.02em] text-primary',
+        className,
+      )}
     >
       {initials(name)}
     </span>
@@ -252,10 +255,10 @@ export function QueryState<T>({
 
 export function PageHeader({ title, description, actions }: { title: string; description?: ReactNode; actions?: ReactNode }) {
   return (
-    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">{title}</h1>
-        {description && <p className="mt-1 text-sm text-muted">{description}</p>}
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+      <div className="min-w-0 flex-[1_1_360px]">
+        <h1 className="text-2xl font-semibold tracking-[-0.03em] text-ink">{title}</h1>
+        {description && <p className="mt-1.5 max-w-[72ch] text-[15px] text-muted">{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -283,9 +286,9 @@ export function KpiCard({
 }) {
   // The whole card is clickable through a stretched button; the info tip sits above it, so no control is nested in another.
   return (
-    <Card className={cn('relative p-0', onClick && 'transition hover:border-primary/40 hover:shadow-sm')}>
-      {onClick && <button type="button" onClick={onClick} aria-label={`${l}: show details`} className="absolute inset-0 z-0 rounded-xl" />}
-      <div className="pointer-events-none relative p-4">
+    <Card className={cn('relative p-0', onClick && 'transition-colors hover:border-line-strong')}>
+      {onClick && <button type="button" onClick={onClick} aria-label={`${l}: show details`} className="absolute inset-0 z-0 rounded-lg" />}
+      <div className="pointer-events-none relative px-4 py-3.5">
         <div className="flex items-center gap-1.5 text-xs font-medium text-muted">
           {l}
           {info && (
@@ -297,7 +300,7 @@ export function KpiCard({
         <div className="mt-2 flex items-baseline gap-1">
           <span
             className={cn(
-              'tabular text-2xl font-semibold tracking-tight',
+              'tabular text-2xl font-semibold tracking-[-0.02em]',
               tone === 'red' ? 'text-danger' : tone === 'amber' ? 'text-warn' : tone === 'green' ? 'text-success' : 'text-ink',
             )}
           >
@@ -324,7 +327,7 @@ export function Segmented<T extends string>({
   label: string
 }) {
   return (
-    <div role="radiogroup" aria-label={aria} className="inline-flex rounded-lg border border-line-strong bg-surface p-0.5">
+    <div role="radiogroup" aria-label={aria} className="inline-flex rounded-md border border-line-strong bg-surface p-0.5">
       {options.map((o) => (
         <button
           key={o.value}
@@ -333,8 +336,8 @@ export function Segmented<T extends string>({
           aria-checked={value === o.value}
           onClick={() => onChange(o.value)}
           className={cn(
-            'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium [&_svg]:size-3.5',
-            value === o.value ? 'bg-primary-soft text-primary' : 'text-ink-soft hover:text-ink',
+            'flex items-center gap-1.5 rounded-sm px-2.5 py-1 text-xs font-semibold [&_svg]:size-3.5',
+            value === o.value ? 'bg-primary-soft text-ink' : 'text-muted hover:text-ink',
           )}
         >
           {o.label}

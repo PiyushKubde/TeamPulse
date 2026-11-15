@@ -28,8 +28,12 @@ const schema = z.object({
   SMTP_SECURE: bool(false),
   SMTP_USER: optional,
   SMTP_PASS: optional,
-  MAIL_FROM: z.string().default('WorkPulse <no-reply@localhost>'),
-  /** Optional: the WorkPulse user whose connected Gmail sends system email (default: the oldest owner/admin connection). */
+  /** Google sign-in (OpenID Connect). Redirect URI defaults to APP_URL + /api/auth/google/callback. */
+  GOOGLE_CLIENT_ID: optional,
+  GOOGLE_CLIENT_SECRET: optional,
+  GOOGLE_REDIRECT_URI: optional,
+  MAIL_FROM: z.string().default('KONVO <no-reply@localhost>'),
+  /** Optional: the KONVO user whose connected Gmail sends system email (default: the oldest owner/admin connection). */
   MAIL_VIASOCKET_USER_ID: optional,
   S3_BUCKET: optional,
   S3_REGION: z.string().default('us-east-1'),

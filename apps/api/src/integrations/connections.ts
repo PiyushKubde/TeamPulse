@@ -114,7 +114,7 @@ export async function pickerOptions(conn: IntegrationConnection, fieldKey: strin
 
 const handlerFor = (providerSlug: string, subscriptionId: string, token: string) => {
   const url = `${env.PUBLIC_API_URL!.replace(/\/$/, '')}/api/integrations/events/${providerSlug}/${subscriptionId}`
-  // Runs on viaSocket per event: forwards the raw event to WorkPulse, authenticated with this subscription's token.
+  // Runs on viaSocket per event: forwards the raw event to KONVO, authenticated with this subscription's token.
   // ngrok-skip-browser-warning: harmless elsewhere; lets a local ngrok tunnel pass the request straight through.
   return `await axios.post(${JSON.stringify(url)}, { event: context.req.body }, { headers: { authorization: ${JSON.stringify(`Bearer ${token}`)}, 'ngrok-skip-browser-warning': '1' }, timeout: 20000 })\nreturn { forwarded: true }`
 }
@@ -142,7 +142,7 @@ export async function syncSubscriptions(conn: IntegrationConnection) {
   const wanted = plannedSubscriptions(def, conn.settings as ConnectionSettings, conn.syncMode)
   const current = await prisma.integrationSubscription.findMany({ where: { connectionId: conn.id } })
   if (wanted.length && !env.PUBLIC_API_URL) {
-    throw unavailable('public_url_missing', 'Live sync needs PUBLIC_API_URL: a public HTTPS address where viaSocket can reach WorkPulse.')
+    throw unavailable('public_url_missing', 'Live sync needs PUBLIC_API_URL: a public HTTPS address where viaSocket can reach KONVO.')
   }
   const user = viasocket().user(vsUserId(conn.userId))
   const authId = authIdOf(conn)
@@ -185,7 +185,7 @@ export async function syncSubscriptions(conn: IntegrationConnection) {
         inputData: w.inputData,
         version: trigger.version,
         code,
-        description: `WorkPulse: ${def.name} ${w.triggerKey.replace(/_/g, ' ')} (${w.resource})`,
+        description: `KONVO: ${def.name} ${w.triggerKey.replace(/_/g, ' ')} (${w.resource})`,
         meta: { workpulseSubscription: row.id },
       })
       await prisma.integrationSubscription.update({
@@ -253,7 +253,7 @@ export async function reconcileSubscriptions() {
   return { repointed, synced }
 }
 
-/** Removes every flow WorkPulse made on the connection, then revokes the connection at viaSocket. */
+/** Removes every flow KONVO made on the connection, then revokes the connection at viaSocket. */
 export async function disconnect(conn: IntegrationConnection, revoke = true) {
   const user = viasocket().user(vsUserId(conn.userId))
   const subs = await prisma.integrationSubscription.findMany({ where: { connectionId: conn.id } })

@@ -119,7 +119,7 @@ function TaskDetailView({ taskId, onOpen, onClose }: { taskId: string; onOpen: (
               {ro && <Badge tone="neutral">View only</Badge>}
             </div>
           </div>
-          <SheetClose className="rounded-md p-1.5 text-muted hover:bg-canvas" aria-label="Close">
+          <SheetClose className="rounded-md p-1.5 text-muted hover:bg-hover" aria-label="Close">
             <X className="size-4" />
           </SheetClose>
         </div>
@@ -327,12 +327,12 @@ function Conflicts({ conflicts, onDone }: { conflicts: TaskDetail['conflicts']; 
   })
   return (
     <div className="mt-3 space-y-2 rounded-lg border border-warn/30 bg-warn-soft p-3 text-xs">
-      <p className="font-medium text-warn">Changed in both WorkPulse and the source. Choose which value to keep:</p>
+      <p className="font-medium text-warn">Changed in both KONVO and the source. Choose which value to keep:</p>
       {conflicts.map((c) => (
         <div key={c.id} className="flex flex-wrap items-center gap-2">
           <span className="font-medium">{c.field}</span>
           <Button size="sm" variant="secondary" onClick={() => resolve.mutate({ id: c.id, keep: 'internal' })}>
-            WorkPulse: {JSON.parse(c.internalValue ?? 'null') ?? '—'}
+            KONVO: {JSON.parse(c.internalValue ?? 'null') ?? '—'}
           </Button>
           <Button size="sm" variant="secondary" onClick={() => resolve.mutate({ id: c.id, keep: 'external' })}>
             Source: {JSON.parse(c.externalValue ?? 'null') ?? '—'}
@@ -520,7 +520,7 @@ function Subtasks({ task, onOpen, onChange }: { task: TaskDetail; onOpen: (id: s
       <ul className="space-y-1">
         {task.subtasks.map((s) => (
           <li key={s.id}>
-            <button className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-canvas" onClick={() => onOpen(s.id)}>
+            <button className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-hover" onClick={() => onOpen(s.id)}>
               {s.status === 'COMPLETED' ? <CheckCircle2 className="size-4 text-success" /> : <span className="size-4 rounded-full border border-line-strong" />}
               <span className={s.status === 'COMPLETED' ? 'text-muted line-through' : ''}>{s.title}</span>
               <span className="ml-auto text-xs text-muted">{s.assignee?.name}</span>
@@ -607,7 +607,7 @@ function Dependencies({ task, onOpen, onChange }: { task: TaskDetail; onOpen: (i
                 .map((x) => (
                   <button
                     key={x.id}
-                    className="block w-full px-3 py-1.5 text-left text-sm hover:bg-canvas"
+                    className="block w-full px-3 py-1.5 text-left text-sm hover:bg-hover"
                     onClick={() => {
                       onChange([...ids, x.id])
                       setQ('')
@@ -643,7 +643,7 @@ function Attachments({ task, onChange }: { task: TaskDetail; onChange: () => voi
       title="Attachments"
       action={
         task.canEdit && (
-          <label className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-ink-soft hover:bg-canvas">
+          <label className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-ink-soft hover:bg-hover">
             <Paperclip className="size-3.5" /> Attach
             <input type="file" className="sr-only" onChange={(e) => e.target.files?.[0] && upload.mutate(e.target.files[0])} />
           </label>

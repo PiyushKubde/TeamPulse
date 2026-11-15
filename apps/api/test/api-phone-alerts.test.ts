@@ -80,7 +80,7 @@ describe('personal phone alerts', () => {
     calls = []
     const r = await member.c.put('/api/me/phone').send({ phone: '+91 98765 43210' }).expect(200)
     expect(r.body).toMatchObject({ available: true, phone: '919876543210', state: 'pending' })
-    expect(calls[0]).toMatchObject({ method: 'POST', body: { phone: '919876543210', label: 'WorkPulse' } })
+    expect(calls[0]).toMatchObject({ method: 'POST', body: { phone: '919876543210', label: 'KONVO' } })
     expect((await member.c.put('/api/me/phone').send({ phone: '12' })).status).toBe(400)
     inviteState = 'accepted'
     expect((await member.c.post('/api/me/phone/refresh')).body.state).toBe('accepted')
@@ -143,12 +143,35 @@ describe('personal phone alerts', () => {
     expect((await prisma.phoneAlert.findFirstOrThrow({ where: { refId: t2.id } })).status).toBe('CLOSED')
   })
 
-  it('says clearly when phone alerts are not set up', async () => {
+  it('without M91 set up, the number is still saved (the worker invites it later) and a test says clearly why it cannot ring', async () => {
     const { member } = await orgWithPeople()
     env.M91_API_KEY = undefined
-    const r = await member.c.put('/api/me/phone').send({ phone: '+919876543210' })
-    expect(r.status).toBe(503)
-    expect(r.body.error.message).toMatch(/administrator needs to add the M91 API key/)
+    calls = []
+    const r = await member.c.put('/api/me/phone').send({ phone: '+919876543210' }).expect(200)
+    expect(r.body).toMatchObject({ available: false, phone: '919876543210' })
+    expect(calls).toHaveLength(0)
+    const t = await member.c.post('/api/me/phone/test')
+    expect(t.status).toBe(503)
+    expect(t.body.error.message).toMatch(/administrator needs to add the M91 API key/)
+  })
+})
+
+describe('inviting a teammate with their number', () => {
+  it('sends the M91 invitation at once and pre-fills the number when they join', async () => {
+    const { owner } = await orgWithPeople()
+    calls = []
+    const email = `newbie-${Date.now()}@x.com`
+    const r = await owner.c.post('/api/invitations').send({ email, role: 'MEMBER', phone: '+91 98765 22222' }).expect(201)
+    expect(calls.find((x) => x.url.endsWith('/recipients'))?.body).toMatchObject({ phone: '919876522222' })
+    expect((await owner.c.post('/api/invitations').send({ email: `x${email}`, role: 'MEMBER', phone: '12' })).status).toBe(400)
+
+    const token = new URL(r.body.link).searchParams.get('token')!
+    const guest = client()
+    expect((await guest.get('/api/invitations/lookup').query({ token })).body.phone).toBe('+919876522222')
+    // Joining without typing the number again uses the one the inviter gave.
+    await guest.post('/api/invitations/accept').send({ token, name: 'New Bie', password: 'Password123' }).expect(200)
+    const me = await guest.get('/api/auth/me').expect(200)
+    expect(me.body.phoneAlerts).toMatchObject({ hasPhone: true })
   })
 })
 

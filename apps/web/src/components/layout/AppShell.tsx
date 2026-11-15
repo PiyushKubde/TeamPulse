@@ -7,7 +7,7 @@ import {
   BarChart3,
   Bell,
   Bot,
-  Building2,
+  Check,
   CalendarCheck,
   ChevronDown,
   ChevronRight,
@@ -17,12 +17,15 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
+  Monitor,
+  Moon,
   Menu as MenuIcon,
   MessageSquareQuote,
   Plug,
   RefreshCcw,
   Search,
   Settings,
+  Sun,
   Target,
   Users,
   Workflow,
@@ -34,6 +37,8 @@ import { ago, cn } from '@/lib/utils'
 import { Avatar, Badge, Spinner, label } from '@/components/ui'
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from '@/components/ui/overlay'
 import type { Task } from '@/lib/types'
+import { Logo } from '@/components/brand'
+import { useTheme } from '@/lib/theme'
 
 interface NavItem {
   to: string
@@ -174,7 +179,7 @@ function GlobalSearch() {
               <button
                 key={h.key}
                 onMouseDown={() => navigate(h.to)}
-                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-canvas"
+                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-hover"
               >
                 <span className="truncate">{h.label}</span>
                 <Badge>{h.kind}</Badge>
@@ -207,10 +212,10 @@ function Notifications() {
   const unread = q.data?.unread ?? 0
   return (
     <Menu>
-      <MenuTrigger className="relative rounded-lg p-2 text-ink-soft hover:bg-canvas" aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}>
+      <MenuTrigger className="relative rounded-lg p-2 text-ink-soft hover:bg-hover" aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}>
         <Bell className="size-4.5" />
         {unread > 0 && (
-          <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-danger text-[10px] font-semibold text-white">
+          <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-danger-solid text-[10px] font-semibold text-white shadow-[0_0_0_2px_var(--surface)]">
             {unread > 9 ? '9+' : unread}
           </span>
         )}
@@ -265,10 +270,12 @@ function OrgSwitcher() {
   })
   return (
     <Menu>
-      <MenuTrigger className="flex w-full items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-left hover:bg-white/10">
-        <Building2 className="size-4 shrink-0 text-blue-200" />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-white">{active?.name ?? 'No organization'}</span>
-        <ChevronDown className="size-3.5 text-blue-200" />
+      <MenuTrigger className="flex w-full items-center gap-2 rounded-lg border border-line bg-surface px-2.5 py-2 text-left hover:bg-hover">
+        <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-teal-soft text-[11px] font-semibold text-teal">
+          {(active?.name ?? '?').slice(0, 1).toUpperCase()}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-soft">{active?.name ?? 'No organization'}</span>
+        <ChevronDown className="size-3.5 text-muted" />
       </MenuTrigger>
       <MenuContent align="start">
         <MenuLabel>Organizations</MenuLabel>
@@ -303,18 +310,17 @@ export function AppShell() {
   const nav = useMemo(() => NAV.map((s) => ({ ...s, items: s.items.filter((i) => !i.managerOnly || isManager) })).filter((s) => s.items.length), [isManager])
 
   const sidebar = (
-    <div className="flex h-full flex-col bg-[#0f1b33] text-blue-100">
-      <div className="flex items-center gap-2 px-4 pb-3 pt-4">
-        <img src="/favicon.svg" alt="" className="size-7" />
-        <span className="text-[15px] font-semibold tracking-tight text-white">WorkPulse</span>
-      </div>
+    <div className="flex h-full flex-col border-r border-line bg-sidebar text-ink-soft">
+      <Link to="/" className="flex items-center px-4 pb-3 pt-4" aria-label="KONVO home">
+        <Logo />
+      </Link>
       <div className="px-3 pb-2">
         <OrgSwitcher />
       </div>
       <nav aria-label="Main" className="flex-1 overflow-y-auto px-3 pb-4">
         {nav.map((s) => (
           <div key={s.section} className="mt-4">
-            <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-blue-300/70">{s.section}</p>
+            <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.07em] text-muted">{s.section}</p>
             {s.items.map((i) => (
               <NavLink
                 key={i.to}
@@ -322,8 +328,10 @@ export function AppShell() {
                 end={i.to === '/' || i.to === '/team'}
                 className={({ isActive }) =>
                   cn(
-                    'flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm [&_svg]:size-4',
-                    isActive ? 'bg-white/12 font-medium text-white' : 'text-blue-100/80 hover:bg-white/6 hover:text-white',
+                    'flex min-h-[34px] items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors [&_svg]:size-[18px]',
+                    isActive
+                      ? 'bg-primary-soft font-semibold text-ink shadow-[inset_2px_0_0_var(--accent)] [&_svg]:text-ink'
+                      : 'text-ink-soft hover:bg-hover hover:text-ink [&_svg]:text-muted',
                   )
                 }
               >
@@ -342,13 +350,13 @@ export function AppShell() {
       <aside className="hidden w-60 shrink-0 lg:block">{sidebar}</aside>
       {mobileOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-ink/40" onClick={() => setMobileOpen(false)} />
+          <div className="absolute inset-0 bg-overlay" onClick={() => setMobileOpen(false)} />
           <div className="absolute inset-y-0 left-0 w-64">{sidebar}</div>
         </div>
       )}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface/95 px-4 backdrop-blur">
-          <button className="rounded-md p-1.5 text-ink-soft hover:bg-canvas lg:hidden" onClick={() => setMobileOpen((o) => !o)} aria-label="Open navigation">
+          <button className="rounded-md p-1.5 text-ink-soft hover:bg-hover lg:hidden" onClick={() => setMobileOpen((o) => !o)} aria-label="Open navigation">
             {mobileOpen ? <X className="size-5" /> : <MenuIcon className="size-5" />}
           </button>
           <div className="hidden min-w-0 flex-1 md:block">
@@ -358,7 +366,7 @@ export function AppShell() {
             <GlobalSearch />
             <Notifications />
             <Menu>
-              <MenuTrigger className="flex items-center gap-2 rounded-lg p-1 hover:bg-canvas" aria-label="Account menu">
+              <MenuTrigger className="flex items-center gap-2 rounded-lg p-1 hover:bg-hover" aria-label="Account menu">
                 <Avatar name={me?.user.name ?? '?'} />
               </MenuTrigger>
               <MenuContent>
@@ -370,6 +378,8 @@ export function AppShell() {
                 <MenuItem onSelect={() => navigate('/settings')}>
                   <Settings /> Settings
                 </MenuItem>
+                <ThemeItems />
+                <MenuSeparator />
                 <MenuItem onSelect={() => logout.mutate()} danger>
                   <LogOut /> Sign out
                 </MenuItem>
@@ -378,7 +388,7 @@ export function AppShell() {
           </div>
         </header>
         {me && !me.user.emailVerified && <VerifyBanner />}
-        {me?.phoneAlerts?.available && me.phoneAlerts.state !== 'accepted' && <PhoneBanner />}
+        {me?.phoneAlerts?.available && me.phoneAlerts.hasPhone && me.phoneAlerts.state === 'pending' && <PhoneBanner />}
         <main className="min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
             <Suspense fallback={<Spinner />}>
@@ -397,7 +407,7 @@ function VerifyBanner() {
   if (!me?.mailConfigured) {
     return (
       <div className="flex flex-wrap items-center justify-center gap-2 border-b border-warn/20 bg-warn-soft px-4 py-1.5 text-xs text-warn">
-        WorkPulse can’t send email yet, so verification links can’t be delivered.
+        KONVO can’t send email yet, so verification links can’t be delivered.
         {isAdmin ? (
           <Link to="/integrations" className="font-medium underline">
             Connect Gmail to turn email on
@@ -428,30 +438,28 @@ function VerifyBanner() {
 
 /** Nudges everyone to connect a phone for urgent alerts; disappears once connected (or dismissed for this session). */
 function PhoneBanner() {
-  const { me } = useAuth()
-  const [hidden, setHidden] = useState(() => sessionStorage.getItem('wp-phone-banner') === 'hidden')
-  if (hidden || !me) return null
-  const pending = me.phoneAlerts.hasPhone && me.phoneAlerts.state !== 'declined'
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return sessionStorage.getItem('konvo-phone-banner') === 'hidden'
+    } catch {
+      return false
+    }
+  })
+  if (hidden) return null
   return (
-    <div className="flex flex-wrap items-center justify-center gap-2 border-b border-primary/15 bg-primary-soft px-4 py-1.5 text-xs text-primary">
-      {pending ? (
-        <span>Almost there: open the M91 app on your phone and accept the WorkPulse invitation to get urgent alerts.</span>
-      ) : (
-        <>
-          <span>Get urgent alerts on your phone, like a critical task assigned to you.</span>
-          <Link to="/alerts" className="font-medium underline">
-            Add your number
-          </Link>
-        </>
-      )}
+    <div className="flex flex-wrap items-center justify-center gap-2 border-b border-primary/15 bg-primary-soft px-4 py-1.5 text-xs text-ink">
+      <span>Almost there: open the M91 app on your phone and accept the KONVO invitation to get urgent alerts.</span>
+      <Link to="/alerts" className="font-medium underline">
+        How
+      </Link>
       <button
         className="ml-2 opacity-70 hover:opacity-100"
         aria-label="Hide"
         onClick={() => {
           try {
-            sessionStorage.setItem('wp-phone-banner', 'hidden')
+            sessionStorage.setItem('konvo-phone-banner', 'hidden')
           } catch {
-            // storage unavailable: hide for this render only
+            // storage unavailable: hide for this page only
           }
           setHidden(true)
         }}
@@ -459,5 +467,25 @@ function PhoneBanner() {
         ×
       </button>
     </div>
+  )
+}
+
+function ThemeItems() {
+  const { pref, setPref } = useTheme()
+  const options = [
+    ['dark', 'Dark', <Moon key="d" />],
+    ['light', 'Light', <Sun key="l" />],
+    ['system', 'System', <Monitor key="s" />],
+  ] as const
+  return (
+    <>
+      <MenuLabel>Theme</MenuLabel>
+      {options.map(([value, text, icon]) => (
+        <MenuItem key={value} onSelect={() => setPref(value)}>
+          {icon} <span className="flex-1">{text}</span>
+          {pref === value && <Check className="size-3.5 text-primary" />}
+        </MenuItem>
+      ))}
+    </>
   )
 }

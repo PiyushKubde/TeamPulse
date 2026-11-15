@@ -5,7 +5,7 @@ import { prisma } from './lib/prisma.js'
 import { closeQueues } from './jobs/queues.js'
 import { startOpsMonitor } from './services/phone-alerts.js'
 
-const server = createApp().listen(env.PORT, () => logger.info(`WorkPulse API on http://localhost:${env.PORT}`))
+const server = createApp().listen(env.PORT, () => logger.info(`KONVO API on http://localhost:${env.PORT}`))
 // On-call checks (M91 channel): database, Redis, worker, backlog, failed syncs, server errors, email, AI, delivery.
 startOpsMonitor()
 

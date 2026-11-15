@@ -1,5 +1,5 @@
-// Two-way sync, WorkPulse → provider. Only for TWO_WAY connections, only status (Linear), only after a person mapped
-// each WorkPulse status to one of their Linear states. Runs in the background so task saves never wait on Linear.
+// Two-way sync, KONVO → provider. Only for TWO_WAY connections, only status (Linear), only after a person mapped
+// each KONVO status to one of their Linear states. Runs in the background so task saves never wait on Linear.
 import { prisma, type Task } from '../lib/prisma.js'
 import { enqueue } from '../jobs/queues.js'
 import { runFlow } from './flows.js'

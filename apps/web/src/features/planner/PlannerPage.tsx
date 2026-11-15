@@ -435,7 +435,7 @@ function CheckIn({ plan, onSave }: { plan: PlannerData['plan']; onSave: (b: Reco
                 role="radio"
                 aria-checked={plan?.energy === n}
                 onClick={() => onSave({ energy: n })}
-                className={`size-8 rounded-md border text-sm ${plan?.energy === n ? 'border-primary bg-primary-soft text-primary' : 'border-line-strong text-ink-soft hover:bg-canvas'}`}
+                className={`size-8 rounded-md border text-sm ${plan?.energy === n ? 'border-primary bg-primary-soft text-primary' : 'border-line-strong text-ink-soft hover:bg-hover'}`}
               >
                 {n}
               </button>

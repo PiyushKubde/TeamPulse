@@ -1,5 +1,5 @@
 // MOCKED integration tests: the viaSocket transport is a deterministic fake (test/fake-viasocket.ts).
-// They prove WorkPulse's own logic; real-account results are recorded separately in docs/viasocket-test-report.md.
+// They prove KONVO's own logic; real-account results are recorded separately in docs/viasocket-test-report.md.
 import request from 'supertest'
 import { describe, expect, it } from 'vitest'
 import { prisma } from '../src/lib/prisma.js'
@@ -203,7 +203,7 @@ describe('event ingestion', () => {
     expect(after.evidence[0]!.status).toBe('VERIFIED')
   })
 
-  it('one-way: the external value wins for external fields; an unmapped assignee never clears the WorkPulse assignee', async () => {
+  it('one-way: the external value wins for external fields; an unmapped assignee never clears the KONVO assignee', async () => {
     const { member } = await orgWithPeople()
     const { handlers } = await connectLinear(member.c, member.user.id)
     await deliver(handlers.New_Issue_Created!, issue()).expect(202)
@@ -520,7 +520,7 @@ describe('Slack messages become tasks', () => {
     })
     await deliver(hook, msg('thanks everyone!')).expect(202)
     const calls = fakeViasocket.aiCalls.length
-    await deliver(hook, msg(':white_check_mark: Task created in WorkPulse', { bot_id: 'B1', subtype: 'bot_message' })).expect(202)
+    await deliver(hook, msg(':white_check_mark: Task created in KONVO', { bot_id: 'B1', subtype: 'bot_message' })).expect(202)
     await deliver(hook, msg('edited', { subtype: 'message_changed' })).expect(202)
     expect(fakeViasocket.aiCalls.length).toBe(calls)
     expect(await prisma.task.count()).toBe(0)

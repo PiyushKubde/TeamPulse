@@ -1,5 +1,5 @@
 // SAMPLE DATA ONLY. Builds "M91 Showcase (sample data)": 14 people, 3 teams, 4 projects, goals with key results and
-// 12 weeks of history (tasks from Slack, Linear, Jira, GitHub and WorkPulse; blockers, evidence, assessments, focus
+// 12 weeks of history (tasks from Slack, Linear, Jira, GitHub and KONVO; blockers, evidence, assessments, focus
 // sessions, daily plans, feedback, sync events, deliveries, reports and weekly score snapshots) so every chart has data.
 // The given owner is added as OWNER; nothing in their real organization is touched. Refuses to run in production.
 //   npm run db:seed:showcase -w @workpulse/api -- you@example.com
@@ -255,7 +255,7 @@ const BLOCKER_REASONS: Record<BlockerKind, string[]> = {
 
 async function main() {
   const owner = await prisma.user.findUnique({ where: { email: ownerEmail } })
-  if (!owner) throw new Error(`No WorkPulse account for ${ownerEmail}. Register first.`)
+  if (!owner) throw new Error(`No KONVO account for ${ownerEmail}. Register first.`)
   const old = await prisma.organization.findUnique({ where: { slug: SLUG } })
   if (old) {
     await prisma.organization.delete({ where: { id: old.id } })

@@ -296,7 +296,7 @@ tasks.get('/tasks/:id', async (req, res) => {
       goals: task.goals.map((g) => g.goal),
       dependsOn: task.dependsOn.map((d) => d.dependsOn),
       blocking: task.blocking.map((d) => d.task),
-      // rawSnapshot is shown to editors only (it can hold external fields WorkPulse does not map).
+      // rawSnapshot is shown to editors only (it can hold external fields KONVO does not map).
       source: source && {
         provider: source.provider,
         externalKey: source.externalKey,

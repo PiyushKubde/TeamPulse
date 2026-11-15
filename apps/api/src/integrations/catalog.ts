@@ -1,4 +1,4 @@
-// The allowlist. Every viaSocket app, trigger, action, key, version and id WorkPulse uses is here, copied from the
+// The allowlist. Every viaSocket app, trigger, action, key, version and id KONVO uses is here, copied from the
 // app pages on viasocket.com (2026-11-15). Nothing outside this file can be subscribed to or run, by code or by AI.
 export type Capability = 'tasks' | 'evidence' | 'delivery' | 'intake'
 
@@ -14,7 +14,7 @@ export interface TriggerDef {
 }
 
 export interface PickerDef {
-  /** WorkPulse's settings field the choice is stored in. */
+  /** KONVO's settings field the choice is stored in. */
   setting: string
   label: string
   app: string
@@ -62,7 +62,7 @@ export const PROVIDERS: Record<string, ProviderDef> = {
     slug: 'linear',
     name: 'Linear',
     icon: 'https://stuff.thingsofbrand.com/linear.app/images/img6e7b754f26_linear.jpg',
-    description: 'New and updated Linear issues become WorkPulse tasks. Optional two-way status sync.',
+    description: 'New and updated Linear issues become KONVO tasks. Optional two-way status sync.',
     capabilities: ['tasks'],
     triggers: [
       { key: 'New_Issue_Created', version: 'v1', triggerId: 'rowm5zd4n3lt', kind: 'task', inputs: team },
@@ -88,7 +88,7 @@ export const PROVIDERS: Record<string, ProviderDef> = {
     slug: 'jira-software-cloud',
     name: 'Jira',
     icon: 'https://stuff.thingsofbrand.com/atlassian.com/images/img681685c8a4_atlassian.jpg',
-    description: 'New and updated Jira issues in one project become WorkPulse tasks.',
+    description: 'New and updated Jira issues in one project become KONVO tasks.',
     capabilities: ['tasks'],
     triggers: [
       // `status` left out on purpose: every status is synced.
@@ -182,7 +182,7 @@ export const PROVIDERS: Record<string, ProviderDef> = {
     name: 'Gmail',
     icon: 'https://stuff.thingsofbrand.com/gmail.com/images/imge_idrA5FDGTH_1763454052978.svg',
     description:
-      'Reports emailed from your own Gmail account to you. Connected by an owner or admin, it also sends WorkPulse’s emails (verification, password reset, invitations).',
+      'Reports emailed from your own Gmail account to you. Connected by an owner or admin, it also sends KONVO’s emails (verification, password reset, invitations).',
     capabilities: ['delivery'],
     triggers: [],
     pickers: [],

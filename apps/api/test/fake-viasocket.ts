@@ -1,4 +1,4 @@
-// A deterministic stand-in for the viasocket-apps client, covering only the methods WorkPulse calls.
+// A deterministic stand-in for the viasocket-apps client, covering only the methods KONVO calls.
 // MOCKED: results from tests using it say nothing about the real viaSocket service.
 type Conn = { id: string; service_id: string; isExpired?: boolean; connection_label?: string }
 

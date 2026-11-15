@@ -143,7 +143,7 @@ integrations.patch('/integrations/connections/:id', async (req, res) => {
   if (syncMode === 'TWO_WAY' && !def.supportsTwoWay) throw badRequest(`${def.name} supports import-only and one-way sync.`)
   const settings = { ...(conn.settings as ConnectionSettings), ...rest }
   if (syncMode === 'TWO_WAY' && !Object.keys(settings.statusMap ?? {}).length)
-    throw badRequest('Map WorkPulse statuses to Linear statuses before turning on two-way sync.')
+    throw badRequest('Map KONVO statuses to Linear statuses before turning on two-way sync.')
   if (settings.userMap) {
     const ids = Object.values(settings.userMap)
     const n = await prisma.organizationMember.count({ where: { orgId: ctx.orgId, userId: { in: ids }, status: 'ACTIVE' } })
@@ -182,16 +182,15 @@ integrations.post('/integrations/connections/:id/test-delivery', async (req, res
   const ctx = ctxOf(req)
   const conn = await ownConnection(ctx.userId, ctx.orgId, param(req, 'id'))
   const user = await prisma.user.findUniqueOrThrow({ where: { id: ctx.userId }, select: { email: true, name: true } })
-  const text = `WorkPulse test message for ${user.name}. Reports will arrive here.`
+  const text = `KONVO test message for ${user.name}. Reports will arrive here.`
   if (conn.provider !== 'slack' && conn.provider !== 'gmail') throw badRequest('Only Slack and Gmail send messages.')
   if (conn.provider === 'slack') {
     const d = (conn.settings as { delivery?: { channelId?: string; userId?: string } }).delivery
-    if (!d?.channelId && !d?.userId)
-      throw new HttpError(409, 'not_configured', 'Choose where to send first: under “Out of WorkPulse”, pick a channel or yourself.')
+    if (!d?.channelId && !d?.userId) throw new HttpError(409, 'not_configured', 'Choose where to send first: under “Out of KONVO”, pick a channel or yourself.')
   }
   try {
     if (conn.provider === 'slack') await runFlow(conn, 'slack_delivery', { text })
-    else await runFlow(conn, 'gmail_delivery', { subject: 'WorkPulse test message', text }, { email: user.email })
+    else await runFlow(conn, 'gmail_delivery', { subject: 'KONVO test message', text }, { email: user.email })
   } catch (e) {
     throw humanize(e, conn.provider)
   }

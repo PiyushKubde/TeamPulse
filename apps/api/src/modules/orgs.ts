@@ -22,6 +22,8 @@ import { env } from '../config/env.js'
 import { ctxOf, requireAuth, requireOrg, userOf } from '../middleware/auth.js'
 import { hashPassword, startSession } from './auth.js'
 import { connectPhone } from '../services/phone-alerts.js'
+import * as m91 from '../lib/m91.js'
+import { logger } from '../config/logger.js'
 
 export const orgs = Router()
 
@@ -165,6 +167,8 @@ orgs.post('/invitations', requireOrg, async (req, res) => {
   if (input.teamId && !(await prisma.team.findFirst({ where: { id: input.teamId, orgId: ctx.orgId } }))) throw notFound('Team')
   const existing = await prisma.organizationMember.findFirst({ where: { orgId: ctx.orgId, user: { email: input.email } } })
   if (existing) throw conflict('This person is already a member.')
+  const phone = input.phone ? m91.normalizePhone(input.phone) : null
+  if (input.phone && !phone) throw badRequest('Enter the mobile number with the country code, for example +91 98765 43210.')
   const token = randomToken()
   const invitation = await prisma.invitation.create({
     data: {
@@ -172,6 +176,7 @@ orgs.post('/invitations', requireOrg, async (req, res) => {
       email: input.email,
       role: input.role,
       teamId: input.teamId ?? null,
+      phone,
       invitedBy: ctx.userId,
       tokenHash: sha256(token),
       expiresAt: new Date(Date.now() + 7 * 864e5),
@@ -181,9 +186,12 @@ orgs.post('/invitations', requireOrg, async (req, res) => {
   const link = `${env.APP_URL}/accept-invite?token=${token}`
   const mail = await sendMail(
     input.email,
-    `You're invited to ${org.name} on WorkPulse`,
-    `${userOf(req).name} invited you to join ${org.name} on WorkPulse.\n\nAccept: ${link}\n\nThis invitation expires in 7 days.`,
+    `You're invited to ${org.name} on KONVO`,
+    `${userOf(req).name} invited you to join ${org.name} on KONVO.\n\nAccept: ${link}\n\nThis invitation expires in 7 days.`,
   )
+  // The M91 invitation goes out now, so the person can accept it in the app before they even open KONVO.
+  if (phone && m91.platformConfigured())
+    await m91.invite(phone).catch((e) => logger.warn({ err: e instanceof Error ? e.message : e }, 'M91 invitation not sent yet'))
   await audit(req, ctx.orgId, 'invitation.create', { type: 'Invitation', id: invitation.id }, { email: input.email, role: input.role })
   // Without email delivery the inviter gets the link to share by hand.
   res.status(201).json({
@@ -207,7 +215,7 @@ orgs.get('/invitations/lookup', async (req, res) => {
   const inv = await prisma.invitation.findUnique({ where: { tokenHash: sha256(token) }, include: { org: { select: { name: true } } } })
   if (!inv || inv.acceptedAt || inv.revokedAt || inv.expiresAt < new Date()) throw notFound('Invitation')
   const hasAccount = Boolean(await prisma.user.findUnique({ where: { email: inv.email }, select: { id: true } }))
-  res.json({ email: inv.email, organization: inv.org.name, role: inv.role, hasAccount })
+  res.json({ email: inv.email, organization: inv.org.name, role: inv.role, hasAccount, phone: inv.phone ? `+${inv.phone}` : null })
 })
 
 /** Accept an invitation: signed in with the invited email, or a new account created with a password. */
@@ -219,16 +227,18 @@ orgs.post('/invitations/accept', async (req, res) => {
   if (req.auth) {
     if (req.auth.user.email !== inv.email) throw forbidden(`This invitation is for ${inv.email}. Sign in with that email to accept it.`)
     userId = req.auth.user.id
-    if (input.phone) await connectPhone(userId, input.phone)
+    const phoneForUser = input.phone || inv.phone
+    if (phoneForUser) await connectPhone(userId, phoneForUser)
   } else {
     if (await prisma.user.findUnique({ where: { email: inv.email } })) throw forbidden('Sign in to accept this invitation.')
-    if (!input.name || !input.password || !input.phone) throw badRequest('Name, password and mobile number are required to create your account.')
+    const phone = input.phone || inv.phone
+    if (!input.name || !input.password || !phone) throw badRequest('Name, password and mobile number are required to create your account.')
     // The invite link reached this inbox, so the email counts as verified.
     const user = await prisma.user.create({
       data: { email: inv.email, name: input.name, passwordHash: await hashPassword(input.password), emailVerifiedAt: new Date() },
     })
     userId = user.id
-    await connectPhone(user.id, input.phone)
+    await connectPhone(user.id, phone)
   }
   await prisma.$transaction(async (tx) => {
     await tx.organizationMember.upsert({

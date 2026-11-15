@@ -191,7 +191,7 @@ export function TasksPage() {
           </Select>
           <Select aria-label="Source" className="w-36" value={params.get('provider') ?? ''} onChange={(e) => set('provider', e.target.value || null)}>
             <option value="">Any source</option>
-            <option value="native">WorkPulse</option>
+            <option value="native">KONVO</option>
             {Object.entries(PROVIDER_NAME)
               .filter(([k]) => ['linear', 'jira-software-cloud', 'github'].includes(k))
               .map(([k, v]) => (
@@ -381,7 +381,7 @@ function Kanban({ tasks, onOpen, onMove }: { tasks: Task[]; onOpen: (id: string)
               const id = e.dataTransfer.getData('text/task')
               if (id) onMove(id, s)
             }}
-            className={cn('flex w-72 shrink-0 flex-col rounded-xl bg-line/40 p-2', over === s && 'ring-2 ring-primary/40')}
+            className={cn('flex w-72 shrink-0 flex-col rounded-lg bg-line/40 p-2', over === s && 'ring-2 ring-primary/40')}
           >
             <header className="mb-2 flex items-center justify-between px-1.5 pt-1">
               <span className="text-xs font-semibold uppercase tracking-wide text-ink-soft">{label(s)}</span>
@@ -436,7 +436,7 @@ function TaskTable({
         </thead>
         <tbody>
           {tasks.map((t) => (
-            <tr key={t.id} className="border-b border-line/70 last:border-0 hover:bg-canvas/60">
+            <tr key={t.id} className="border-b border-line/70 last:border-0 hover:bg-hover/60">
               <td className="px-3 py-2">
                 <input type="checkbox" aria-label={`Select ${t.title}`} checked={selected.has(t.id)} onChange={() => toggle(t.id)} />
               </td>
