@@ -40,11 +40,27 @@ export const saveSteps = (token: string, scriptId: string, steps: Step[]) => cal
 export const readFlow = (token: string, scriptId: string) =>
   call<{ script_id: string; title: string; status: string; steps: Step[] }>(token, 'GET', `${API}/automations/${scriptId}`)
 
-export async function runHistory(token: string, scriptId: string, { page = 1, limit = 20 } = {}) {
+export interface RunLog {
+  _id?: string
+  status?: string
+  createdAt?: string
+  requestTimestamp?: string
+  console?: unknown
+  stepOrderJsonData?: unknown
+  output?: string
+  flowHitId?: string
+  /** Holds request headers: never shown to users or logged. */
+  requestSnapshot?: unknown
+}
+
+/** The last 30 days of runs, newest first (viaSocket answers { finalResponse: [...] }; logs land a few seconds after a run). */
+export async function runHistory(token: string, scriptId: string, { page = 1, limit = 20 } = {}): Promise<RunLog[]> {
   const url = `${API}/logs/orgId/${env.VIASOCKET_ORG_ID}?projectId=${env.VIASOCKET_PROJECT_ID}&scriptId=${scriptId}&page=${page}&limit=${limit}`
   const res = await fetch(url, { headers: { proxy_auth_token: token } })
   if (!res.ok) throw new Error(`runHistory: ${res.status}`)
-  return ((await res.json()) as { data: unknown }).data
+  const body = (await res.json()) as { data?: { finalResponse?: RunLog[] } | RunLog[]; finalResponse?: RunLog[] }
+  const d = body.data ?? body
+  return Array.isArray(d) ? d : (d.finalResponse ?? [])
 }
 
 /** POSTs to a webhook-triggered flow; answers the last step's return value. The script_id is a credential. */

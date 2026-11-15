@@ -22,7 +22,10 @@
     "test:e2e": "playwright test",
     "db:migrate": "npm run db:migrate -w @workpulse/api",
     "db:seed": "npm run db:seed -w @workpulse/api",
-    "start": "npm run start -w @workpulse/api"
+    "start": "npm run start -w @workpulse/api",
+    "db:deploy": "npm run db:deploy -w @workpulse/api",
+    "viasocket:selftest": "npm run viasocket:selftest -w @workpulse/api",
+    "worker": "npm run start:worker -w @workpulse/api"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

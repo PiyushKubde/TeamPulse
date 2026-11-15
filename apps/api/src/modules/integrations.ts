@@ -394,9 +394,18 @@ integrations.get('/automations/:id/runs', async (req, res) => {
   const s = await prisma.integrationSubscription.findFirst({ where: { id: param(req, 'id'), connection: { userId: ctx.userId, orgId: ctx.orgId } } })
   if (!s?.scriptIdEnc) throw notFound('Workflow')
   const token = await automationToken(ctx.userId)
-  const data = (await runHistory(token, decrypt(s.scriptIdEnc))) as { data?: Record<string, unknown>[] } | Record<string, unknown>[]
-  const rows = (Array.isArray(data) ? data : (data?.data ?? [])) as Record<string, unknown>[]
-  res.json({ runs: rows.map((r) => ({ status: r.status, createdAt: r.createdAt, console: r.console, steps: r.stepOrderJsonData, flowHitId: r.flowHitId })) })
+  const rows = await runHistory(token, decrypt(s.scriptIdEnc))
+  // Only the documented, user-facing fields; requestSnapshot (request headers) never leaves the server.
+  res.json({
+    runs: rows.map((r) => ({
+      status: r.status ?? (r.stepOrderJsonData && JSON.stringify(r.stepOrderJsonData).includes('"400"') ? 'failed' : 'success'),
+      createdAt: r.createdAt ?? r.requestTimestamp ?? null,
+      console: r.console ?? null,
+      steps: r.stepOrderJsonData ?? null,
+      output: typeof r.output === 'string' ? r.output.slice(0, 2000) : null,
+      flowHitId: r.flowHitId ?? r._id ?? null,
+    })),
+  })
 })
 
 export const SCHEDULED_AUTOMATIONS = [

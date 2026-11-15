@@ -1,6 +1,6 @@
 # WorkPulse — Implementation Plan (awaiting approval)
 
-Status: **PROPOSED 2026-11-15. No application code has been changed.**
+Status: **APPROVED 2026-11-15 and implemented. Current state: [status.md](status.md).** (Original proposal kept below for reference.)
 viaSocket skill: `viasocket-integrations/SKILL.md` updated to version `2026-11-14.1` (downloaded from
 https://beta-flow.viasocket.com/documentation/skill-install.md). The full SDK skill (`skill.md?format=sdk`) and its
 pages `app-integrations`, `actions-and-events`, `automations`, `setup` and `journey` were read in full (each ended in `END OF PAGE`).
