@@ -16,6 +16,12 @@ export const CURATED_APPS = [
     usedBy: ['My notifications', 'Team task notifications', 'Weekly team report', 'Gmail intake → task requests']
   },
   {
+    // Trigger rowsfn4nr5vx (New Channel Message) from viasocket.catalog.versions('rowxzmscatfe'); the Connect popup asks consent for it.
+    slug: 'microsftteams', name: 'Microsoft Teams', actions: ['rowsfn4nr5vx'], runsInTeamPulse: true, priority: 1,
+    purpose: 'Turning messages in a Teams channel you choose into pending task requests. Replies in a thread and private chats are not read.',
+    usedBy: ['Teams intake → task requests']
+  },
+  {
     slug: 'google-sheets', name: 'Google Sheets', actions: null, runsInTeamPulse: false, priority: 1,
     purpose: 'Log your assigned tasks or each weekly report as rows in a sheet — built in place from My Tasks and Reports.',
     usedBy: ['My Tasks → Automate', 'Reports → Send to Google Sheets']

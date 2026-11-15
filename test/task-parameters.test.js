@@ -329,7 +329,7 @@ test('migration 011 keeps existing tasks and confirms their values as LEGACY, re
   ev('e3', 'moved', 'deadline_changed', { from: '2026-11-20T10:00:00.000Z', to: '2026-12-10T10:00:00.000Z', reason: 'slip' }, '2026-10-04T10:00:00.000Z')
   run(`INSERT INTO blockers (id, org_id, task_id, reported_by, description, reported_at) VALUES ('b1','o1','moved','u2','Waiting',?)`, ts)
   const before = plain(db.prepare('SELECT * FROM tasks ORDER BY id').all())
-  assert.deepEqual(migrate(db), ['011_manager_led_expectations.sql'])
+  assert.deepEqual(migrate(db), ['011_manager_led_expectations.sql', '012_intake_sources.sql'])
   const after = plain(db.prepare('SELECT * FROM tasks ORDER BY id').all())
   assert.equal(after.length, 3)
   for (const [i, row] of before.entries()) for (const [k, val] of Object.entries(row)) assert.equal(after[i][k], val, `task ${row.id}.${k} unchanged`)

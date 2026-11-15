@@ -62,7 +62,7 @@ test('without ViaSocket credentials: clear errors, nothing pretends to work', as
     const s = seedOrg(t.db)
     assert.equal((await t.call('/api/viasocket/token?apps=slack', { as: s.manager })).body.error.code, 'viasocket_not_configured')
     assert.equal((await t.call('/api/automations', { as: s.manager })).body.viasocketConfigured, false)
-    assert.equal((await t.call('/api/viasocket/connections', { as: s.manager })).body.apps.length, 5)
+    assert.equal((await t.call('/api/viasocket/connections', { as: s.manager })).body.apps.length, 6)
     assert.equal((await t.call('/api/notifications/prefs', { method: 'PUT', as: s.employee, body: { channel: 'slack' } })).status, 503)
     assert.equal((await t.call('/api/viasocket/context/task_assigned_to_me', { as: s.employee })).status, 503)
   } finally { await t.close() }
@@ -276,7 +276,7 @@ test('migration 003 keeps existing automations and their run history (table rebu
   db.prepare(`INSERT INTO automation_use_cases (key, name, description, updated_at) VALUES ('weekly_team_report','W','d',?)`).run(ts)
   db.prepare(`INSERT INTO automation_workflows (id, org_id, use_case_key, owner_id, status, config, created_at, updated_at) VALUES ('w1','o1','weekly_team_report','u1','ACTIVE','{}',?,?)`).run(ts, ts)
   db.prepare(`INSERT INTO automation_execution_logs (id, org_id, workflow_id, use_case_key, trigger, status, started_at) VALUES ('l1','o1','w1','weekly_team_report','schedule','SUCCEEDED',?)`).run(ts)
-  assert.deepEqual(migrate(db), ['003_viasocket_automations.sql', '004_outbox.sql', '005_backup_restore_check.sql', '006_email_password_auth.sql', '007_work_measurement.sql', '008_external_evidence.sql', '009_work_signals.sql', '010_slack_task_intake.sql', '011_manager_led_expectations.sql'])
+  assert.deepEqual(migrate(db), ['003_viasocket_automations.sql', '004_outbox.sql', '005_backup_restore_check.sql', '006_email_password_auth.sql', '007_work_measurement.sql', '008_external_evidence.sql', '009_work_signals.sql', '010_slack_task_intake.sql', '011_manager_led_expectations.sql', '012_intake_sources.sql'])
   assert.equal(db.prepare('SELECT workflow_id FROM automation_execution_logs').get().workflow_id, 'w1', 'run history still points at its automation')
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM automation_workflows').get().n, 1)
   assert.equal(db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1)

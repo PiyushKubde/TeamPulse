@@ -524,7 +524,7 @@ test('migration 010 keeps every existing task and everything that points at it',
   run(`INSERT INTO external_identities (id, org_id, user_id, app, identity, source, created_at) VALUES ('i1','o1','u2','slack','U0OLD00001','declared',?)`, ts)
   const before = plain(db.prepare('SELECT * FROM tasks ORDER BY id').all())
   const applied = migrate(db)
-  assert.deepEqual(applied, ['010_slack_task_intake.sql', '011_manager_led_expectations.sql'])
+  assert.deepEqual(applied, ['010_slack_task_intake.sql', '011_manager_led_expectations.sql', '012_intake_sources.sql'])
   const after = plain(db.prepare('SELECT * FROM tasks ORDER BY id').all())
   assert.equal(after.length, 7)
   for (const [i, row] of before.entries()) for (const [k, val] of Object.entries(row)) assert.equal(after[i][k], val, `task ${row.id}.${k} unchanged`)

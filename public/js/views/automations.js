@@ -205,13 +205,13 @@ Content-Type: application/json
   })
 }
 
-// C: the manager's Gmail / Slack intakes.
+// C: the manager's task intakes (Gmail, Slack, Microsoft Teams: the sources come from the server's registry).
 async function renderIntakes(box, conns, configured) {
   if (!box) return
   const draw = async () => {
     let list = []
     try { list = await api('/api/intakes') } catch (e) { box.innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString(); return }
-    box.innerHTML = html`${list.length ? html`<ul class="list">${list.map((i) => html`<li><div class="grow"><b>${i.app === 'gmail' ? 'Gmail label' : 'Slack'} “${i.target}”</b> → ${i.teamName || 'admins'}
+    box.innerHTML = html`${list.length ? html`<ul class="list">${list.map((i) => html`<li><div class="grow"><b>${i.app === 'gmail' ? 'Gmail label' : (i.source || i.app)} “${i.target}”</b> → ${i.teamName || 'admins'}
         <div class="small muted">${i.mine ? '' : `${i.ownerName} · `}${i.eventsReceived} message(s) received${i.lastEventAt ? `, last ${ago(i.lastEventAt)}` : ''}</div>
         ${i.app === 'slack' ? html`<div class="small" style="margin-top:2px"><span class="badge ${i.assignFromMentions ? 'brand' : 'outline'}">${i.assignFromMentions ? 'Creates tasks for tagged people' : 'Creates pending requests'}</span>${i.assignFromMentions ? html` <span class="muted">${i.tasksCreated} task(s) created · ${i.needManager} need a manager · <a href="#/slack-intake">Slack Intake</a></span>` : ''}</div>` : ''}
         ${i.lastError ? html`<div class="small" style="color:var(--bad)">${i.lastError}</div>` : ''}</div>
@@ -220,7 +220,7 @@ async function renderIntakes(box, conns, configured) {
         ${i.status === 'ACTIVE' ? html`<button class="btn small ghost" data-i="${i.id}" data-to="PAUSED">Pause</button>` : i.mine ? html`<button class="btn small ghost" data-i="${i.id}" data-to="ACTIVE">Resume</button>` : ''}
         ${i.mine ? html`<button class="btn small ghost" data-i="${i.id}" data-to="DELETED">Remove</button>` : ''}</li>`)}</ul>`
       : html`<p class="small muted">No intakes yet.</p>`}
-      <div class="row" style="margin-top:8px"><button class="btn small" id="add-intake" ${!configured ? raw('disabled title="ViaSocket is not configured"') : ''}>Add Gmail or Slack intake</button></div>`.toString()
+      <div class="row" style="margin-top:8px"><button class="btn small" id="add-intake" ${!configured ? raw('disabled title="ViaSocket is not configured"') : ''}>Add an intake</button></div>`.toString()
     box.querySelectorAll('[data-i]').forEach((b) => b.addEventListener('click', async () => {
       if (b.dataset.to === 'DELETED') { const r = await confirmDialog({ title: 'Remove this intake?', body: 'New messages stop becoming requests. Requests already created stay.', confirm: 'Remove', danger: true }); if (!r?.ok) return }
       try { await api(`/api/intakes/${b.dataset.i}/status`, { method: 'POST', body: { status: b.dataset.to } }); draw() } catch (e) { toast(errorText(e), { error: true }) }
@@ -236,14 +236,17 @@ async function renderIntakes(box, conns, configured) {
 }
 
 async function addIntake(conns, done) {
-  const g = conns.connections.filter((c) => c.app === 'gmail' && c.status !== 'missing')
-  const s = conns.connections.filter((c) => c.app === 'slack' && c.status !== 'missing')
-  if (!g.length && !s.length) return modal(html`<h2 id="modal-title">Connect Gmail or Slack first</h2><p>Intake listens on your own Gmail or Slack account.</p><div class="row end"><button class="btn ghost" data-close>Close</button><a class="btn" href="#/automations?tab=apps">Connect an app</a></div>`.toString(), (el, close) => el.querySelector('a').addEventListener('click', () => close()))
+  let sources = []
+  try { sources = await api('/api/intakes/sources') } catch (e) { return toast(errorText(e), { error: true }) }
+  const byApp = Object.fromEntries(sources.map((src) => [src.app, { src, list: conns.connections.filter((c) => c.app === src.slug && c.status !== 'missing') }]))
+  const avail = sources.filter((src) => byApp[src.app].list.length)
+  if (!avail.length) return modal(html`<h2 id="modal-title">Connect an app first</h2><p>Intake listens on your own ${sources.map((x) => x.name).join(', ')} account. Connect one in Connected apps, then come back.</p><div class="row end"><button class="btn ghost" data-close>Close</button><a class="btn" href="#/automations?tab=apps">Connect an app</a></div>`.toString(), (el, close) => el.querySelector('a').addEventListener('click', () => close()))
   const teams = (await api('/api/teams')).filter((t) => app.isAdmin || t.managedByMe)
-  modal(html`<h2 id="modal-title">Gmail / Slack intake</h2><p class="small muted">Each new email with the label, or each new message in the channel, becomes a <b>pending</b> task request for your team, nothing is approved automatically. For Slack you can instead create tasks for the people tagged: they still have to accept. Use a dedicated label or channel.</p>
+  modal(html`<h2 id="modal-title">Task intake</h2><p class="small muted">Each new email with the label, or each new message in the channel, becomes a <b>pending</b> task request for your team, nothing is approved automatically. For Slack you can instead create tasks for the people tagged: they still have to accept. Use a dedicated label or channel.</p>
     <form id="f"><div class="form-error"></div>
-    <div class="field"><label for="i-app">Listen on</label><select id="i-app" name="app">${g.length ? html`<option value="gmail">Gmail (a label)</option>` : ''}${s.length ? html`<option value="slack">Slack (a channel)</option>` : ''}</select></div>
+    <div class="field"><label for="i-app">Listen on</label><select id="i-app" name="app">${avail.map((src) => html`<option value="${src.app}">${src.name} (${src.parentNoun ? `a ${src.targetNoun.toLowerCase()}` : `a ${src.targetNoun.replace(/^(Gmail|Slack) /, '')}`})</option>`)}</select></div>
     <div class="field"><label for="i-conn">Your account</label><select id="i-conn" name="connectionId"></select></div>
+    <div class="field" id="i-parent-wrap" hidden><label for="i-parent" id="i-parent-label">Team</label><select id="i-parent" name="parent"><option value="">Loading…</option></select></div>
     <div class="field"><label for="i-target" id="i-target-label">Label</label><select id="i-target" name="target"><option value="">Loading…</option></select><div class="hint" id="i-hint"></div></div>
     <div class="field"><label for="i-team">Requests go to</label><select id="i-team" name="teamId">${teams.map((t) => html`<option value="${t.id}">${t.name}</option>`)}</select></div>
     <div id="i-assign-wrap" hidden><label class="check"><input type="checkbox" id="i-assign" checked> Create tasks for tagged people</label>
@@ -251,24 +254,39 @@ async function addIntake(conns, done) {
     <div id="i-preview"></div>
     <div class="row end"><button class="btn ghost" type="button" id="i-sample">Preview a real message</button><button class="btn ghost" data-close>Cancel</button><button class="btn" type="submit">Switch on</button></div></form>`.toString(), (el, close) => {
     const $ = (q) => el.querySelector(q)
+    const cur = () => byApp[$('#i-app').value]
+    const opts = (out) => out.options.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')
     const fill = async () => {
-      const isG = $('#i-app').value === 'gmail'
-      $('#i-conn').innerHTML = (isG ? g : s).map((c) => `<option value="${esc(c.id)}">${esc(c.label || $('#i-app').value)}</option>`).join('')
-      $('#i-target-label').textContent = isG ? 'Gmail label' : 'Slack channel'
-      $('#i-assign-wrap').hidden = isG
-      $('#i-hint').textContent = isG ? 'Create a label such as “KONVO” in Gmail and apply it to emails that should become requests.' : 'Use a channel only for requests — not one KONVO posts notifications or reports to.'
-      await fillTargets()
+      const { src, list } = cur()
+      $('#i-conn').innerHTML = list.map((c) => `<option value="${esc(c.id)}">${esc(c.label || src.name)}</option>`).join('')
+      $('#i-target-label').textContent = src.targetNoun
+      $('#i-assign-wrap').hidden = !src.supportsMentionAssign
+      $('#i-parent-wrap').hidden = !src.parentNoun
+      if (src.parentNoun) $('#i-parent-label').textContent = src.parentNoun
+      $('#i-hint').textContent = src.hint
+      await (src.parentNoun ? fillParents() : fillTargets())
     }
-    const fillTargets = async () => {
-      $('#i-target').innerHTML = '<option value="">Loading…</option>'
+    const fillParents = async () => {
+      $('#i-parent').innerHTML = '<option value="">Loading…</option>'; $('#i-target').innerHTML = '<option value="">Choose a ' + esc(cur().src.parentNoun.toLowerCase()) + ' first</option>'
       try {
         const out = await api(`/api/intakes/targets?app=${$('#i-app').value}&connectionId=${encodeURIComponent($('#i-conn').value)}`)
+        $('#i-parent').innerHTML = opts(out) || '<option value="">Nothing found</option>'
+        if (out.message) $('#i-hint').textContent = out.message
+        await fillTargets()
+      } catch (e) { $('#i-parent').innerHTML = '<option value="">Could not load</option>'; $('.form-error').innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString() }
+    }
+    const fillTargets = async () => {
+      const parent = cur().src.parentNoun ? $('#i-parent').value : ''
+      if (cur().src.parentNoun && !parent) return
+      $('#i-target').innerHTML = '<option value="">Loading…</option>'
+      try {
+        const out = await api(`/api/intakes/targets?app=${$('#i-app').value}&connectionId=${encodeURIComponent($('#i-conn').value)}${parent ? `&parent=${encodeURIComponent(parent)}` : ''}`)
         $('#i-target').innerHTML = out.options.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('') || '<option value="">Nothing found</option>'
         if (out.message) $('#i-hint').textContent = out.message
       } catch (e) { $('#i-target').innerHTML = '<option value="">Could not load</option>'; $('.form-error').innerHTML = html`<div class="notice err">${errorText(e)}</div>`.toString() }
     }
-    $('#i-app').addEventListener('change', fill); $('#i-conn').addEventListener('change', fillTargets); fill()
-    const read = () => ({ app: $('#i-app').value, connectionId: $('#i-conn').value, target: $('#i-target').value, teamId: $('#i-team').value || undefined, assignFromMentions: $('#i-app').value === 'slack' && $('#i-assign').checked })
+    $('#i-app').addEventListener('change', fill); $('#i-conn').addEventListener('change', () => (cur().src.parentNoun ? fillParents() : fillTargets())); $('#i-parent').addEventListener('change', fillTargets); fill()
+    const read = () => ({ app: $('#i-app').value, connectionId: $('#i-conn').value, target: $('#i-target').value, parent: cur().src.parentNoun ? $('#i-parent').value : undefined, teamId: $('#i-team').value || undefined, assignFromMentions: cur().src.supportsMentionAssign && $('#i-assign').checked })
     $('#i-sample').addEventListener('click', async () => {
       $('#i-preview').innerHTML = loading('Reading a recent message…').toString()
       try {

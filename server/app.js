@@ -4,7 +4,7 @@ import { createReadStream } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AppError, forbidden } from './errors.js'
-import { assignableUserIds, loadContext, isAdmin, isManager, requireVisibleTask, canManageTask } from './access.js'
+import { assignableUserIds, loadContext, isAdmin, isManager, requireVisibleTask, canManageTask, requireManager } from './access.js'
 import * as params from './services/task-parameters.js'
 import * as prio from './services/priority-model.js'
 import * as analytics from './services/analytics.js'
@@ -498,9 +498,10 @@ export function createApp({ db, cfg, vs = { configured: false }, m91, google = g
   // A real message, only to the person pressing the button (their own DM / own email / a channel they chose).
   app.post('/api/automations/test-send', h((req) => auto.sendTestToSelf(db, member(req), vs, req.body)))
 
-  // C: Gmail / Slack intake.
+  // C: task intake from communication sources (Gmail, Slack, Microsoft Teams; server/automations/sources).
+  app.get('/api/intakes/sources', h((req) => { requireManager(member(req)); return intake.publicSources() }))
   app.get('/api/intakes', h((req) => intake.listIntakes(db, member(req))))
-  app.get('/api/intakes/targets', h((req) => intake.intakeTargets(db, vs, member(req), String(req.query.app || ''), String(req.query.connectionId || ''), { search: typeof req.query.search === 'string' ? req.query.search.slice(0, 80) : undefined })))
+  app.get('/api/intakes/targets', h((req) => intake.intakeTargets(db, vs, member(req), String(req.query.app || ''), String(req.query.connectionId || ''), { search: typeof req.query.search === 'string' ? req.query.search.slice(0, 80) : undefined, parent: typeof req.query.parent === 'string' ? req.query.parent.slice(0, 120) : undefined })))
   app.post('/api/intakes/sample', h((req) => intake.sampleIntake(db, vs, member(req), req.body)))
   app.post('/api/intakes', h((req, res) => { res.status(201); return intake.createIntake(db, vs, member(req), req.body, { appUrl: cfg.appUrl }) }))
   app.post('/api/intakes/:id/status', h((req) => intake.setIntakeStatus(db, vs, member(req), req.params.id, req.body)))
