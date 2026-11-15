@@ -14,17 +14,20 @@
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="KONVO — AI Work Intelligence Platform">
   <meta name="twitter:description" content="From conversations to contribution. Work moves forward. Every contribution counts.">
-  <meta name="theme-color" content="#FAFAFA" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0A0A0A" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#EEF1F5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1B2430" media="(prefers-color-scheme: dark)">
   <script>
     // Theme before first paint, so the page never flashes the wrong theme. Dark is the default; 'system' follows the OS live.
     (function () {
-      var pref = 'light'
+      var pref = 'dark'
       try { pref = localStorage.getItem('tp-theme') || 'dark' } catch (e) {}
       var mq = window.matchMedia('(prefers-color-scheme: dark)')
       function apply() {
         var p = document.documentElement.dataset.themePref || pref
-        document.documentElement.dataset.theme = p === 'dark' || (p === 'system' && mq.matches) ? 'dark' : 'light'
+        var dark = p === 'dark' || (p === 'system' && mq.matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+        var metas = document.querySelectorAll('meta[name="theme-color"]')
+        for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', dark ? '#1B2430' : '#EEF1F5')
       }
       document.documentElement.dataset.themePref = pref
       apply()

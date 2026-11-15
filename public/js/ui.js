@@ -218,7 +218,9 @@ export function setThemePref(pref) {
   try { localStorage.setItem('tp-theme', p) } catch { /* private mode: still applies for this page */ }
   const root = document.documentElement
   root.dataset.themePref = p
-  root.dataset.theme = p === 'dark' || (p === 'system' && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'
+  const dark = p === 'dark' || (p === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+  root.dataset.theme = dark ? 'dark' : 'light'
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute('content', dark ? '#1B2430' : '#EEF1F5')) // browser chrome follows the chosen theme
 }
 
 // ---------- domain components ----------
