@@ -27,12 +27,13 @@ Checked every minute by the API process (so a dead worker is still noticed). Ans
 | `workpulse-ai-failing` | 5 AI calls in a row failed (work continues without AI) | MEDIUM (rings, never phones) |
 | `workpulse-delivery-failing` | 5 Slack/Gmail deliveries in a row failed | MEDIUM |
 
-Check the channel at any time with `npm run m91:test -w @workpulse/api` (a connection test that raises nothing, then
+In the app: **Phone alerts (M91)** in the sidebar shows (to owners and admins) the channel, every condition with its
+state, what is ringing now, the history, and a **Send test alert** button. From the command line: `npm run m91:test -w @workpulse/api` (a connection test that raises nothing, then
 one LOW test alert).
 
 ## People: their own phone
 
-Each person adds their number in **Settings → Profile → Phone alerts**. WorkPulse invites it through M91; they accept the
+Each person adds their number on the **Phone alerts (M91)** page (also in Settings → Profile). WorkPulse invites it through M91; they accept the
 invitation in the M91 app ([iPhone](https://apps.apple.com/app/id6759090472) ·
 [Android](https://play.google.com/store/apps/details?id=com.msg91.m91)) and press **Send a test alert**. Every moment
 can be switched off there.

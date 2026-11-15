@@ -152,3 +152,18 @@ describe('on-call channel (needs Redis, like the job queues)', () => {
     expect(calls.some((c) => c.url.endsWith('/s/sk_test/close') && c.body?.customId === 'workpulse-sync-dead-linear')).toBe(true)
   })
 })
+
+describe('on-call page', () => {
+  it('shows the channel, conditions and history to admins only; test alert reports how many were reached', async () => {
+    const { owner, member } = await orgWithPeople()
+    expect((await member.c.get('/api/alerts/on-call')).status).toBe(403)
+    const r = (await owner.c.get('/api/alerts/on-call').expect(200)).body
+    expect(r).toMatchObject({ configured: true, personalAvailable: true })
+    expect(r.conditions.length).toBeGreaterThan(5)
+    expect((await owner.c.post('/api/alerts/on-call/test').expect(200)).body).toEqual({ delivered: 1 })
+    const sent = calls.find((c) => c.method === 'POST' && c.url.endsWith('/s/sk_test'))!
+    expect(sent.body).toMatchObject({ severity: 'LOW', isAutoClose: true })
+    expect((sent.body!.responseOptions as unknown[]).length).toBe(2)
+    expect((await member.c.post('/api/alerts/on-call/test')).status).toBe(403)
+  })
+})

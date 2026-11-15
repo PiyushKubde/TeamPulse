@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
+  BellRing,
   BarChart3,
   Bell,
   Bot,
@@ -68,6 +69,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
       { to: '/integrations', label: 'Integrations', icon: <Plug /> },
       { to: '/automations', label: 'Automation Center', icon: <Workflow /> },
       { to: '/sync-history', label: 'Sync History', icon: <RefreshCcw /> },
+      { to: '/alerts', label: 'Phone alerts (M91)', icon: <BellRing /> },
       { to: '/assistant', label: 'AI Assistant', icon: <Bot /> },
     ],
   },
@@ -88,6 +90,7 @@ const CRUMBS: Record<string, string> = {
   automations: 'Automation Center',
   'sync-history': 'Sync History',
   assistant: 'AI Assistant',
+  alerts: 'Phone alerts',
   settings: 'Settings',
 }
 

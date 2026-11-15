@@ -816,7 +816,7 @@ interface PhoneAlertsState {
 }
 
 /** The person's own phone alerts through M91. Says only what rings, why, and what to do. */
-function PhoneAlerts() {
+export function PhoneAlerts() {
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ['phone-alerts'], queryFn: () => api<PhoneAlertsState>('/me/phone-alerts') })
   const [phone, setPhone] = useState('')
@@ -853,7 +853,7 @@ function PhoneAlerts() {
   return (
     <Card>
       <CardHeader
-        title="Phone alerts"
+        title="Your phone"
         description="WorkPulse rings your phone, even on silent, when something needs you now: you can answer right from the alert."
       />
       <div className="space-y-4 p-5 text-sm">

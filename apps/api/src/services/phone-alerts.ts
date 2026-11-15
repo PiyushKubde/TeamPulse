@@ -98,6 +98,22 @@ async function clearOps(customId: string) {
 const set = (cond: boolean, customId: string, sev: m91.AlertPayload['severity'], title: string, desc: string) =>
   cond ? raiseOps(customId, sev, title, desc) : clearOps(customId)
 
+/** What the on-call channel watches. Shown on the Phone alerts page; customIds match checkOps() below. */
+export const ON_CALL_CONDITIONS = [
+  { customId: 'workpulse-database-down', label: 'Database unreachable for 3 minutes', severity: 'CRITICAL' },
+  { customId: 'workpulse-redis-down', label: 'Redis unreachable for 3 minutes', severity: 'CRITICAL' },
+  { customId: 'workpulse-worker-stalled', label: 'Background worker stopped (imports, reminders, reports)', severity: 'HIGH' },
+  { customId: 'workpulse-ingest-backlog', label: 'Over 200 app events waiting for 10 minutes', severity: 'HIGH' },
+  { customId: 'workpulse-sync-dead-linear', label: 'Linear sync failing for good (3+ in an hour)', severity: 'HIGH' },
+  { customId: 'workpulse-sync-dead-jira-software-cloud', label: 'Jira sync failing for good (3+ in an hour)', severity: 'HIGH' },
+  { customId: 'workpulse-sync-dead-github', label: 'GitHub sync failing for good (3+ in an hour)', severity: 'HIGH' },
+  { customId: 'workpulse-sync-dead-slack', label: 'Slack sync failing for good (3+ in an hour)', severity: 'HIGH' },
+  { customId: 'workpulse-api-errors', label: 'Over 20 server errors in 5 minutes', severity: 'HIGH' },
+  { customId: 'workpulse-email-failing', label: 'Email failing 3 times in a row', severity: 'HIGH' },
+  { customId: 'workpulse-ai-failing', label: 'AI failing 5 times in a row', severity: 'MEDIUM' },
+  { customId: 'workpulse-delivery-failing', label: 'Slack/Gmail delivery failing 5 times in a row', severity: 'MEDIUM' },
+] as const
+
 const streak = { db: 0, redis: 0, backlog: 0 }
 const startedAt = Date.now()
 

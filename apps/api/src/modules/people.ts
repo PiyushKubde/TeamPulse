@@ -6,7 +6,7 @@ import { prisma } from '../lib/prisma.js'
 import { body, param, query } from '../lib/validate.js'
 import { HttpError, badRequest, forbidden, notFound } from '../lib/errors.js'
 import * as m91 from '../lib/m91.js'
-import { MOMENTS, type Moment } from '../services/phone-alerts.js'
+import { MOMENTS, ON_CALL_CONDITIONS, type Moment } from '../services/phone-alerts.js'
 import { assertAdmin, assertCanSeeUser, canManageUser, findVisibleTask, type Ctx } from '../lib/scope.js'
 import { audit } from '../lib/audit.js'
 import { isValidTz } from '../lib/dates.js'
@@ -366,4 +366,66 @@ people.delete('/me/phone', async (req, res) => {
   if (user.phone && m91.platformConfigured()) await m91.uninvite(user.phone).catch(() => undefined)
   await prisma.user.update({ where: { id: user.id }, data: { phone: null, phoneAlertState: null } })
   res.json(await phoneStatus(user.id))
+})
+
+// ───────────── On-call channel (owners and admins) ─────────────
+
+let channelName: { name: string; at: number } | null = null
+
+people.get('/alerts/on-call', async (req, res) => {
+  assertAdmin(ctxOf(req))
+  const configured = m91.channelConfigured()
+  let channel: string | null = null
+  let error: string | null = null
+  if (configured) {
+    // The connection test raises nothing; cached for a minute.
+    if (channelName && Date.now() - channelName.at < 60_000) channel = channelName.name
+    else
+      try {
+        channel = (await m91.channelInfo()).channel.name
+        channelName = { name: channel, at: Date.now() }
+      } catch (e) {
+        error = m91Message(e)
+      }
+  }
+  const open = await prisma.phoneAlert.findMany({ where: { userId: null, status: 'OPEN' }, select: { customId: true, createdAt: true } })
+  const recent = await prisma.phoneAlert.findMany({
+    where: { userId: null },
+    orderBy: { createdAt: 'desc' },
+    take: 15,
+    select: { id: true, title: true, severity: true, status: true, delivered: true, createdAt: true, closedAt: true },
+  })
+  res.json({
+    configured,
+    channel,
+    error,
+    personalAvailable: m91.platformConfigured(),
+    conditions: ON_CALL_CONDITIONS.map((c) => ({ ...c, open: open.find((o) => o.customId === c.customId)?.createdAt ?? null })),
+    recent,
+  })
+})
+
+people.post('/alerts/on-call/test', async (req, res) => {
+  assertAdmin(ctxOf(req))
+  if (!m91.channelConfigured())
+    throw new HttpError(409, 'not_configured', 'No on-call channel yet: add the channel’s send link to the server as M91_SEND_LINK.')
+  try {
+    const r = await m91.channelAlert({
+      title: 'WorkPulse on-call test',
+      description: `Sent by ${userOf(req).name} from the Phone alerts page. Nothing is wrong.`,
+      severity: 'LOW',
+      customId: `workpulse-test-${Date.now()}`,
+      isAutoClose: true,
+      responseOptions: [
+        { label: 'It rang', effect: 'SHARED' },
+        { label: 'Seen', effect: 'PERSONAL' },
+      ],
+    })
+    if (r.delivered === 0)
+      throw new HttpError(409, 'channel_empty', 'Nobody was reached: add people to the channel in the M91 app, and make sure they accepted the invitation.')
+    res.json({ delivered: r.delivered })
+  } catch (e) {
+    if (e instanceof HttpError) throw e
+    throw new HttpError(502, 'm91_failed', m91Message(e))
+  }
 })

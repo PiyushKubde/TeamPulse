@@ -24,6 +24,7 @@ const SyncHistory = lazy(() => import('@/features/integrations/AutomationPages')
 const AssistantPage = lazy(() => import('@/features/ai/AssistantPage').then((m) => ({ default: m.AssistantPage })))
 const ReportView = lazy(() => import('@/features/reports/ReportsPage').then((m) => ({ default: m.ReportView })))
 const ReportsPage = lazy(() => import('@/features/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
+const AlertsPage = lazy(() => import('@/features/alerts/AlertsPage').then((m) => ({ default: m.AlertsPage })))
 const SettingsPage = lazy(() => import('@/features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 
 function RequireAuth({ children, needsOrg = true }: { children: ReactNode; needsOrg?: boolean }) {
@@ -123,6 +124,7 @@ export function App() {
         <Route path="automations" element={<AutomationCenter />} />
         <Route path="sync-history" element={<SyncHistory />} />
         <Route path="assistant" element={<AssistantPage />} />
+        <Route path="alerts" element={<AlertsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route
           path="*"
