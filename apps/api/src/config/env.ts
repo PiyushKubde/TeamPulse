@@ -74,10 +74,6 @@ function load() {
     const issues = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n')
     throw new Error(`Invalid environment configuration:\n${issues}`)
   }
-  if (parsed.data.NODE_ENV === 'production' && !parsed.data.PUBLIC_API_URL) {
-    // Not fatal: integrations that need inbound events report it on screen.
-    console.warn('PUBLIC_API_URL is not set: external event subscriptions are unavailable.')
-  }
   const d = parsed.data
   // On Embarko the public address follows from the app name unless set explicitly.
   const embarkoUrl = d.APP_NAME && process.env.APP_URL === undefined ? `https://${d.APP_NAME}.embarko.app` : null
@@ -87,6 +83,10 @@ function load() {
     if (!process.env.CORS_ORIGINS) d.CORS_ORIGINS = embarkoUrl as never
   }
   d.DATABASE_URL ??= `file:${resolve(d.DATA_DIR)}/konvo.db`
+  if (d.NODE_ENV === 'production' && !d.PUBLIC_API_URL) {
+    // Not fatal: integrations that need inbound events report it on screen.
+    console.warn('PUBLIC_API_URL is not set: external event subscriptions are unavailable.')
+  }
   return d as typeof d & { DATABASE_URL: string }
 }
 
