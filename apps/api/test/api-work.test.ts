@@ -323,3 +323,14 @@ describe('notifications', () => {
     expect((await c.get('/api/tasks')).status).toBe(403)
   })
 })
+
+describe('date ranges', () => {
+  it('a date-only "to" includes work completed later that same day', async () => {
+    const { member } = await orgWithPeople()
+    const t = (await member.c.post('/api/tasks').send({ title: 'Done today', impactLevel: 'HIGH' })).body.task
+    await member.c.patch(`/api/tasks/${t.id}`).send({ status: 'COMPLETED' })
+    const today = new Date().toISOString().slice(0, 10)
+    const a = (await member.c.get(`/api/analytics/individual?to=${today}`)).body
+    expect(a.kpis.completedOutcomes).toBe(1)
+  })
+})

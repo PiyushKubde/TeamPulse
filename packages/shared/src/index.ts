@@ -170,6 +170,8 @@ export const taskUpdateSchema = taskCreateSchema.partial().extend({
   actualMins: z.number().int().min(0).max(100000).optional(),
   sortOrder: z.number().finite().optional(),
   archived: z.boolean().optional(),
+  /** Clears the sync review flag once a person checked the imported values. */
+  needsReview: z.literal(false).optional(),
 })
 export const taskListQuerySchema = z.object({
   q: text(200).optional(),

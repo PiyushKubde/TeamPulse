@@ -57,7 +57,20 @@ export function createApp() {
     next()
   })
 
-  app.use('/api/auth', limiter(15 * 60_000, 50), auth)
+  // Strict limit only on credential endpoints; /auth/me is read on every page load.
+  const authLimit = limiter(15 * 60_000, 50)
+  app.use(
+    [
+      '/api/auth/login',
+      '/api/auth/register',
+      '/api/auth/forgot-password',
+      '/api/auth/reset-password',
+      '/api/auth/verify-email',
+      '/api/auth/resend-verification',
+    ],
+    authLimit,
+  )
+  app.use('/api/auth', auth)
   app.use('/api/ai', limiter(60_000, 30))
   app.use('/api', limiter(60_000, 600), orgs, routes)
 

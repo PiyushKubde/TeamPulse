@@ -185,12 +185,10 @@ orgs.post('/invitations', requireOrg, async (req, res) => {
   )
   await audit(req, ctx.orgId, 'invitation.create', { type: 'Invitation', id: invitation.id }, { email: input.email, role: input.role })
   // Without email delivery the inviter gets the link to share by hand.
-  res
-    .status(201)
-    .json({
-      invitation: { id: invitation.id, email: invitation.email, role: invitation.role, expiresAt: invitation.expiresAt },
-      link: mail.delivered ? null : link,
-    })
+  res.status(201).json({
+    invitation: { id: invitation.id, email: invitation.email, role: invitation.role, expiresAt: invitation.expiresAt },
+    link: mail.delivered ? null : link,
+  })
 })
 
 orgs.delete('/invitations/:id', requireOrg, async (req, res) => {

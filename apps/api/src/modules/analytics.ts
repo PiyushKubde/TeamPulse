@@ -13,8 +13,11 @@ export const analytics = Router()
 
 // ───────────── Range & weeks ─────────────
 
+const isMidnightUtc = (d: Date) => d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0
+
 function resolveRange(q: { from?: Date; to?: Date }) {
-  const to = q.to ?? new Date()
+  // A date-only "to" (YYYY-MM-DD) means the whole of that day.
+  const to = q.to ? (isMidnightUtc(q.to) ? new Date(q.to.getTime() + 864e5 - 1) : q.to) : new Date()
   const from = q.from ?? new Date(to.getTime() - 8 * 7 * 864e5)
   if (to.getTime() - from.getTime() > 366 * 864e5) throw forbidden('Choose a range of at most one year.')
   return { from, to }
@@ -155,8 +158,13 @@ analytics.get('/analytics/individual', async (req, res) => {
     }
   })
 
-  const byProject = new Map<string, number>()
-  for (const t of openTasks) byProject.set(t.project?.name ?? 'No project', (byProject.get(t.project?.name ?? 'No project') ?? 0) + 1)
+  const byProject = new Map<string, { id: string | null; name: string; value: number }>()
+  for (const t of openTasks) {
+    const k = t.project?.id ?? 'none'
+    const row = byProject.get(k) ?? { id: t.project?.id ?? null, name: t.project?.name ?? 'No project', value: 0 }
+    row.value++
+    byProject.set(k, row)
+  }
   const time = new Map<string, number>()
   for (const s of sessions) {
     const key = s.task?.project?.name ?? s.task?.category ?? 'Unlinked'
@@ -177,7 +185,7 @@ analytics.get('/analytics/individual', async (req, res) => {
       activeBlockers: openTasks.filter((t) => t.status === 'BLOCKED').length,
     },
     weekly,
-    workload: [...byProject].map(([name, value]) => ({ name, value })),
+    workload: [...byProject.values()],
     workloadByStatus: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW', 'BLOCKED'].map((s) => ({
       status: s,
       value: openTasks.filter((t) => t.status === s).length,
