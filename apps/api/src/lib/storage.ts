@@ -1,14 +1,15 @@
 // Evidence and attachment files: S3-compatible storage when S3_BUCKET is set, local disk (DATA_DIR/uploads) otherwise.
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { env } from '../config/env.js'
 import { randomToken } from './crypto.js'
 import { badRequest } from './errors.js'
 
-const s3 = env.S3_BUCKET
-  ? new S3Client({
+// The S3 SDK loads only when S3 is configured (it costs memory, and Embarko stores files under DATA_DIR instead).
+const sdk = env.S3_BUCKET ? await import('@aws-sdk/client-s3') : null
+const { getSignedUrl } = env.S3_BUCKET ? await import('@aws-sdk/s3-request-presigner') : { getSignedUrl: null }
+const s3 = sdk
+  ? new sdk.S3Client({
       region: env.S3_REGION,
       endpoint: env.S3_ENDPOINT,
       forcePathStyle: env.S3_FORCE_PATH_STYLE,
@@ -43,7 +44,7 @@ export async function putFile(orgId: string, fileName: string, mimeType: string,
   validateUpload(mimeType, data)
   const safe = fileName.replace(/[^\w.-]+/g, '_').slice(-80)
   const key = `${orgId}/${randomToken(12)}-${safe}`
-  if (s3) await s3.send(new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: key, Body: data, ContentType: mimeType }))
+  if (s3 && sdk) await s3.send(new sdk.PutObjectCommand({ Bucket: env.S3_BUCKET, Key: key, Body: data, ContentType: mimeType }))
   else {
     await mkdir(join(localDir, orgId), { recursive: true })
     await writeFile(join(localDir, key), data)
@@ -53,10 +54,10 @@ export async function putFile(orgId: string, fileName: string, mimeType: string,
 
 /** A short-lived URL (S3) or null when files are local (then the API streams it after an auth check). */
 export async function signedUrl(key: string, fileName: string) {
-  if (!s3) return null
+  if (!s3 || !sdk || !getSignedUrl) return null
   return getSignedUrl(
     s3,
-    new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key, ResponseContentDisposition: `attachment; filename="${fileName.replace(/"/g, '')}"` }),
+    new sdk.GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key, ResponseContentDisposition: `attachment; filename="${fileName.replace(/"/g, '')}"` }),
     { expiresIn: 300 },
   )
 }
@@ -68,6 +69,6 @@ export async function readLocal(key: string) {
 }
 
 export async function deleteFile(key: string) {
-  if (s3) await s3.send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))
+  if (s3 && sdk) await s3.send(new sdk.DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))
   else await unlink(resolve(localDir, key)).catch(() => undefined)
 }

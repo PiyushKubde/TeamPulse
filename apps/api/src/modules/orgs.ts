@@ -323,10 +323,11 @@ orgs.put('/teams/:id/members', requireOrg, async (req, res) => {
   if (!(await prisma.team.findFirst({ where: { id, orgId: ctx.orgId } }))) throw notFound('Team')
   const valid = await prisma.organizationMember.count({ where: { orgId: ctx.orgId, userId: { in: userIds }, status: 'ACTIVE' } })
   if (valid !== new Set(userIds).size) throw badRequest('Every team member must be an active member of the organization.')
-  await prisma.$transaction([
-    prisma.teamMember.deleteMany({ where: { teamId: id, userId: { notIn: userIds } } }),
-    prisma.teamMember.createMany({ data: userIds.map((userId) => ({ teamId: id, userId })), skipDuplicates: true }),
-  ])
+  await prisma.$transaction(async (tx) => {
+    await tx.teamMember.deleteMany({ where: { teamId: id, userId: { notIn: userIds } } })
+    const have = new Set((await tx.teamMember.findMany({ where: { teamId: id }, select: { userId: true } })).map((m) => m.userId))
+    await tx.teamMember.createMany({ data: [...new Set(userIds)].filter((u) => !have.has(u)).map((userId) => ({ teamId: id, userId })) })
+  })
   await audit(req, ctx.orgId, 'team.members', { type: 'Team', id }, { userIds })
   res.json({ ok: true })
 })

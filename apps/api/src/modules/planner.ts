@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { dailyPlanSchema, dailyReviewSchema, manualSessionSchema, startSessionSchema } from '@workpulse/shared'
-import { prisma, type Prisma } from '../lib/prisma.js'
+import { prisma, type Prisma, strings } from '../lib/prisma.js'
 import { body, param, query } from '../lib/validate.js'
 import { badRequest, notFound } from '../lib/errors.js'
 import { findEditableTask, findVisibleTask, taskScope, type Ctx } from '../lib/scope.js'
@@ -54,9 +54,8 @@ planner.get('/planner/:date', async (req, res) => {
       select: { id: true, title: true, period: true, progress: true, status: true, dueDate: true },
     }),
   ])
-  const planned = plan?.plannedTaskIds.length
-    ? await prisma.task.findMany({ where: { AND: [taskScope(ctx), { id: { in: plan.plannedTaskIds } }] }, include: taskInclude })
-    : []
+  const plannedIds = strings(plan?.plannedTaskIds)
+  const planned = plannedIds.length ? await prisma.task.findMany({ where: { AND: [taskScope(ctx), { id: { in: plannedIds } }] }, include: taskInclude }) : []
   const now = Date.now()
   const focusMins = sessions.reduce((a, s) => a + Math.round(((s.endedAt?.getTime() ?? now) - s.startedAt.getTime()) / 60000), 0)
   const est = completed.reduce((a, t) => a + (t.estimateMins ?? 0), 0)
@@ -107,7 +106,10 @@ planner.post('/planner/review', async (req, res) => {
   const input = body(req, dailyReviewSchema)
   const plan = await prisma.dailyPlan.findUnique({ where: { orgId_userId_date: { orgId: ctx.orgId, userId: ctx.userId, date: input.date } } })
   if (!plan) throw badRequest('Plan the day before reviewing it.')
-  const open = await prisma.task.findMany({ where: { id: { in: plan.plannedTaskIds }, status: { notIn: ['COMPLETED', 'CANCELLED'] } }, select: { id: true } })
+  const open = await prisma.task.findMany({
+    where: { id: { in: strings(plan.plannedTaskIds) }, status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+    select: { id: true },
+  })
   const explained = new Set(input.carryForward.map((c) => c.taskId))
   const missing = open.filter((t) => !explained.has(t.id))
   if (missing.length) throw badRequest('Give a reason for every planned task that is not done.', { taskIds: missing.map((t) => t.id) })

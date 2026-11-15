@@ -1,5 +1,4 @@
-import PDFDocument from 'pdfkit'
-import { prisma, type Prisma } from '../lib/prisma.js'
+import { prisma, type Prisma, strings } from '../lib/prisma.js'
 import { addDays, dayBounds, todayIn, weekStart } from '../lib/dates.js'
 import { IMPACT_POINTS, snapshot } from './performance.js'
 
@@ -48,7 +47,7 @@ export async function buildDaily(orgId: string, subject: string, date?: string):
       take: 5,
     }),
   ])
-  const plannedIds = plans.flatMap((p) => p.plannedTaskIds)
+  const plannedIds = plans.flatMap((p) => strings(p.plannedTaskIds))
   const planned = plannedIds.length ? await prisma.task.findMany({ where: { id: { in: plannedIds } }, include }) : []
   const incomplete = planned.filter((t) => t.status !== 'COMPLETED' && t.status !== 'CANCELLED')
   const reasons = new Map(plans.flatMap((p) => (p.carryForward as { taskId: string; reason: string }[]).map((c) => [c.taskId, c.reason] as const)))
@@ -183,7 +182,9 @@ export function toCsv(c: ReportContent) {
   return rows.map((r) => r.map(csvCell).join(',')).join('\n')
 }
 
-export function toPdf(c: ReportContent, aiSummary?: string | null): Promise<Buffer> {
+export async function toPdf(c: ReportContent, aiSummary?: string | null): Promise<Buffer> {
+  // Loaded on first export only: the PDF library costs memory every report-free minute otherwise.
+  const { default: PDFDocument } = await import('pdfkit')
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 50, info: { Title: c.title } })
     const chunks: Buffer[] = []

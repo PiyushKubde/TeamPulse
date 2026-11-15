@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 if (existsSync('.env')) process.loadEnvFile('.env')
 // A separate database: the e2e run resets it.
-const E2E_DB = process.env.E2E_DATABASE_URL ?? (process.env.DATABASE_URL ?? '').replace(/\/[^/?]+(\?|$)/, '/workpulse_e2e$1')
+const E2E_DB = process.env.E2E_DATABASE_URL ?? `file:${process.cwd()}/data-e2e/e2e.db`
 
 export default defineConfig({
   testDir: 'e2e',

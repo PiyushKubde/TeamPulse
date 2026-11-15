@@ -1,47 +1,37 @@
 // Phone alerts through M91.
-//  • On-call: named conditions checked every minute in the API process → the on-call channel (send link).
+//  • On-call: named conditions checked every minute → the on-call channel (send link).
 //  • People: chosen moments → that person's own phone (API key), answered with buttons that KONVO acts on.
 // Every alert has two answers and a customId naming the condition; it is closed when the condition clears, which
 // re-arms it. Nothing here is wired into a generic error handler: only the conditions below ring anybody.
 import { prisma } from '../lib/prisma.js'
 import { logger } from '../config/logger.js'
 import { env, isTest } from '../config/env.js'
-import { redis, queue } from '../jobs/queues.js'
+import { pendingJobs } from '../jobs/queues.js'
 import * as m91 from '../lib/m91.js'
 import { notify } from './notify.js'
 import { chooseAssignee, recordAssignment } from './assignment.js'
 
-// ───────────── Shared failure counters (API and worker both write them) ─────────────
+// ───────────── Failure counters (one process, so plain memory) ─────────────
 
 export type Counter = 'ai' | 'email' | 'delivery'
+const failures = new Map<Counter, number>()
+const serverErrors = new Map<number, number>()
+const beats = new Map<'tick' | 'hourly', number>()
 export async function recordFailure(name: Counter) {
-  if (isTest) return
-  await redis()
-    .incr(`wp:fail:${name}`)
-    .catch(() => undefined)
+  if (!isTest) failures.set(name, (failures.get(name) ?? 0) + 1)
 }
 export async function recordSuccess(name: Counter) {
-  if (isTest) return
-  await redis()
-    .del(`wp:fail:${name}`)
-    .catch(() => undefined)
+  failures.delete(name)
 }
 /** Server errors per minute bucket, kept 10 minutes. Counting only; the monitor decides. */
 export async function recordServerError() {
   if (isTest) return
-  const k = `wp:5xx:${Math.floor(Date.now() / 60000)}`
-  await redis()
-    .multi()
-    .incr(k)
-    .expire(k, 600)
-    .exec()
-    .catch(() => undefined)
+  const m = Math.floor(Date.now() / 60000)
+  serverErrors.set(m, (serverErrors.get(m) ?? 0) + 1)
+  for (const k of serverErrors.keys()) if (k < m - 10) serverErrors.delete(k)
 }
-export async function heartbeat(name: 'worker' | 'hourly') {
-  if (isTest) return
-  await redis()
-    .set(`wp:beat:${name}`, String(Date.now()))
-    .catch(() => undefined)
+export async function heartbeat(name: 'tick' | 'hourly') {
+  beats.set(name, Date.now())
 }
 
 // ───────────── On-call channel ─────────────
@@ -101,8 +91,7 @@ const set = (cond: boolean, customId: string, sev: m91.AlertPayload['severity'],
 /** What the on-call channel watches. Shown on the Phone alerts page; customIds match checkOps() below. */
 export const ON_CALL_CONDITIONS = [
   { customId: 'workpulse-database-down', label: 'Database unreachable for 3 minutes', severity: 'CRITICAL' },
-  { customId: 'workpulse-redis-down', label: 'Redis unreachable for 3 minutes', severity: 'CRITICAL' },
-  { customId: 'workpulse-worker-stalled', label: 'Background worker stopped (imports, reminders, reports)', severity: 'HIGH' },
+  { customId: 'workpulse-worker-stalled', label: 'Scheduled jobs stopped (reminders, reports, phone answers)', severity: 'HIGH' },
   { customId: 'workpulse-ingest-backlog', label: 'Over 200 app events waiting for 10 minutes', severity: 'HIGH' },
   { customId: 'workpulse-sync-dead-linear', label: 'Linear sync failing for good (3+ in an hour)', severity: 'HIGH' },
   { customId: 'workpulse-sync-dead-jira-software-cloud', label: 'Jira sync failing for good (3+ in an hour)', severity: 'HIGH' },
@@ -114,56 +103,42 @@ export const ON_CALL_CONDITIONS = [
   { customId: 'workpulse-delivery-failing', label: 'Slack/Gmail delivery failing 5 times in a row', severity: 'MEDIUM' },
 ] as const
 
-const streak = { db: 0, redis: 0, backlog: 0 }
+const streak = { db: 0, backlog: 0 }
 const startedAt = Date.now()
 
 /** One pass of every on-call condition. Runs every minute in the API process. */
 export async function checkOps() {
   if (!m91.channelConfigured()) return
-  // 1. Database and Redis reachability (3 checks in a row ≈ 3 minutes).
+  // 1. Database reachable (3 checks in a row ≈ 3 minutes).
   const dbOk = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false)
   streak.db = dbOk ? 0 : streak.db + 1
-  const redisOk = await redis()
-    .ping()
-    .then(() => true)
-    .catch(() => false)
-  streak.redis = redisOk ? 0 : streak.redis + 1
   await set(
     streak.db >= 3,
     'workpulse-database-down',
     'CRITICAL',
     'KONVO database unreachable',
-    `The API has not reached PostgreSQL for ${streak.db} checks in a row. Every page and sync is failing.`,
+    `KONVO has not been able to read its database for ${streak.db} checks in a row. Every page and sync is failing.`,
   )
-  await set(
-    streak.redis >= 3,
-    'workpulse-redis-down',
-    'CRITICAL',
-    'KONVO Redis unreachable',
-    `The API has not reached Redis for ${streak.redis} checks in a row. Background jobs, imports and reminders are stopped.`,
-  )
-  if (!dbOk || !redisOk) return
+  if (!dbOk) return
 
-  // 2. Worker alive and running its hourly job.
-  const beat = Number(await redis().get('wp:beat:worker')) || 0
-  const hourly = Number(await redis().get('wp:beat:hourly')) || 0
-  const up = Date.now() - startedAt > 10 * 60000
-  const workerDown = up && Date.now() - beat > 10 * 60000
+  // 2. Scheduled jobs still running (the 5-minute tick and the hourly job).
+  const up = Date.now() - startedAt > 15 * 60000
+  const tick = beats.get('tick') ?? startedAt
+  const hourly = beats.get('hourly') ?? 0
+  const tickLate = up && Date.now() - tick > 15 * 60000
   const hourlyLate = up && hourly > 0 && Date.now() - hourly > 2 * 36e5
   await set(
-    workerDown || hourlyLate,
+    tickLate || hourlyLate,
     'workpulse-worker-stalled',
     'HIGH',
-    'KONVO background worker stopped',
-    workerDown
-      ? 'No heartbeat from the worker for over 10 minutes: imports, reminders and reports are not running.'
+    'KONVO scheduled jobs stopped',
+    tickLate
+      ? 'The 5-minute job has not run for over 15 minutes: phone answers, invitations and sync retries are waiting.'
       : 'The hourly job has not run for over 2 hours: reminders, escalations and daily reports are not going out.',
   )
 
   // 3. Ingestion backlog (over 200 waiting for 10 checks).
-  const waiting = await queue('ingest')
-    .getWaitingCount()
-    .catch(() => 0)
+  const waiting = pendingJobs('ingest')
   streak.backlog = waiting > 200 ? streak.backlog + 1 : 0
   await set(
     streak.backlog >= 10,
@@ -188,8 +163,7 @@ export async function checkOps() {
 
   // 5. Server errors (over 20 in 5 minutes).
   const minute = Math.floor(Date.now() / 60000)
-  const counts = await redis().mget(...[0, 1, 2, 3, 4].map((i) => `wp:5xx:${minute - i}`))
-  const errors = counts.reduce((a, c) => a + (Number(c) || 0), 0)
+  const errors = [0, 1, 2, 3, 4].reduce((a, i) => a + (serverErrors.get(minute - i) ?? 0), 0)
   await set(
     errors > 20,
     'workpulse-api-errors',
@@ -199,7 +173,7 @@ export async function checkOps() {
   )
 
   // 6–8. Email, AI and report delivery failing in a row.
-  const fail = async (n: Counter) => Number(await redis().get(`wp:fail:${n}`)) || 0
+  const fail = async (n: Counter) => failures.get(n) ?? 0
   const email = await fail('email')
   await set(
     email >= 3,

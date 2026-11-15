@@ -6,11 +6,20 @@ import { env, isTest } from './config/env.js'
 import { logger } from './config/logger.js'
 import { HttpError } from './lib/errors.js'
 import { loadSession } from './middleware/auth.js'
-import { auth } from './modules/auth.js'
+import { auth, startSession } from './modules/auth.js'
+import { finishGoogle } from './modules/google.js'
 import { orgs } from './modules/orgs.js'
 import { routes } from './modules/index.js'
+import { self } from './modules/people.js'
 import { events } from './integrations/events.js'
 import { recordServerError } from './services/phone-alerts.js'
+import { BACKGROUND, SCHEDULES, runSchedule, type ScheduleName } from './jobs/clock.js'
+import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { timingSafeEqual } from 'node:crypto'
+
+// The built web app (apps/web/dist), served by this same process in production.
+const WEB_DIST = fileURLToPath(new URL('../../web/dist/', import.meta.url))
 
 const allowedOrigins = new Set(
   env.CORS_ORIGINS.split(',')
@@ -43,6 +52,20 @@ export function createApp() {
 
   app.get('/health', (_req, res) => res.json({ ok: true }))
 
+  // Embarko's scheduler (embarko.json) calls these with "Bearer CRON_SECRET". Before the CSRF guard: no cookies here.
+  app.all('/api/internal/cron/:name', async (req, res) => {
+    const name = req.params.name as ScheduleName
+    const given = Buffer.from(req.get('authorization') ?? '')
+    const expected = Buffer.from(`Bearer ${env.CRON_SECRET ?? ''}`)
+    if (!env.CRON_SECRET || given.length !== expected.length || !timingSafeEqual(given, expected)) return res.sendStatus(401)
+    if (!(name in SCHEDULES)) return res.sendStatus(404)
+    if (BACKGROUND.includes(name)) {
+      void runSchedule(name).catch((e) => logger.error({ job: name, err: e instanceof Error ? e.message : e }, 'scheduled job failed'))
+      return res.status(202).send(`${name} started`)
+    }
+    res.send(`${name}: ${await runSchedule(name)}`)
+  })
+
   // Inbound events from viaSocket handlers: bearer-token auth, own body limit, no cookies, no CSRF header.
   app.use('/api/integrations/events', limiter(60_000, 600), express.json({ limit: '512kb' }), events)
 
@@ -73,10 +96,24 @@ export function createApp() {
     authLimit,
   )
   app.use('/api/auth', auth)
+  // The original KONVO registered this Google callback; keep it working so the existing Google client needs no change.
+  app.get('/auth/google/callback', authLimit, (req, res) => finishGoogle(req, res, startSession))
   app.use('/api/ai', limiter(60_000, 30))
-  app.use('/api', limiter(60_000, 600), orgs, routes)
+  app.use('/api', limiter(60_000, 600), self, orgs, routes)
 
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'not_found', 'No such endpoint.')))
+
+  // The web app: static files, and index.html for every other path (client-side routes such as /tasks).
+  if (existsSync(WEB_DIST) && !isTest) {
+    app.use(
+      express.static(WEB_DIST, {
+        index: false,
+        maxAge: '1h',
+        setHeaders: (res, path) => path.includes('/assets/') && res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'),
+      }),
+    )
+    app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile('index.html', { root: WEB_DIST, headers: { 'Cache-Control': 'no-cache' } }))
+  }
 
   const onError: ErrorRequestHandler = (err, req, res, _next) => {
     if (err instanceof HttpError) {

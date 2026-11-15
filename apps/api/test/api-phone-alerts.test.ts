@@ -175,7 +175,7 @@ describe('inviting a teammate with their number', () => {
   })
 })
 
-describe('on-call channel (needs Redis, like the job queues)', () => {
+describe('on-call channel', () => {
   it('raises one alert for a named condition and closes it when the condition clears', async () => {
     const { org } = await orgWithPeople()
     for (let i = 0; i < 3; i++)

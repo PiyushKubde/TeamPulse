@@ -7,7 +7,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
 }
 
 // ───────────── Identity & tenancy ─────────────
@@ -345,7 +345,8 @@ model Task {
   status         TaskStatus   @default(TODO)
   priority       Priority     @default(MEDIUM)
   category       String?
-  labels         String[]     @default([])
+  /// string[] (SQLite has no list columns)
+  labels         Json         @default("[]")
   assigneeId     String?
   creatorId      String
   dueAt          DateTime?
@@ -529,7 +530,8 @@ model DailyPlan {
   date         String
   /// [{ text, taskId? , done }] max 3
   topOutcomes  Json         @default("[]")
-  plannedTaskIds String[]   @default([])
+  /// string[] of task ids
+  plannedTaskIds Json       @default("[]")
   checkIn      String?
   energy       Int?
   review       String?

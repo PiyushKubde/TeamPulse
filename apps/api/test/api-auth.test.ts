@@ -16,6 +16,15 @@ describe('authentication', () => {
     expect((await c.get('/api/auth/me')).status).toBe(200)
   })
 
+  it('before joining any organization, a person can still save their timezone and phone (Google sign-ups do this first)', async () => {
+    const { c } = await signUp('Solo')
+    await c.patch('/api/me').send({ timezone: 'Asia/Kolkata' }).expect(200)
+    const r = await c.put('/api/me/phone').send({ phone: '+91 90000 00042' }).expect(200)
+    expect(r.body.phone).toBe('919000000042')
+    expect((await c.get('/api/me/phone-alerts')).status).toBe(200)
+    expect((await c.get('/api/tasks')).status).toBe(403) // org work still needs an organization
+  })
+
   it('rejects weak passwords and duplicate emails', async () => {
     const c = client()
     expect((await c.post('/api/auth/register').send({ name: 'A', email: 'a@x.com', password: 'short' })).status).toBe(400)

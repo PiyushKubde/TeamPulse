@@ -1,8 +1,8 @@
 {
-  "name": "workpulse",
+  "name": "konvo",
   "version": "0.1.0",
   "private": true,
-  "description": "WorkPulse: one workspace, every task, measurable impact.",
+  "description": "KONVO: AI work intelligence platform. From conversations to contribution.",
   "type": "module",
   "engines": {
     "node": ">=22.13"
@@ -25,8 +25,7 @@
     "start": "npm run start -w @workpulse/api",
     "db:deploy": "npm run db:deploy -w @workpulse/api",
     "viasocket:selftest": "npm run viasocket:selftest -w @workpulse/api",
-    "worker": "npm run start:worker -w @workpulse/api",
-    "dev:no-tunnel": "concurrently -k -n api,worker,web -c blue,magenta,green \"npm run dev -w @workpulse/api\" \"npm run worker:dev -w @workpulse/api\" \"npm run dev -w @workpulse/web\""
+    "dev:no-tunnel": "concurrently -k -n api,web -c blue,green \"npm run dev -w @workpulse/api\" \"npm run dev -w @workpulse/web\""
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
@@ -36,7 +35,6 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^16.5.0",
     "prettier": "3.10.1",
-    "typescript": "~6.0.3",
     "typescript-eslint": "^8.72.2"
   },
   "allowScripts": {
@@ -44,5 +42,8 @@
     "@prisma/engines@7.10.1": true,
     "esbuild@0.28.2": true,
     "msgpackr-extract@3.0.7": true
+  },
+  "dependencies": {
+    "typescript": "~6.0.3"
   }
 }

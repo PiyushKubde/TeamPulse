@@ -1,6 +1,6 @@
-// `npm run dev`: API + worker + web. When PUBLIC_API_URL is not set and ngrok is installed, opens a tunnel to the API
-// so viaSocket can deliver live events (Slack messages, Linear/Jira/GitHub changes) to this machine. The worker
-// re-points existing subscriptions to the new address on start-up.
+// `npm run dev`: API (with its background jobs and clock) + web. When PUBLIC_API_URL is not set and ngrok is installed,
+// opens a tunnel to the API so viaSocket can deliver live events (Slack messages, Linear/Jira/GitHub changes) to this
+// machine. The API re-points existing subscriptions to the new address on start-up.
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 
@@ -35,20 +35,9 @@ async function tunnel() {
 }
 
 await tunnel()
-const run = spawn(
-  'npx',
-  [
-    'concurrently',
-    '-k',
-    '-n',
-    'api,worker,web',
-    '-c',
-    'blue,magenta,green',
-    'npm run dev -w @workpulse/api',
-    'npm run worker:dev -w @workpulse/api',
-    'npm run dev -w @workpulse/web',
-  ],
-  { stdio: 'inherit', env },
-)
+const run = spawn('npx', ['concurrently', '-k', '-n', 'api,web', '-c', 'blue,green', 'npm run dev -w @workpulse/api', 'npm run dev -w @workpulse/web'], {
+  stdio: 'inherit',
+  env,
+})
 children.push(run)
 run.on('exit', (code) => (stop(), process.exit(code ?? 0)))

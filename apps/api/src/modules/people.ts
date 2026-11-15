@@ -10,7 +10,7 @@ import { MOMENTS, ON_CALL_CONDITIONS, connectPhone, type Moment } from '../servi
 import { assertAdmin, assertCanSeeUser, canManageUser, findVisibleTask, type Ctx } from '../lib/scope.js'
 import { audit } from '../lib/audit.js'
 import { isValidTz } from '../lib/dates.js'
-import { ctxOf, userOf } from '../middleware/auth.js'
+import { ctxOf, userOf, requireAuth } from '../middleware/auth.js'
 import { notify } from '../services/notify.js'
 
 export const people = Router()
@@ -243,9 +243,12 @@ people.post('/notifications/read', async (req, res) => {
   res.json({ ok: true })
 })
 
-// ───────────── Profile ─────────────
+// ───────────── Profile and phone (signed in, no organization needed: Google sign-ups give their number first) ─────────────
 
-people.patch('/me', async (req, res) => {
+export const self = Router()
+self.use('/me', requireAuth)
+
+self.patch('/me', async (req, res) => {
   const user = userOf(req)
   const input = body(
     req,
@@ -255,7 +258,7 @@ people.patch('/me', async (req, res) => {
   res.json({ user: updated })
 })
 
-people.get('/me/profile', async (req, res) => {
+self.get('/me/profile', async (req, res) => {
   const user = userOf(req)
   res.json({
     user: await prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { id: true, name: true, email: true, timezone: true, emailVerifiedAt: true } }),
@@ -290,12 +293,12 @@ const m91Message = (e: unknown) =>
       : e.message
     : 'M91 couldn’t be reached. Try again in a minute.'
 
-people.get('/me/phone-alerts', async (req, res) => {
+self.get('/me/phone-alerts', async (req, res) => {
   res.json(await phoneStatus(userOf(req).id))
 })
 
 /** Saves the number and sends the M91 invitation; the person accepts it in the M91 app. */
-people.put('/me/phone', async (req, res) => {
+self.put('/me/phone', async (req, res) => {
   const user = userOf(req)
   const { phone: raw } = body(req, z.object({ phone: z.string().min(6).max(20) }))
   const phone = m91.normalizePhone(raw)
@@ -305,7 +308,7 @@ people.put('/me/phone', async (req, res) => {
 })
 
 /** Re-reads the invitation (accepted yet?). Inviting again is how M91 reports the current state. */
-people.post('/me/phone/refresh', async (req, res) => {
+self.post('/me/phone/refresh', async (req, res) => {
   if (!m91.platformConfigured()) throw unavailable()
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userOf(req).id } })
   if (!user.phone) throw badRequest('Add your number first.')
@@ -318,7 +321,7 @@ people.post('/me/phone/refresh', async (req, res) => {
   res.json(await phoneStatus(user.id))
 })
 
-people.post('/me/phone/test', async (req, res) => {
+self.post('/me/phone/test', async (req, res) => {
   if (!m91.platformConfigured()) throw unavailable()
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userOf(req).id } })
   if (!user.phone) throw badRequest('Add your number first.')
@@ -347,14 +350,14 @@ people.post('/me/phone/test', async (req, res) => {
   }
 })
 
-people.patch('/me/alert-prefs', async (req, res) => {
+self.patch('/me/alert-prefs', async (req, res) => {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userOf(req).id } })
   const input = body(req, z.partialRecord(z.enum(Object.keys(MOMENTS) as [Moment, ...Moment[]]), z.boolean()))
   await prisma.user.update({ where: { id: user.id }, data: { alertPrefs: { ...(user.alertPrefs as object), ...input } } })
   res.json(await phoneStatus(user.id))
 })
 
-people.delete('/me/phone', async (req, res) => {
+self.delete('/me/phone', async (req, res) => {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userOf(req).id } })
   if (user.phone && m91.platformConfigured()) await m91.uninvite(user.phone).catch(() => undefined)
   await prisma.user.update({ where: { id: user.id }, data: { phone: null, phoneAlertState: null } })

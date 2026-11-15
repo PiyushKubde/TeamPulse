@@ -12,7 +12,7 @@ import {
   templateSchema,
 } from '@workpulse/shared'
 import type { z } from 'zod'
-import { prisma, type Prisma, type TaskStatus } from '../lib/prisma.js'
+import { prisma, type Prisma, type TaskStatus, strings } from '../lib/prisma.js'
 import { body, param, query } from '../lib/validate.js'
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js'
 import { assertAssignable, canEditTask, canManageUser, findEditableTask, findVisibleTask, taskScope, type Ctx } from '../lib/scope.js'
@@ -176,7 +176,8 @@ export async function updateTask(ctx: Ctx, id: string, input: z.infer<typeof tas
   const task = await prisma.$transaction(async (tx) => {
     if (goalIds) {
       await tx.taskGoal.deleteMany({ where: { taskId: id, goalId: { notIn: goalIds } } })
-      await tx.taskGoal.createMany({ data: goalIds.map((goalId) => ({ taskId: id, goalId })), skipDuplicates: true })
+      const have = new Set((await tx.taskGoal.findMany({ where: { taskId: id }, select: { goalId: true } })).map((g) => g.goalId))
+      await tx.taskGoal.createMany({ data: [...new Set(goalIds)].filter((g) => !have.has(g)).map((goalId) => ({ taskId: id, goalId })) })
     }
     if (dependsOnIds) {
       await tx.taskDependency.deleteMany({ where: { taskId: id } })
@@ -194,7 +195,7 @@ export async function updateTask(ctx: Ctx, id: string, input: z.infer<typeof tas
       description: before.description,
       priority: before.priority,
       category: before.category,
-      labels: before.labels,
+      labels: strings(before.labels),
       projectId: before.projectId,
       assigneeId: before.assigneeId,
       dueAt: due,
@@ -229,9 +230,10 @@ tasks.get('/tasks', async (req, res) => {
   if (q.q)
     and.push({
       OR: [
-        { title: { contains: q.q, mode: 'insensitive' } },
-        { description: { contains: q.q, mode: 'insensitive' } },
-        { source: { externalKey: { equals: q.q, mode: 'insensitive' } } },
+        // SQLite's LIKE (used by contains) ignores case for ASCII.
+        { title: { contains: q.q } },
+        { description: { contains: q.q } },
+        { source: { externalKey: { contains: q.q } } },
       ],
     })
   if (q.status) and.push({ status: { in: arr(q.status) } })

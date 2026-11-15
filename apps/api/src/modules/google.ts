@@ -15,7 +15,8 @@ const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const CERTS_URL = 'https://www.googleapis.com/oauth2/v3/certs'
 const ISSUERS = new Set(['accounts.google.com', 'https://accounts.google.com'])
 const COOKIE = 'konvo_oauth'
-const COOKIE_PATH = '/api/auth/google'
+// Readable on both callback paths (/api/auth/google/callback and the original KONVO /auth/google/callback).
+const COOKIE_PATH = '/'
 
 export const googleConfigured = () => Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET)
 const redirectUri = () => env.GOOGLE_REDIRECT_URI ?? `${env.APP_URL}/api/auth/google/callback`
