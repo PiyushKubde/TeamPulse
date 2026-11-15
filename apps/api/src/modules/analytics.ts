@@ -242,7 +242,14 @@ analytics.get('/analytics/team', async (req, res) => {
       select: { createdAt: true, resolvedAt: true, kind: true, task: { select: { projectId: true, project: { select: { name: true } } } } },
     }),
     q.teamId ? prisma.team.findUnique({ where: { id: q.teamId }, select: { id: true, name: true } }) : null,
-    goalAchievement(ctx.orgId, q.teamId ? { OR: [{ teamId: q.teamId }, { ownerId: { in: userIds } }] } : { ownerId: { in: userIds } }, from, to),
+    goalAchievement(
+      ctx.orgId,
+      q.teamId
+        ? { OR: [{ teamId: q.teamId }, { ownerId: { in: userIds } }] }
+        : { OR: [{ ownerId: { in: userIds } }, ...(ctx.managedTeamIds.length ? [{ teamId: { in: ctx.managedTeamIds } }] : [])] },
+      from,
+      to,
+    ),
     prisma.taskActivity.groupBy({ by: ['actorId'], where: { actorId: { in: userIds } }, _max: { createdAt: true } }),
     prisma.evidence.count({ where: { orgId: ctx.orgId, deletedAt: null, status: 'RECEIVED', task: { assigneeId: { in: userIds }, status: 'COMPLETED' } } }),
   ])

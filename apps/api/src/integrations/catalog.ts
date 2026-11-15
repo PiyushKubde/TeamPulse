@@ -174,7 +174,8 @@ export const PROVIDERS: Record<string, ProviderDef> = {
       },
     ],
     supportsTwoWay: false,
-    verifiedLiveAt: null,
+    // 2026-11-15: real message → task, confirmation posted, bot echo ignored (docs/viasocket-test-report.md).
+    verifiedLiveAt: '2026-11-15',
   },
   gmail: {
     slug: 'gmail',

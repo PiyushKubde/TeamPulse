@@ -52,7 +52,9 @@ INFO VIASOCKET_TEST_EMBED_TOKEN not set — token check skipped
 | `user.subscribe('slack', 'New_Message_Posted_in_Channel_Instant', v2)` on the owner's real Slack connection, channel `all-aryans-workspace` | PASS (subscription ACTIVE) |
 | `sampleEvent` for that trigger on the real connection | PASS: an Events API envelope (`event`, `team_id`, `event_id`, …); the adapter normalizes it; `token`, `authorizations` and `viasocketHelp` are stripped before storage |
 | ngrok tunnel → `/health` from the public URL | PASS |
-| A real Slack message arriving and becoming a task | waiting for a human message in the channel |
+| A real Slack message arriving and becoming a task | **PASS**: “i need to deploy one feature on m91…” → task “Deploy the feature on M91” (AI), 11:17 |
+| `Send_Message` through the per-user flow (confirmation) | **PASS**: AutomationExecution SUCCEEDED |
+| The confirmation (a bot message) is not re-ingested | **PASS**: event PROCESSED as “Bot, edited or system message” |
 
 ## B. BLOCKED: needs connected test accounts and a public URL
 

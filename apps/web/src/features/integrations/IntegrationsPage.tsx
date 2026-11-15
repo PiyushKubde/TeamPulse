@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { connect } from 'viasocket-apps/browser'
-import { AlertTriangle, CheckCircle2, CloudDownload, Info, Plug, RefreshCcw, Send, Unplug } from 'lucide-react'
+import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, CheckCircle2, CloudDownload, Info, Plug, RefreshCcw, Send, Unplug } from 'lucide-react'
 import { PRIORITIES, TASK_STATUSES } from '@workpulse/shared'
 import { api, errorMessage } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
@@ -53,6 +53,37 @@ interface Catalog {
 
 const STATUS_TONE = { ACTIVE: 'green', EXPIRED: 'amber', ERROR: 'red', REVOKED: 'neutral' } as const
 
+/** What a provider does in each direction, shown on its card. */
+function directions(p: Provider) {
+  const into = [
+    p.capabilities.includes('tasks') && (p.slug === 'github' ? 'tasks from issues (optional)' : 'tasks'),
+    p.capabilities.includes('evidence') && 'evidence',
+    p.capabilities.includes('intake') && 'tasks from messages',
+  ].filter(Boolean) as string[]
+  const out = [
+    p.capabilities.includes('delivery') && (p.slug === 'gmail' ? 'reports, WorkPulse system emails' : 'reports, alerts, task confirmations'),
+    p.supportsTwoWay && 'status updates (optional)',
+  ].filter(Boolean) as string[]
+  return { into, out }
+}
+
+function Direction({ dir, title, subtitle, children }: { dir: 'in' | 'out'; title: string; subtitle: string; children: React.ReactNode }) {
+  return (
+    <section className={`space-y-3 rounded-lg border bg-surface p-3 ${dir === 'in' ? 'border-teal/30' : 'border-primary/25'}`}>
+      <header className="flex items-center gap-2">
+        <span className={`flex size-6 items-center justify-center rounded-md ${dir === 'in' ? 'bg-teal-soft text-teal' : 'bg-primary-soft text-primary'}`}>
+          {dir === 'in' ? <ArrowDownToLine className="size-3.5" /> : <ArrowUpFromLine className="size-3.5" />}
+        </span>
+        <div>
+          <p className="text-sm font-semibold">{title}</p>
+          <p className="text-xs text-muted">{subtitle}</p>
+        </div>
+      </header>
+      {children}
+    </section>
+  )
+}
+
 export function IntegrationsPage() {
   const [tab, setTab] = useState('apps')
   const q = useQuery({ queryKey: ['integrations'], queryFn: () => api<Catalog>('/integrations') })
@@ -60,14 +91,14 @@ export function IntegrationsPage() {
     <div>
       <PageHeader
         title="Integrations"
-        description="Connect your own accounts. WorkPulse brings tasks in, collects evidence and delivers reports; each connection belongs to you and only acts for you."
+        description="Each connection works in two directions: into WorkPulse (new tasks and evidence arrive by themselves) and out of WorkPulse (reports, alerts and status updates are sent by themselves). Each connection belongs to you and only acts for you."
       />
       <Tabs
         value={tab}
         onValueChange={setTab}
         tabs={[
           { value: 'apps', label: 'Apps' },
-          { value: 'mappings', label: 'Mappings' },
+          { value: 'mappings', label: 'Unrecognised values' },
         ]}
       >
         <TabPanel value="apps">
@@ -155,12 +186,24 @@ function ProviderCard({ p, disabled }: { p: Provider; disabled: boolean }) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-semibold">{p.name}</p>
-            {p.capabilities.map((cap) => (
-              <Badge key={cap}>{cap === 'tasks' ? 'Task sync' : cap === 'evidence' ? 'Evidence' : 'Delivery'}</Badge>
-            ))}
             {p.verifiedLiveAt ? <Badge tone="green">Verified live</Badge> : <Badge tone="amber">Not yet verified with a live account</Badge>}
           </div>
-          <p className="mt-1 text-sm text-muted">{p.description}</p>
+          <div className="mt-2 grid gap-1 text-xs">
+            <p className="flex items-start gap-1.5">
+              <ArrowDownToLine className="mt-0.5 size-3.5 shrink-0 text-teal" />
+              <span>
+                <span className="font-medium text-ink">Into WorkPulse:</span>{' '}
+                <span className="text-ink-soft">{directions(p).into.join(', ') || 'nothing'}</span>
+              </span>
+            </p>
+            <p className="flex items-start gap-1.5">
+              <ArrowUpFromLine className="mt-0.5 size-3.5 shrink-0 text-primary" />
+              <span>
+                <span className="font-medium text-ink">Out of WorkPulse:</span>{' '}
+                <span className="text-ink-soft">{directions(p).out.join(', ') || 'nothing (read only)'}</span>
+              </span>
+            </p>
+          </div>
         </div>
         {p.connections.length === 0 && (
           <Button onClick={() => c.mutate(undefined)} loading={c.isPending} disabled={disabled}>
@@ -212,7 +255,6 @@ function ConnectionPanel({ p, conn, onReconnect }: { p: Provider; conn: Connecti
       toast.success('Disconnected and access revoked')
     },
   })
-  const isTasks = p.capabilities.includes('tasks') && p.slug !== 'github'
   const active = conn.subscriptions.filter((s) => !s.triggerKey.startsWith('flow:') && s.status === 'ACTIVE').length
   const configured =
     p.slug === 'linear'
@@ -248,157 +290,192 @@ function ConnectionPanel({ p, conn, onReconnect }: { p: Provider; conn: Connecti
       </div>
       {conn.lastError && <Notice tone="red">{conn.lastError}</Notice>}
 
-      {p.slug === 'linear' && (
-        <Picker
-          conn={conn}
-          fieldKey="team_id"
-          labelText="Linear team to sync"
-          value={settings.teamId}
-          display={settings.teamName}
-          onPick={(o) => save.mutate({ teamId: o.value, teamName: o.label })}
-        />
-      )}
-      {p.slug === 'jira-software-cloud' && (
-        <Picker
-          conn={conn}
-          fieldKey="project"
-          labelText="Jira project to sync"
-          value={settings.projectKey}
-          display={settings.projectName}
-          onPick={(o) => save.mutate({ projectKey: o.value, projectName: o.label })}
-        />
-      )}
-      {p.slug === 'github' && (
-        <div className="space-y-2">
-          <Picker
-            conn={conn}
-            fieldKey="repoFullName"
-            labelText="Add a repository"
-            onPick={(o) => !settings.repos?.includes(o.value) && save.mutate({ repos: [...(settings.repos ?? []), o.value].slice(0, 20) })}
-          />
-          <div className="flex flex-wrap gap-1.5">
-            {(settings.repos ?? []).map((r) => (
-              <Badge key={r} tone="blue">
-                {r}{' '}
-                <button aria-label={`Remove ${r}`} onClick={() => save.mutate({ repos: settings.repos!.filter((x) => x !== r) })}>
-                  ×
-                </button>
-              </Badge>
-            ))}
-          </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={Boolean(settings.importIssues)} onChange={(e) => save.mutate({ importIssues: e.target.checked })} /> Also import new
-            GitHub issues as tasks
-          </label>
-          <p className="text-xs text-muted">
-            Pull requests, commits and releases arrive as evidence. They attach to a task when they mention its key (e.g. ENG-42); otherwise they wait in
-            Reviews for you to match them.
-          </p>
-        </div>
-      )}
-      {p.slug === 'slack' && (
-        <div className="space-y-2 rounded-lg border border-line bg-surface p-3">
-          <Picker
-            conn={conn}
-            fieldKey="channel_id"
-            labelText="Turn messages in this channel into tasks"
-            value={settings.intake?.channelId}
-            display={settings.intake?.label}
-            onPick={(o) => save.mutate({ intake: { channelId: o.value, label: o.label } })}
-          />
-          <p className="text-xs text-muted">
-            Every message people post there is read by AI: work requests become tasks (title, priority, due date and assignee filled in), chatter is skipped,
-            and a confirmation is posted back. Bot messages, including WorkPulse’s own, are ignored. If you connected Slack before this feature, use “Reconnect
-            / update permissions” once.
-          </p>
-          {settings.intake?.channelId && (
-            <Button size="sm" variant="ghost" onClick={() => save.mutate({ intake: null })}>
-              Stop creating tasks from Slack
-            </Button>
-          )}
-        </div>
-      )}
-      {p.slug === 'slack' && (
-        <div className="space-y-2">
-          <Field label="Send reports and alerts to" htmlFor={`sl-${conn.id}`}>
-            <Select
-              id={`sl-${conn.id}`}
-              value={settings.delivery?.messageto ?? 'channel'}
-              onChange={(e) => setSettings({ ...settings, delivery: { messageto: e.target.value } })}
-            >
-              <option value="channel">A channel</option>
-              <option value="user">A direct message to me</option>
-            </Select>
-          </Field>
-          {(settings.delivery?.messageto ?? 'channel') === 'channel' ? (
+      <Direction dir="in" title="Into WorkPulse" subtitle={`What ${p.name} creates here, automatically`}>
+        {(p.slug === 'linear' || p.slug === 'jira-software-cloud') && (
+          <>
             <Picker
               conn={conn}
-              fieldKey="destination.channel_id"
-              labelText="Channel"
-              value={settings.delivery?.channelId}
-              display={settings.delivery?.label}
-              onPick={(o) => save.mutate({ delivery: { messageto: 'channel', channelId: o.value, label: o.label } })}
+              fieldKey={p.slug === 'linear' ? 'team_id' : 'project'}
+              labelText={p.slug === 'linear' ? 'Bring in issues from this Linear team' : 'Bring in issues from this Jira project'}
+              value={p.slug === 'linear' ? settings.teamId : settings.projectKey}
+              display={p.slug === 'linear' ? settings.teamName : settings.projectName}
+              onPick={(o) => save.mutate(p.slug === 'linear' ? { teamId: o.value, teamName: o.label } : { projectKey: o.value, projectName: o.label })}
             />
-          ) : (
+            <Field
+              label="How"
+              htmlFor={`mode-${conn.id}`}
+              hint={
+                mode === 'IMPORT_ONLY'
+                  ? 'Only what you import with the button below. Later changes in ' + p.name + ' are ignored.'
+                  : `New issues become tasks automatically, and edits, status changes and comments keep them up to date. Your impact ratings, assessments and evidence in WorkPulse are never overwritten.`
+              }
+            >
+              <Select
+                id={`mode-${conn.id}`}
+                value={mode === 'IMPORT_ONLY' ? 'IMPORT_ONLY' : 'SYNC'}
+                onChange={(e) => {
+                  const m = e.target.value === 'IMPORT_ONLY' ? 'IMPORT_ONLY' : 'ONE_WAY'
+                  setMode(m)
+                  save.mutate({ syncMode: m })
+                }}
+              >
+                <option value="SYNC">Keep in sync automatically</option>
+                <option value="IMPORT_ONLY">Import existing issues only</option>
+              </Select>
+            </Field>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="secondary" onClick={() => backfill.mutate()} loading={backfill.isPending} disabled={!configured}>
+                <CloudDownload /> Import existing issues (last 90 days)
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setPeopleOpen(true)}>
+                Match people
+              </Button>
+            </div>
+          </>
+        )}
+        {p.slug === 'github' && (
+          <>
             <Picker
               conn={conn}
-              fieldKey="destination.userId"
-              labelText="Choose yourself"
-              value={settings.delivery?.userId}
-              display={settings.delivery?.label}
-              onPick={(o) => save.mutate({ delivery: { messageto: 'user', userId: o.value, label: o.label } })}
+              fieldKey="repoFullName"
+              labelText="Watch a repository"
+              onPick={(o) => !settings.repos?.includes(o.value) && save.mutate({ repos: [...(settings.repos ?? []), o.value].slice(0, 20) })}
             />
-          )}
-        </div>
-      )}
-      {p.slug === 'gmail' && <p className="text-sm text-ink-soft">Reports you send by email go from this Gmail account to your own address.</p>}
-
-      {isTasks && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field
-            label="Sync mode"
-            htmlFor={`mode-${conn.id}`}
-            hint={
-              mode === 'IMPORT_ONLY'
-                ? 'One-time import; later changes are not synced.'
-                : mode === 'ONE_WAY'
-                  ? 'Changes flow into WorkPulse. Internal ratings and evidence are never overwritten.'
-                  : 'Status changes also flow back. Conflicts are shown for you to resolve.'
-            }
-          >
-            <Select
-              id={`mode-${conn.id}`}
-              value={mode}
-              onChange={(e) => {
-                const m = e.target.value as Connection['syncMode']
-                if (m === 'TWO_WAY' && !Object.keys(settings.statusMap ?? {}).length) {
-                  setStatusMapOpen(true)
-                  return
-                }
-                setMode(m)
-                save.mutate({ syncMode: m })
-              }}
-            >
-              <option value="IMPORT_ONLY">Import only</option>
-              <option value="ONE_WAY">One-way ({p.name} → WorkPulse)</option>
-              {p.supportsTwoWay && <option value="TWO_WAY">Two-way (status)</option>}
-            </Select>
-          </Field>
-          <div className="flex flex-wrap items-end gap-2">
-            <Button size="sm" variant="secondary" onClick={() => backfill.mutate()} loading={backfill.isPending} disabled={!configured}>
-              <CloudDownload /> Import existing issues
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setPeopleOpen(true)}>
-              Match people
-            </Button>
-            {p.supportsTwoWay && (
-              <Button size="sm" variant="ghost" onClick={() => setStatusMapOpen(true)}>
-                Status mapping
+            <div className="flex flex-wrap gap-1.5">
+              {(settings.repos ?? []).map((r) => (
+                <Badge key={r} tone="blue">
+                  {r}{' '}
+                  <button aria-label={`Remove ${r}`} onClick={() => save.mutate({ repos: settings.repos!.filter((x) => x !== r) })}>
+                    ×
+                  </button>
+                </Badge>
+              ))}
+            </div>
+            <p className="text-xs text-muted">
+              Pull requests, commits and releases arrive as <strong>evidence</strong> and attach to the task whose key they mention (e.g. ENG-42); the rest wait
+              in Reviews for you to match.
+            </p>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={Boolean(settings.importIssues)} onChange={(e) => save.mutate({ importIssues: e.target.checked })} /> Also create
+              tasks from new GitHub issues
+            </label>
+          </>
+        )}
+        {p.slug === 'slack' && (
+          <>
+            <Picker
+              conn={conn}
+              fieldKey="channel_id"
+              labelText="Turn messages in this channel into tasks"
+              value={settings.intake?.channelId}
+              display={settings.intake?.label}
+              onPick={(o) => save.mutate({ intake: { channelId: o.value, label: o.label } })}
+            />
+            <p className="text-xs text-muted">
+              AI reads every message posted there: work requests become tasks (title, priority, due date, assignee), chatter is skipped. Bot messages, including
+              WorkPulse’s own, are ignored.
+            </p>
+            {settings.intake?.channelId && (
+              <Button size="sm" variant="ghost" onClick={() => save.mutate({ intake: null })}>
+                Stop creating tasks from Slack
               </Button>
             )}
-          </div>
-        </div>
-      )}
+          </>
+        )}
+        {p.slug === 'gmail' && <p className="text-xs text-muted">Nothing: Gmail does not create tasks in WorkPulse.</p>}
+      </Direction>
+
+      <Direction dir="out" title="Out of WorkPulse" subtitle={`What WorkPulse sends to ${p.name}, automatically`}>
+        {p.slug === 'linear' && (
+          <>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                disabled={mode === 'IMPORT_ONLY'}
+                checked={mode === 'TWO_WAY'}
+                onChange={(e) => {
+                  if (e.target.checked && !Object.keys(settings.statusMap ?? {}).length) return setStatusMapOpen(true)
+                  const m = e.target.checked ? 'TWO_WAY' : 'ONE_WAY'
+                  setMode(m)
+                  save.mutate({ syncMode: m })
+                }}
+              />
+              <span>
+                Update the Linear issue when its status changes in WorkPulse
+                <span className="block text-xs text-muted">
+                  {mode === 'IMPORT_ONLY'
+                    ? 'Needs “Keep in sync automatically” above.'
+                    : 'If both sides change the same field before syncing, you choose which value wins.'}
+                </span>
+              </span>
+            </label>
+            <Button size="sm" variant="ghost" onClick={() => setStatusMapOpen(true)}>
+              Status mapping
+            </Button>
+          </>
+        )}
+        {(p.slug === 'jira-software-cloud' || p.slug === 'github') && (
+          <p className="text-xs text-muted">Nothing: WorkPulse only reads from {p.name}; it never changes anything there.</p>
+        )}
+        {p.slug === 'slack' && (
+          <>
+            <Field label="Send to" htmlFor={`sl-${conn.id}`}>
+              <Select
+                id={`sl-${conn.id}`}
+                value={settings.delivery?.messageto ?? 'channel'}
+                onChange={(e) => setSettings({ ...settings, delivery: { messageto: e.target.value } })}
+              >
+                <option value="channel">A channel</option>
+                <option value="user">A direct message to me</option>
+              </Select>
+            </Field>
+            {(settings.delivery?.messageto ?? 'channel') === 'channel' ? (
+              <Picker
+                conn={conn}
+                fieldKey="destination.channel_id"
+                labelText="Channel"
+                value={settings.delivery?.channelId}
+                display={settings.delivery?.label}
+                onPick={(o) => save.mutate({ delivery: { messageto: 'channel', channelId: o.value, label: o.label } })}
+              />
+            ) : (
+              <Picker
+                conn={conn}
+                fieldKey="destination.userId"
+                labelText="Choose yourself"
+                value={settings.delivery?.userId}
+                display={settings.delivery?.label}
+                onPick={(o) => save.mutate({ delivery: { messageto: 'user', userId: o.value, label: o.label } })}
+              />
+            )}
+            <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted">
+              <li>Daily report, weekdays 18:00 (your time zone)</li>
+              <li>Weekly report, Mondays</li>
+              <li>Blocker escalations for people you manage (blocked over 48 h)</li>
+              <li>“Task created” confirmations for messages turned into tasks</li>
+              <li>Any report you send with “Send to Slack”</li>
+            </ul>
+          </>
+        )}
+        {p.slug === 'gmail' && (
+          <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted">
+            <li>Reports you send with “Email me”, to your own address</li>
+            <li>When you are an owner or admin: WorkPulse’s own emails (verification, password reset, invitations) to anyone in the organization</li>
+          </ul>
+        )}
+        {p.capabilities.includes('delivery') && (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => test.mutate()}
+            loading={test.isPending}
+            disabled={p.slug === 'slack' && !(settings.delivery?.channelId || settings.delivery?.userId)}
+          >
+            <Send /> Send test message
+          </Button>
+        )}
+      </Direction>
 
       <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
         {configured ? (
@@ -407,11 +484,6 @@ function ConnectionPanel({ p, conn, onReconnect }: { p: Provider; conn: Connecti
           </span>
         ) : (
           <span className="text-xs text-warn">Finish the choices above to start syncing.</span>
-        )}
-        {p.capabilities.includes('delivery') && (
-          <Button size="sm" variant="secondary" onClick={() => test.mutate()} loading={test.isPending} disabled={!configured}>
-            <Send /> Send test message
-          </Button>
         )}
         <Link to={`/sync-history?connectionId=${conn.id}`} className="text-xs text-primary hover:underline">
           <RefreshCcw className="mr-1 inline size-3" />
@@ -703,11 +775,18 @@ function Mappings() {
   return (
     <div className="space-y-4">
       <Notice tone="blue">
-        Values WorkPulse did not recognise (a custom status like “QA Ready”) are imported with a safe default and flagged. Approve a mapping and the waiting
-        events are re-applied. AI suggestions are never applied without approval.
+        <p>
+          WorkPulse has a fixed set of statuses (Backlog, To do, In progress, In review, Blocked, Completed, Cancelled) and priorities. Linear and Jira let
+          teams invent their own, like a status called “QA Ready”. WorkPulse understands the common ones by itself (“In Progress”, “Done”, “Won’t Do”…).
+        </p>
+        <p className="mt-1.5">
+          When it meets one it doesn’t know, the task is still imported (as “To do”) and marked “Needs review”, and the value is listed here. AI suggests what
+          it probably means (for example “QA Ready” → In review). A manager or admin clicks <strong>Approve</strong> (or picks another value), and every task
+          waiting on it is corrected at once. From then on that value is understood automatically.
+        </p>
       </Notice>
       <Card>
-        <CardHeader title="Waiting for a decision" />
+        <CardHeader title="Waiting for a decision" description="Each row is a value from one of your apps that WorkPulse has not seen before." />
         {pending.length === 0 ? (
           <EmptyState title="Nothing waiting" />
         ) : (
