@@ -7,6 +7,7 @@
 //   node scripts/eval-measurement.mjs --dry-run                       build packs, check the dataset; no model calls
 //   node scripts/eval-measurement.mjs --provider=simulated            exercise the harness with the dev simulator
 //   node scripts/eval-measurement.mjs --provider=viasocket --confirm-live [--no-backup]   viaSocket AI (+ Anthropic backup if key set)
+//   node scripts/eval-measurement.mjs --provider=gemini --confirm-live   Gemini direct (GEMINI_API_KEY, GEMINI_MODEL); fictional dataset only
 //   AI_PROVIDER=anthropic ANTHROPIC_API_KEY=… \
 //   node scripts/eval-measurement.mjs --provider=anthropic --repeats=3 --confirm-live   real model (costs money)
 //
@@ -50,6 +51,9 @@ if (!dry) {
     if (!args['confirm-live']) { console.error('Refusing to call viaSocket AI without --confirm-live (it sends the fictional dataset to viaSocket, which stores each call as a thread).'); process.exit(2) }
     const vs = createViasocketGateway({ orgId: process.env.VIASOCKET_ORG_ID, projectId: process.env.VIASOCKET_PROJECT_ID, secret: process.env.VIASOCKET_EMBED_SECRET })
     provider = createAiProvider(loadConfig({ ai: { provider: 'viasocket', viasocketPolicyConfirmed: true /* fictional dataset only — never real employee data */, viasocketService: process.env.AI_VIASOCKET_SERVICE || 'anthropic', viasocketModel: process.env.AI_VIASOCKET_MODEL || 'claude-sonnet-5-5', apiKey: args['no-backup'] ? '' : process.env.ANTHROPIC_API_KEY || '', timeoutMs: Number(process.env.AI_TIMEOUT_MS) || 120000 }, production: true }), { vs })
+  } else if (providerName === 'gemini') {
+    if (!args['confirm-live']) { console.error('Refusing to call Gemini without --confirm-live (it sends the FICTIONAL dataset to Google using GEMINI_API_KEY and GEMINI_MODEL).'); process.exit(2) }
+    provider = createAiProvider({ production: false, ai: { provider: 'gemini', geminiPolicyConfirmed: true /* fictional dataset only: never real employee data */, geminiApiKey: process.env.GEMINI_API_KEY || '', geminiModel: process.env.GEMINI_MODEL || '', timeoutMs: Number(process.env.AI_TIMEOUT_MS) || 120000 } })
   } else if (providerName === 'simulated') {
     provider = createAiProvider({ production: false, ai: { provider: 'mock' } })
   } else { console.error(`Unknown --provider=${providerName}`); process.exit(2) }

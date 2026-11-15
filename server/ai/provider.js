@@ -5,10 +5,13 @@
 //   AI_PROVIDER=viasocket  viaSocket's built-in AI through the existing viaSocket keys; if ANTHROPIC_API_KEY is also
 //                          set, a failed viaSocket call is retried once on Anthropic (backup), and recorded as such
 //   AI_PROVIDER=anthropic  Claude through the official SDK (server-side key: ANTHROPIC_API_KEY)
+//   AI_PROVIDER=gemini     Google Gemini directly through the official @google/genai SDK (GEMINI_API_KEY, GEMINI_MODEL). Nothing is sent until
+//                          AI_GEMINI_POLICY_CONFIRMED=true, and there is NO fallback to any other provider
 //   AI_PROVIDER=mock       a deterministic SIMULATED analyser for local development and demos only — refused in
 //                          production, and every assessment it makes is labelled "simulated" in the UI
 //   (unset)                not configured: the app says so; no analysis is pretended
 import Anthropic from '@anthropic-ai/sdk'
+import { GoogleGenAI, ApiError as GeminiApiError } from '@google/genai'
 import { redact, registerSecret } from './redact.js'
 
 export class ProviderError extends Error {
@@ -20,9 +23,10 @@ export class ProviderError extends Error {
 // KONVO authorization/permission/business-rule errors, which are raised before any provider is called.
 export const BACKUP_ON = new Set(['timeout', 'network', 'provider_error', 'rate_limited', 'auth', 'invalid_output', 'truncated'])
 
-export function createAiProvider(cfg, { vs = null } = {}) {
+export function createAiProvider(cfg, { vs = null, genai = null } = {}) {
   const ai = cfg.ai || {}
   registerSecret(ai.apiKey)
+  registerSecret(ai.geminiApiKey)
   registerSecret(cfg.viasocket?.secret)
   if (ai.provider === 'viasocket') {
     // viaSocket stores every AI call as a thread, and its retention, deletion and training policies are unresolved
@@ -36,6 +40,13 @@ export function createAiProvider(cfg, { vs = null } = {}) {
     const primary = viasocketProvider(ai, vs)
     return ai.apiKey ? withBackup(primary, anthropicProvider(ai)) : primary
   }
+  if (ai.provider === 'gemini') {
+    // Privacy gate first: employee work data goes to Google only after the billing tier and data terms are confirmed. No other provider is used instead.
+    if (!ai.geminiPolicyConfirmed) return notConfigured('Gemini is not enabled: the Google data terms and billing tier are not confirmed yet (set AI_GEMINI_POLICY_CONFIRMED=true only after the Cloud project has active billing and the Google data processing terms are accepted for employee data).')
+    if (!ai.geminiApiKey) return notConfigured('AI_PROVIDER=gemini needs GEMINI_API_KEY.')
+    if (!ai.geminiModel) return notConfigured('AI_PROVIDER=gemini needs GEMINI_MODEL (no default is assumed).')
+    return geminiProvider(ai, genai)
+  }
   if (ai.provider === 'anthropic' && ai.apiKey) return anthropicProvider(ai)
   if (ai.provider === 'mock' && !cfg.production) return simulatedProvider()
   const reason = ai.provider === 'mock' ? 'AI_PROVIDER=mock is for local development only and is ignored in production.'
@@ -46,6 +57,66 @@ export function createAiProvider(cfg, { vs = null } = {}) {
 
 const notConfigured = (reason) => ({ configured: false, name: null, model: null, reason, async generate() { throw new ProviderError('not_configured', reason, false) } })
 const withNote = (p, note) => ({ ...p, note })
+
+// ---------- Google Gemini (direct, official SDK) ----------
+// One stateless request per analysis, JSON-schema output, no tools (so no search or code execution), no fallback.
+// The client is built from the explicit key; SDK retries are off (attempts: 1) because the evaluation engine owns
+// retries and records every attempt.
+function geminiProvider(ai, injected) {
+  const model = ai.geminiModel
+  const timeoutMs = ai.timeoutMs || 120000
+  const client = injected || new GoogleGenAI({ apiKey: ai.geminiApiKey, httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } } })
+  return {
+    configured: true, name: 'gemini', model, fallbacks: false,
+    async generate({ system, user, schema }) {
+      let res
+      try {
+        res = await client.models.generateContent({
+          model, contents: user,
+          config: { systemInstruction: system, responseMimeType: 'application/json', responseJsonSchema: schema, abortSignal: AbortSignal.timeout(timeoutMs) }
+        })
+      } catch (error) { throw mapGeminiError(error) }
+      return { ...readGeminiResponse(res, model), provider: 'gemini' }
+    }
+  }
+}
+
+/** Turns a Gemini response into { output, model, usage, ... } or a ProviderError. Exported for tests. */
+export function readGeminiResponse(res, requestedModel) {
+  const block = res?.promptFeedback?.blockReason
+  if (block) throw new ProviderError('refused', `Gemini declined to analyse this task (${String(block).slice(0, 40)}).`, false)
+  const cand = res?.candidates?.[0]
+  const reason = cand?.finishReason || null
+  if (reason === 'MAX_TOKENS') throw new ProviderError('truncated', 'The analysis was cut off before it finished.', true)
+  if (reason && !['STOP', 'FINISH_REASON_UNSPECIFIED'].includes(reason)) throw new ProviderError('refused', `Gemini stopped without an answer (${String(reason).slice(0, 40)}).`, false)
+  const text = (cand?.content?.parts || []).filter((x) => typeof x.text === 'string' && !x.thought).map((x) => x.text).join('')
+  if (!text.trim()) throw new ProviderError('invalid_output', 'Gemini returned no text.', true)
+  let output
+  try { output = JSON.parse(text) } catch { throw new ProviderError('invalid_output', 'Gemini did not return valid JSON.', true) }
+  if (!output || typeof output !== 'object' || Array.isArray(output)) throw new ProviderError('invalid_output', 'Gemini returned no answer object.', true)
+  const u = res.usageMetadata || {}
+  const served = res.modelVersion || requestedModel
+  return {
+    output, model: served, requestId: res.responseId ?? null, stopReason: reason,
+    usage: { input_tokens: u.promptTokenCount ?? null, output_tokens: u.candidatesTokenCount ?? null, thoughts_tokens: u.thoughtsTokenCount ?? null, cached_tokens: u.cachedContentTokenCount ?? null, total_tokens: u.totalTokenCount ?? null },
+    fallback: { used: false, requestedModel, servedModel: served, modelConfirmed: Boolean(res.modelVersion), hops: [] }
+  }
+}
+
+function mapGeminiError(error) {
+  if (error instanceof ProviderError) return error
+  if (error?.name === 'TimeoutError' || error?.name === 'AbortError') return new ProviderError('timeout', 'Gemini did not answer in time.', true)
+  const status = error instanceof GeminiApiError || typeof error?.status === 'number' ? error.status : null
+  if (status === 401 || status === 403) return new ProviderError('auth', `Gemini rejected the API key or the project access (${status}). Check GEMINI_API_KEY.`, false)
+  if (status === 404) return new ProviderError('not_found', 'Gemini does not know this model (404). Check GEMINI_MODEL.', false)
+  if (status === 400 || status === 422) return new ProviderError('bad_request', `Gemini rejected the request (${status}). Check GEMINI_MODEL and the schema.`, false)
+  if (status === 408) return new ProviderError('timeout', 'Gemini did not answer in time.', true)
+  if (status === 429) return new ProviderError('rate_limited', 'Gemini is rate limiting requests.', true)
+  if (status && status >= 500) return new ProviderError('provider_error', `Gemini failed (${status}).`, true)
+  if (status) return new ProviderError('provider_error', `Gemini returned ${status}.`, false)
+  if (error instanceof TypeError || /fetch failed|ECONN|ENOTFOUND|ETIMEDOUT|network/i.test(String(error?.message))) return new ProviderError('network', 'Could not reach Gemini.', true)
+  return new ProviderError('unknown', 'The Gemini call failed.', false)
+}
 
 // ---------- viaSocket built-in AI ----------
 // One stateless-looking call per analysis: a fresh thread id each time (viaSocket stores every thread; no earlier

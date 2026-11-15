@@ -56,6 +56,11 @@ export function loadConfig(overrides = {}) {
       viasocketModel: env.AI_VIASOCKET_MODEL || 'claude-sonnet-5-5',
       // Set to true ONLY after viaSocket has answered the open data-policy questions (docs/viasocket-ai-data-policy.md).
       viasocketPolicyConfirmed: env.AI_VIASOCKET_POLICY_CONFIRMED === 'true',
+      // Direct Google Gemini (server/ai/provider.js). The key comes only from GEMINI_API_KEY; there is NO default model (GEMINI_MODEL must be set explicitly).
+      geminiApiKey: env.GEMINI_API_KEY || '',
+      geminiModel: (env.GEMINI_MODEL || '').trim(),
+      // Defaults to false. Set to true ONLY after the Google Cloud project has active billing (paid terms) and the Google data processing terms are accepted for employee data.
+      geminiPolicyConfirmed: env.AI_GEMINI_POLICY_CONFIRMED === 'true',
       effort: env.AI_EFFORT || 'medium',
       timeoutMs: Number(env.AI_TIMEOUT_MS) || 120000,
       fallbacks: env.AI_FALLBACKS !== 'off',

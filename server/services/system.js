@@ -9,7 +9,8 @@ export function aiActivationSteps({ configured, simulated, requested, policyConf
   if (configured && simulated) return ['This is the development simulator. It is never real AI and is refused in production; nothing to activate here.']
   const steps = []
   if (!configured) {
-    steps.push('Choose a provider on the server: AI_PROVIDER=viasocket (with AI_VIASOCKET_SERVICE and AI_VIASOCKET_MODEL), or AI_PROVIDER=anthropic with ANTHROPIC_API_KEY.')
+    steps.push('Choose a provider on the server: AI_PROVIDER=viasocket (with AI_VIASOCKET_SERVICE and AI_VIASOCKET_MODEL), or AI_PROVIDER=gemini (with GEMINI_API_KEY and GEMINI_MODEL), or AI_PROVIDER=anthropic with ANTHROPIC_API_KEY.')
+    if (requested === 'gemini' && !policyConfirmed) steps.push('Gemini is chosen, but it stays off until the Google Cloud project has active billing and the Google data processing terms are accepted for employee data. Then set AI_GEMINI_POLICY_CONFIRMED=true (and GEMINI_API_KEY and GEMINI_MODEL).')
     if (requested === 'viasocket' && !policyConfirmed) steps.push('viaSocket is chosen, but it stays off until viaSocket has answered the data-policy questions (docs/viasocket-ai-data-policy.md). Then set AI_VIASOCKET_POLICY_CONFIRMED=true.')
   }
   if (mode !== 'on') steps.push('Set AI_MODE=on so every submitted task is assessed automatically. The default for a real provider is "supervised": admins only, selected tasks, no automatic runs.')
@@ -24,7 +25,7 @@ export function systemStatus(db, ctx, { cfg, ai, aiMode, vs, m91, mailer }) {
   const unassigned = db.prepare(`SELECT COUNT(*) AS n FROM memberships WHERE org_id = ? AND status = 'active' AND role = 'employee' AND team_id IS NULL`).get(ctx.orgId).n
   const deactivated = db.prepare(`SELECT COUNT(*) AS n FROM memberships WHERE org_id = ? AND status != 'active'`).get(ctx.orgId).n
   const teamsWithoutManager = db.prepare('SELECT COUNT(*) AS n FROM teams WHERE org_id = ? AND manager_id IS NULL').get(ctx.orgId).n
-  const policyConfirmed = Boolean(cfg.ai?.viasocketPolicyConfirmed)
+  const policyConfirmed = Boolean(cfg.ai?.provider === 'gemini' ? cfg.ai?.geminiPolicyConfirmed : cfg.ai?.viasocketPolicyConfirmed)
   const requested = cfg.ai?.provider || null
   const mode = aiMode.mode
   let backup = null
