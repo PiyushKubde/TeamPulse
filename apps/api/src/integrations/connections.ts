@@ -2,7 +2,7 @@
 // auth_id and every script_id are stored encrypted, per user, and used only for the user who owns them.
 import { prisma, type IntegrationConnection, type Prisma } from '../lib/prisma.js'
 import { decrypt, encrypt, randomToken, sha256 } from '../lib/crypto.js'
-import { badRequest, conflict, notFound, unavailable } from '../lib/errors.js'
+import { badRequest, notFound, unavailable } from '../lib/errors.js'
 import { env } from '../config/env.js'
 import { logger } from '../config/logger.js'
 import { PROVIDERS, provider, type ConnectionSettings, type ProviderDef } from './catalog.js'
@@ -50,8 +50,10 @@ export async function saveConnection(orgId: string, userId: string, slug: string
   if (!def) throw notFound('Integration')
   const vs = await assertOwnsAuth(userId, slug, authId)
   const hash = sha256(authId)
-  const existing = await prisma.integrationConnection.findUnique({ where: { userId_provider_authIdHash: { userId, provider: slug, authIdHash: hash } } })
-  if (existing && existing.orgId !== orgId) throw conflict('This account is already connected in another organization.')
+  // The same account may be connected in several organizations: each organization has its own connection.
+  const existing = await prisma.integrationConnection.findUnique({
+    where: { orgId_userId_provider_authIdHash: { orgId, userId, provider: slug, authIdHash: hash } },
+  })
   // Connecting the same app again (expired sign-in, more permissions) replaces the previous connection: its choices and
   // sync mode carry over and its flows are removed, so the user never ends up with two half-configured connections.
   const previous = await prisma.integrationConnection.findFirst({
@@ -59,7 +61,7 @@ export async function saveConnection(orgId: string, userId: string, slug: string
     orderBy: { updatedAt: 'desc' },
   })
   const conn = await prisma.integrationConnection.upsert({
-    where: { userId_provider_authIdHash: { userId, provider: slug, authIdHash: hash } },
+    where: { orgId_userId_provider_authIdHash: { orgId, userId, provider: slug, authIdHash: hash } },
     create: {
       orgId,
       userId,
@@ -256,8 +258,15 @@ export async function disconnect(conn: IntegrationConnection, revoke = true) {
   const user = viasocket().user(vsUserId(conn.userId))
   const subs = await prisma.integrationSubscription.findMany({ where: { connectionId: conn.id } })
   for (const s of subs) if (s.scriptIdEnc) await user.deleteFlow(decrypt(s.scriptIdEnc)).catch(() => undefined)
-  if (conn.enabledScriptIdEnc) await user.deleteFlow(decrypt(conn.enabledScriptIdEnc)).catch(() => undefined)
-  if (revoke) await user.revokeConnection(authIdOf(conn)).catch((e) => logger.warn({ err: e?.message }, 'revokeConnection failed'))
+  // The same account can be connected in another organization: keep its sign-in and the shared enabled app then.
+  const stillUsed = await prisma.integrationConnection.count({
+    where: { id: { not: conn.id }, userId: conn.userId, provider: conn.provider, status: { not: 'REVOKED' } },
+  })
+  const sameAuthElsewhere = await prisma.integrationConnection.count({
+    where: { id: { not: conn.id }, userId: conn.userId, provider: conn.provider, authIdHash: conn.authIdHash, status: { not: 'REVOKED' } },
+  })
+  if (conn.enabledScriptIdEnc && !stillUsed) await user.deleteFlow(decrypt(conn.enabledScriptIdEnc)).catch(() => undefined)
+  if (revoke && !sameAuthElsewhere) await user.revokeConnection(authIdOf(conn)).catch((e) => logger.warn({ err: e?.message }, 'revokeConnection failed'))
   await prisma.$transaction([
     prisma.integrationSubscription.deleteMany({ where: { connectionId: conn.id } }),
     prisma.integrationConnection.update({ where: { id: conn.id }, data: { status: 'REVOKED', enabledScriptIdEnc: null } }),

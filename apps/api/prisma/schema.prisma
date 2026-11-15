@@ -674,7 +674,8 @@ model IntegrationConnection {
   checkpoints SyncCheckpoint[]
   taskSources TaskSource[]
 
-  @@unique([userId, provider, authIdHash])
+  /// The same app account may be connected in several organizations; one connection per organization.
+  @@unique([orgId, userId, provider, authIdHash])
   @@index([orgId, provider])
 }
 

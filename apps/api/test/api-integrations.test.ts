@@ -576,3 +576,22 @@ describe('tunnel address changes', () => {
     }
   })
 })
+
+describe('the same account in several organizations', () => {
+  it('connects in each organization separately; disconnecting one keeps the other working', async () => {
+    const { owner } = await orgWithPeople()
+    fakeViasocket.addConnection(owner.user.id, 'slack', 'auth-shared')
+    const a = (await owner.c.post('/api/integrations/connect').send({ provider: 'slack', authId: 'auth-shared' }).expect(201)).body.connection
+    const second = (await owner.c.post('/api/organizations').send({ name: 'Second Org' }).expect(201)).body.organization
+    const b = (await owner.c.post('/api/integrations/connect').send({ provider: 'slack', authId: 'auth-shared' }).expect(201)).body.connection
+    expect(b.id).not.toBe(a.id)
+    expect((await prisma.integrationConnection.findUniqueOrThrow({ where: { id: b.id } })).orgId).toBe(second.id)
+    await owner.c.post('/api/integrations/disconnect').send({ connectionId: b.id }).expect(200)
+    expect(fakeViasocket.revoked).toEqual([])
+    expect((await prisma.integrationConnection.findUniqueOrThrow({ where: { id: a.id } })).status).toBe('ACTIVE')
+    const first = await prisma.organizationMember.findFirstOrThrow({ where: { userId: owner.user.id, orgId: { not: second.id } } })
+    await owner.c.post(`/api/organizations/${first.orgId}/switch`).expect(200)
+    await owner.c.post('/api/integrations/disconnect').send({ connectionId: a.id }).expect(200)
+    expect(fakeViasocket.revoked).toEqual(['auth-shared'])
+  })
+})
