@@ -1,17 +1,13 @@
 // Team assignment journey (Playwright, Chromium), on disposable demo data (never ./data): an admin invites an employee without a team, assigns and changes the team in the browser,
 // the manager then sees the person and their work, and permissions and team isolation hold. This covers plain task review, NOT the AI contribution assessment (see e2e-roles).
 // Usage: npm run test:e2e:team-assignment
-/* global document, window */
 import { spawn, execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
-import assert from 'node:assert/strict'
 const { chromium } = createRequire(import.meta.url)('playwright')
 
-const shots = process.env.SCREENSHOTS || null
-if (shots) mkdirSync(shots, { recursive: true })
 const stops = []
 let nextPort = 4600 + Math.floor(Math.random() * 60)
 async function boot(extra = {}) {
@@ -31,8 +27,6 @@ const problems = []
 let step = ''
 let base = ''
 const ok = (cond, msg) => { if (!cond) throw new Error(`Check failed: ${msg}`) }
-const overflow = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
-const shot = async (page, name, full = true) => { if (shots) { await page.evaluate(() => window.scrollTo(0, 0)); await page.screenshot({ path: join(shots, `${name}.png`), fullPage: full }) } }
 async function session(email, { viewport = { width: 1440, height: 900 }, mobile = false } = {}) {
   const ctx = await browser.newContext({ viewport, ...(mobile ? { isMobile: true, hasTouch: true } : {}) })
   const page = await ctx.newPage()
@@ -48,7 +42,6 @@ async function session(email, { viewport = { width: 1440, height: 900 }, mobile 
 }
 const api = async (ctx, path, method = 'GET', body) => { const r = await ctx.request.fetch(base + path, { method, headers: { 'X-Requested-With': 'TeamPulse', ...(body ? { 'Content-Type': 'application/json' } : {}) }, data: body ? JSON.stringify(body) : undefined }); return { status: r.status(), body: await r.json().catch(() => null) } }
 const go = async (page, hash) => { await page.goto(`${base}/${hash}`); await page.waitForSelector('main h1'); await page.waitForTimeout(250) }
-const topNames = (page) => page.locator('#nav > .nav-group:not(.nav-section ~ .nav-group) > .nav-top').allTextContents().then((a) => a.map((t) => t.replace(/\s*\d+\s*$/, '').trim()))
 
 
 const FREE = 'newhire@demo.teampulse'
