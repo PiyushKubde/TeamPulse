@@ -1,0 +1,14 @@
+{
+  "name": "KONVO",
+  "short_name": "KONVO",
+  "description": "AI Work Intelligence Platform. From conversations to contribution.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F2F7F8",
+  "theme_color": "#F2F7F8",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

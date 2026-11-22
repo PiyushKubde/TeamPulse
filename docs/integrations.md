@@ -1,73 +1,63 @@
-# Integrations
+# Integrations setup
 
-## Google sign-in
+KONVO uses viaSocket for every external app: sign-in, tokens, webhooks and the AI. The server needs three values.
+The person who owns the viaSocket workspace gets them once:
 
-1. Google Cloud Console → **APIs & Services → OAuth consent screen**: set the app name, support email, and scopes `openid`, `email`, `profile`.
-2. **Credentials → Create credentials → OAuth client ID → Web application**.
-3. Authorized redirect URIs:
-   - `http://localhost:3000/auth/google/callback` (local)
-   - `https://<app-name>.embarko.app/auth/google/callback` (Embarko; also any custom domain)
-4. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` (exactly one of the URIs above).
+```bash
+npx -y viasocket-apps setup --no-open     # prints a sign-in link; click Allow; writes .env
+```
 
-Flow: `/auth/google` stores state, nonce and a PKCE verifier server-side (10 minutes, single use) → Google → `/auth/google/callback` exchanges the code, verifies the ID token's RS256 signature against Google's JWKS, issuer, audience, expiry and nonce, then upserts the user by `sub`. A new user has no role until they create an organization, accept an invitation sent to their Google-verified email, or have a join request approved.
+or copies them from https://flow.viasocket.com/embed-keys?project=<project id> into `.env`:
 
-**Status:** implemented and covered by tests with a simulated Google (signed tokens, forged signature, wrong audience/nonce/issuer, expiry). A live Google sign-in needs the credentials above.
+```
+VIASOCKET_ORG_ID=…
+VIASOCKET_PROJECT_ID=…
+VIASOCKET_EMBED_SECRET=…    # server only; never in frontend code, logs or Git
+```
 
-## ViaSocket
+Check them with `npm run viasocket:selftest`.
 
-KONVO uses `viasocket-apps` **0.19.0** (apps by slug, actions and triggers by key with a pinned version). The plan,
-every value and who supplies it: [`viasocket-plan.md`](../viasocket-plan.md). Keys: `VIASOCKET_ORG_ID`,
-`VIASOCKET_PROJECT_ID`, `VIASOCKET_EMBED_SECRET` (server only).
+## Live sync needs a public address
 
-| | What | Whose account | Where in KONVO |
-| --- | --- | --- | --- |
-| A1 | Task assigned to me → Slack DM / channel or Gmail | the person's own | Settings → Profile → My notifications |
-| A2 | Task assigned in my team → team channel / DM me / email assignee / email me | the manager's own | Automation Center → Ready-made |
-| B | Weekly report (Mondays 09:05 IST) → Slack or Gmail; managers: their teams, admins: organization | the manager's / admin's own | Automation Center → Ready-made; Reports |
-| C | Gmail label / Slack channel → **pending** task requests | the manager's own | Automation Center → Ready-made → Gmail / Slack intake |
-| D | Full builder; restricted builders from My Tasks, Team Tasks, Reports | the person's own | Automation Center → Advanced builder; "Automate" buttons |
+`npm run dev` opens an ngrok tunnel automatically when `PUBLIC_API_URL` is empty and ngrok is installed and signed in;
+the worker re-points every subscription to the current address on start-up.
 
-Isolation: every connection, enabled flow (`script_id`), subscription and flow belongs to one KONVO user id; the
-server checks ownership before every run; only the per-user embed token reaches the browser.
-Loops and duplicates: every outgoing message carries "Sent by TeamPulse" and the intake ignores it; Slack bot posts and
-thread replies are ignored; an intake channel can never also be an outgoing channel; each email/message creates at most
-one request (`externalRef` = message id); intake never assigns or approves.
+Triggers (new or updated issues, PRs, Slack messages) are delivered by viaSocket to
+`$PUBLIC_API_URL/api/integrations/events/<provider>/<subscriptionId>`. Without `PUBLIC_API_URL` you can still connect,
+import existing issues and send reports; live sync stays off and the Integrations page says so. Locally, use a tunnel:
 
-## M91 (MSG91) alerts
+```bash
+cloudflared tunnel --url http://localhost:4000      # then set PUBLIC_API_URL to the https URL it prints
+```
 
-M91 rings a person's phone (through silent mode) until they answer, and returns the answer to the software.
-Implemented against the official contract, https://m91-api.msg91.com/api/public/api.md (Platform API, read 2026-11-09):
+After changing `PUBLIC_API_URL`, re-save each connection's choices so the handlers point at the new address.
 
-| Step | Call | KONVO |
-| --- | --- | --- |
-| Invite a person | `POST /api/v1/recipients {phone, label}` | when someone saves a phone in *Settings → Profile*; they must accept in the M91 app |
-| Raise an alert | `POST /api/v1/alerts {phone, title, description, severity, responseOptions, other, isAutoClose, customId, callbackUrl}` | queued per alert rule with M91 switched on; `customId` = stable hash per condition and person, so repeats never ring twice |
-| Answer / close callback | M91 → `POST /api/webhooks/m91?token=<M91_CALLBACK_TOKEN>` | stored once per `idempotencyKey`; the alert is **read back** (`GET /api/v1/alerts/:id?phone=`) before anything is recorded, because M91's callback signature cannot be verified yet |
-| Resolve | `POST /api/v1/alerts/close {phone, alertId}` | when the task is completed/cancelled, the blockers are resolved, or an unassigned task gets an owner |
+## Per app
 
-Severity per rule: deadline missed and critical task blocked → `HIGH` (M91 phones after 3 minutes if nobody opened it); deadline approaching, no progress, unassigned, blocker unresolved → `MEDIUM`; others `LOW`. `CRITICAL` is never sent automatically.
-Buttons: "I’m on it" (`SHARED`, closes it) and "Seen" (`PERSONAL`); free-text replies on. The answer appears in *Alerts → M91 alert history* and on the task's history.
-Failure handling: 429, 5xx and network errors retry with backoff (1, 2, 4, 8 min; 5 attempts); 4xx (not invited, not accepted, validation) fail without retry and say why; people without a phone are `SKIPPED`; admins can retry from the history page.
+| App | What the user chooses once | What happens |
+|---|---|---|
+| Linear | team; sync mode; optional status map for two-way; optional people matching | new/updated issues and comments sync; **Import existing issues** backfills 90 days; two-way pushes status changes |
+| Jira | project; sync mode; people matching | new/updated issues sync; import via JQL |
+| GitHub | repositories; optionally "import new issues as tasks" | PRs, commits and releases become evidence, matched to a task by key (ENG-42 / PROJ-7 / org/repo#12); others wait in Reviews → Unmatched |
+| Slack | a channel to turn into tasks; a channel or DM for reports | every human message in the intake channel is read by AI: work requests become tasks (title, priority, due date, assignee when a real member is named), chatter is skipped, a confirmation is posted back; bot messages are ignored. Reports and blocker escalations go to the delivery destination |
+| Gmail | (none) | reports emailed from your account to your own address. When an owner/admin connects Gmail and no SMTP is set, it also sends KONVO's system email (verification, password reset, invitations) |
 
-### Channel mode (send link) — configured for "New test"
+## Sync modes
 
-Contract: https://m91-api.msg91.com/llms.txt (read 2026-11-09). With `M91_SEND_LINK` set, KONVO alerts **one M91 channel** instead of individual phones:
+- **Import only**: a one-time backfill; later changes are not applied.
+- **One-way** (default): external changes update the external-owned fields (title, description, status, priority,
+  assignee, due date, labels). Impact, complexity, assessments, evidence verification and feedback are never touched.
+- **Two-way** (Linear, opt-in): status changes in KONVO are pushed to the mapped Linear state. A field changed on both
+  sides since the last sync becomes a conflict for a person to resolve. Nothing is overwritten silently.
 
-| Step | Call | KONVO |
-| --- | --- | --- |
-| Connection test | `GET <link>` (no `title` → raises nothing) | used once to confirm the channel: **"New test"** (public), confirmed by the owner on 2026-11-09 |
-| Raise an alert | `POST <link> {title, description, severity, responseOptions, other, isAutoClose, customId, callbackUrl}` | same queue, retries and per-rule M91 switch; the title names the person it is about; `customId` is per **condition** (not per person), so one condition rings the channel once |
-| Read back / close | `GET <link>/alerts/:id`, `POST <link>/close {alertId}` | as in person mode |
+## Unknown values
 
-- **No invites:** no phone is needed and nobody is invited. People join the channel in the M91 app.
-- **The link is a credential:** anyone holding it can alert the channel. It lives only in the server's environment, never in source or Git, and redaction removes it from logs and stored errors.
-- **Precedence:** it takes precedence over `M91_API_KEY`.
-- **Activation:**
-  1. Set `M91_SEND_LINK` (and `M91_CALLBACK_TOKEN` for answers) in the app's environment.
-  2. Turn on M91 in *Settings → Alert settings*.
-  3. Choose which rules use M91.
-- **Status:** tested against a stand-in (`test/m91-channel.test.js`). **No real alert has been sent.** Before relying on it, send M91's quickstart test alert (LOW, auto-close) and check that `delivered > 0`; the owner chose to do this later.
+A status or priority KONVO doesn't recognise is imported with a safe default (TODO / MEDIUM) and the task is flagged
+**Needs review**. With AI enabled, a suggested mapping and confidence are recorded. A manager or admin approves or
+changes it in **Integrations → Mappings**, and the waiting events are re-applied.
 
-**To activate (person mode):** in the M91 app create an API key (*Settings → API keys*, `m91sk_…`), set `M91_API_KEY` and a random `M91_CALLBACK_TOKEN` (e.g. `openssl rand -hex 24`), make sure `APP_URL` is the https address, then turn on M91 in *Settings → Alert settings*. Each person adds their phone in *Settings → Profile* and accepts the invitation in the M91 app.
+## AI
 
-**Status:** request/response shapes are covered by contract tests (stubbed `fetch`, `test/m91.test.js`) and the lifecycle by API tests. A live alert has not been sent: no `M91_API_KEY` was available.
+`AI_PROVIDER=viasocket` (default) uses OpenAI models through viaSocket with the same three keys: no model key, billed by
+viaSocket. `AI_PROVIDER=openai` uses `OPENAI_API_KEY` directly. AI is on whenever its credentials are present (the
+separate data-policy switch was removed at the owner's request on 2026-11-15); `AI_PROVIDER=` (empty) turns it off.

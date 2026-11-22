@@ -1,96 +1,57 @@
-# ViaSocket plan — TeamPulse (A, B, C, D)
+# viaSocket plan — KONVO
 
-Status: **APPROVED with changes (2026-11-09) — BUILT.** Changes from the person: both A1 and A2 (managers can also notify themselves); B one report per manager for their own teams plus an organization-wide report for admins, no duplicates; C both Gmail and Slack; D Slack, Gmail and Google Sheets first, Google Calendar and GitHub secondary. Source of truth: https://viasocket.com/docs/skill.md?format=sdk (skill `2026-11-04.3`),
-with the `viasocket-apps` package (upgrade 0.7.0 → 0.19.0: apps by slug, actions by key + pinned version, triggers by `subscribe`).
+Status: **APPROVED 2026-11-15** ("Proceed with the KONVO build"; AI via viaSocket's AI API with OpenAI models, added the same day).
+Skill: `viasocket-integrations/SKILL.md` version `2026-11-14.1` → https://viasocket.com/docs/skill.md?format=sdk, pages
+`app-integrations`, `actions-and-events`, `automations`, `setup`, `ai`, `journey`. SDK: `viasocket-apps@0.19.0` (types read).
+Every key, version and id below is in `apps/api/src/integrations/catalog.ts`. They were checked against the live listing by
+`npm run viasocket:selftest` and against the catalog by `npx -y viasocket-apps check` (0 FAIL).
 
-## Scoping (all four)
+## Who connects, where things run
 
-- viaSocket `userId` = the TeamPulse user's id (UUID), never an email. Every connection, enabled app (`script_id`) and
-  subscription belongs to exactly one TeamPulse user and is used only on that user's behalf.
-- `auth_id` and every `script_id` stay on the server; before any run the server checks the signed-in user owns it.
-  The browser only gets that user's embed token.
-- Automations only send messages or create **pending** task requests. They never create, assign or approve tasks, so
-  TeamPulse's approval and permission rules are untouched.
+- Each KONVO user connects **their own** account with the Connect button (`viasocket-apps/browser` `connect()`, embed
+  token signed per user on the server). viaSocket end-user id = KONVO user id (UUID), never the email.
+- The `auth_id` is accepted only if it is in **that user's** `listConnections()` for that app's `service_id`. It is stored
+  AES-GCM encrypted. Expired connections show **Reconnect**, which updates the same `auth_id` in place.
+- Every `script_id` (subscriptions, action flows, enabled app) is stored encrypted, used only for its owner, and never
+  sent to the browser.
 
-## A. Task assigned → Slack / Gmail
+## Table
 
-A1 (new, the default): each employee turns on "Notify me" in *Settings → Profile* with **their own** Slack or Gmail.
-A2: each manager, for tasks they manage: a team Slack channel, a Slack DM to themselves, an email to the assignee, or an email to themselves — from the manager's own connection.
-Who picks the action: TeamPulse's code (on every assignment), from the channel the user chose.
+| app | action / trigger (key, version) | `inputData` key | who supplies it | when |
+|---|---|---|---|---|
+| linear | trigger `New_Issue_Created` v1 | `team_id` | the user, from their Linear teams (PICK, `listOptions` on this trigger) | once, after Connect |
+| linear | trigger `Updated_Issue` v2 | `team_id` | same stored choice | once, after Connect |
+| linear | trigger `New_Issue_Comment` v1 | `team_id` | same stored choice | once, after Connect |
+| linear | action `Update_Issue_Status` v3 (flow, TWO_WAY only) | `teams` | stored team | once, after Connect |
+| linear | action `Update_Issue_Status` v3 | `issue` | KONVO: the task's stored external id | per run |
+| linear | action `Update_Issue_Status` v3 | `stateID` | the user's status map (PICK, `listOptions` with `teams`) | once, when enabling two-way |
+| linear | `runCode` on the enabled app (Linear GraphQL, backfill) | `team`, `after`, `since` | stored team, page cursor, checkpoint | per run (import) |
+| jira-software-cloud | trigger `New_Issue` v2 | `project` | the user (PICK) | once, after Connect |
+| jira-software-cloud | trigger `New_Issue` v2 / `Updated_Issue` v4 | `status` | left out on purpose: all statuses sync | — |
+| jira-software-cloud | trigger `Updated_Issue` v4 | `project` | stored project (PICK via this trigger) | once, after Connect |
+| jira-software-cloud | action `Find_Issue_via_JQL` v1 (flow, backfill) | `jql` | KONVO builds `project = "<stored>" AND updated >= "<checkpoint>"` from validated values | per run |
+| github | trigger `Pull_Request_Opens_or_Closes` v22 | `repoFullName` | the user picks repositories (PICK); one subscription per repo | once, after Connect |
+| github | trigger `New_Commit_Pushed` v6 | `repoFullName` / `sha` | stored repo / constant `main` (the trigger's own default branch) | once |
+| github | trigger `New_Release_Published` v6 | `repoFullName` | stored repo | once |
+| github | trigger `When_a_new_issue_is_created` v7 | `repoFullName` | stored repo; only when the user turns on "import GitHub issues as tasks" | once |
+| slack | trigger `New_Message_Posted_in_Channel_Instant` v2 (added 2026-11-15) | `channel_id` | the user picks the intake channel (PICK, `listOptions` on this trigger) | once, after Connect |
+| slack | action `Send_Message` v107 (per-user webhook flow) | `destination.messageto` | the user: a channel or a DM to themselves | once, at setup |
+| slack | action `Send_Message` v107 | `destination.channel_id` / `destination.userId` | the user (PICK) | once, at setup |
+| slack | action `Send_Message` v107 | `markdown_content` | KONVO report or alert text (AI summary paragraph optional, validated, length-capped) | per run |
+| slack | action `Send_Message` v107 | thread keys, `tagged_users`, `buttons`, `schedule_type`, `bot_details`, `preview` | left out on purpose (plain immediate post) | — |
+| gmail | action `Send_Email` v55 (per-user webhook flow) | `to` | KONVO: the user's own verified email (constant per user, baked into the flow) | once, at setup |
+| gmail | action `Send_Email` v55 | `subject`, `messageBody` | KONVO report content | per run |
+| gmail | action `Send_Email` v55 (system mail flow of the sending owner/admin) | `to`, `subject`, `messageBody` | KONVO: the recipient of a verification, reset or invitation email (validated) | per run |
+| gmail | action `Send_Email` v55 | `fromName` | constant `KONVO` | — |
+| gmail | action `Send_Email` v55 | `from`, `cc`, `bcc`, `replyTo`, `attachments`, `labelIds` | left out on purpose (sends as the connected account) | — |
+| viaSocket AI | `user.ai.send` (`json_schema`, strict) | message, prompt, schema | KONVO code; model `openai/gpt-6-luna` (structured) and `openai/gpt-6.1-terra` (assistant) | per run |
 
-| app | action (key, version) | key of `inputData` | who supplies it | when |
-| --- | --- | --- | --- | --- |
-| slack | `Send_Message` `v107` | `destination.messageto` | the employee: "DM me" (`user`) or "a channel" (`channel`) | once, after Connect |
-| slack | `Send_Message` `v107` | `destination.userId` | the employee picks themself (PICK "Users") | once, after Connect |
-| slack | `Send_Message` `v107` | `destination.channel_id` | the user picks a channel (PICK "Channels") | once, after Connect / at setup |
-| slack | `Send_Message` `v107` | `markdown_content` | TeamPulse: task title, priority, due date, link | per run |
-| slack | `Send_Message` `v107` | thread keys, `tagged_users`, `buttons`, `schedule_type`, `bot_details`, `preview` | left out on purpose (plain immediate post) | — |
-| gmail | `Send_Email` `v55` | `to` | TeamPulse: the assignee's Google-verified email | per run |
-| gmail | `Send_Email` `v55` | `subject`, `messageBody` | TeamPulse: task details + link | per run |
-| gmail | `Send_Email` `v55` | `fromName` | constant `TeamPulse` (same for every user) | — |
-| gmail | `Send_Email` `v55` | `from`, `cc`, `bcc`, `replyTo`, `attachments`, `labelIds` | left out on purpose (sends as the connected account) | — |
+**Who picks each action:** always KONVO's code, from the allowlist. Actions fixed in code (`Send_Message`, `Send_Email`,
+`Update_Issue_Status`, `Find_Issue_via_JQL`) are each a **flow per user**: webhook trigger, one step, created with the
+automations API and stored as `flow:<name>`. Triggers are `user.subscribe` with a handler that POSTs `context.req.body` to
+KONVO's events endpoint with a per-subscription bearer token. The only enabled app is Linear's, used solely for the
+backfill `runCode`; no `script_id` is ever given to an AI. **The AI never picks an action.** The assistant's tools are
+KONVO's own read-only functions, run under the caller's permissions.
 
-## B. Weekly team report (Mondays 09:05 IST, Embarko schedule)
-
-Each manager gets their own report for **their own teams**; each admin gets the **organization-wide** report. One report row and at most one delivery per person per week (dedupe keys).
-Same two actions as A, from the manager's own connection.
-
-| app | action | key | who supplies it | when |
-| --- | --- | --- | --- | --- |
-| slack | `Send_Message` `v107` | `destination.messageto` | constant `channel` | — |
-| slack | `Send_Message` `v107` | `destination.channel_id` | the manager (PICK "Channels") | once, at setup |
-| slack / gmail | `markdown_content` / `messageBody`, `subject` | TeamPulse: verified outcomes, contributions, blockers, missed commitments with reasons | per run (weekly) |
-| gmail | `Send_Email` `v55` | `to` | the manager types recipients at setup (default: their own email) | once, at setup |
-
-## C. Incoming email / Slack message → pending task request
-
-A manager subscribes **their own** Gmail or Slack; each matching message becomes a PENDING task request for their team
-(source "external", never assigned, idempotent by message id). The handler runs on viaSocket and posts the event to
-`POST /api/viasocket/events/:subscriptionId` with a per-subscription bearer token (stored hashed). Field mapping is
-taken from a real `sampleEvent`, never from the page sample.
-
-| app | trigger (key, version) | key | who supplies it | when |
-| --- | --- | --- | --- | --- |
-| gmail | `New_Email_Arrives` `v11` | `thread` | constant `first_email_only` (replies are not new requests) | — |
-| gmail | `New_Email_Arrives` `v11` | `query` | constant `["label"]` (recommended) or the manager adds sender/subject | once, at setup |
-| gmail | `New_Email_Arrives` `v11` | `searchFields.label` | the manager picks a Gmail label, e.g. "TeamPulse" (PICK) | once, at setup |
-| gmail | `New_Email_Arrives` `v11` | `searchFields.senderEmail`, `.subject` | the manager types them, only if chosen | once, at setup |
-| slack | `New_Message_Posted_in_Channel_Instant` `v2` | `channel_id` | the manager picks one intake channel (PICK "Channel") | once, at setup |
-
-Request fields (TeamPulse, per event): title ← subject / first line; description ← body / message; requester ← sender;
-externalRef ← message id / channel+ts. Bot messages are ignored (no loops with A/B posts).
-
-## D. Full Embed + selected apps in context
-
-- Full Embed: *Automation Center → Advanced builder* (exists): `viaSocket.mount` with the user's embed token; flow
-  events checked against `https://embedfrontend.viasocket.com` and read back with `user.listFlows()`.
-- Selected apps in context, each a drawer with the prebuilt UI restricted by `filteredServices` to that one app's
-  chosen events, started from a TeamPulse event that TeamPulse POSTs to the user's published flow:
-  - *My Tasks* → "When a task is assigned to me" → **Google Calendar** (create an event for the deadline).
-  - *Reports* → "When my weekly report is ready" → **Google Sheets** (add the summary as a row).
-  - *Automation Center → Connected apps* → **GitHub** builder filtered to GitHub.
-  Flows are the user's own; TeamPulse stores each published flow's id + status per user and sends only that user's data.
-
-## Missing configuration / needed from the person
-
-1. Yes to this plan (and the A1/A2 and per-manager B choices).
-2. ViaSocket keys on Embarko — I set them with the deploy token after the yes (they are already in local `.env`).
-3. Test accounts of your own, connected through TeamPulse's own Connect button on https://teampulse.embarko.app
-   (signed in as you): a Slack workspace with a test channel, and a Gmail account. For C also a Gmail label (e.g.
-   "TeamPulse") and a Slack test channel. Not the existing connections of `apps-api-test-user` (other people's).
-4. Your yes before each real send: every test message goes only to you / your test channel.
-
-## Test status (live = against the real viaSocket service)
-
-| what | status |
-| --- | --- |
-| Keys (setup check: listConnections for the test user) | **live OK** |
-| `npx viasocket-apps check` | **0 FAIL, 0 WARN** over 45 files |
-| Catalog: slugs, keys, versions (`listActions`) | **live OK** — Send_Message V107, Send_Email V55, New_Email_Arrives V11, New_Message_Posted_in_Channel_Instant V2 |
-| D — full Embed mounted with a signed token | **live OK** (rendered, `ready` event) |
-| D — contextual builder (`filteredServices`) | **live OK** (only Gmail, Google Calendar, Google Sheets, Slack shown) |
-| Connect popup → stored `auth_id` | UNTESTED — needs the person's own Slack/Gmail sign-in on the live app |
-| listOptions (channels, people, Gmail labels) | UNTESTED — needs a connection |
-| A1/A2/B sends (runAction) | UNTESTED — needs a connection and the person's approval to send |
-| C subscribe + real event | UNTESTED — needs a connection, a label/channel, and a test message |
-| D flow publish → event delivered to the flow | UNTESTED — needs the person to publish a flow |
+**Not built (needs no plan row yet):** Trello, Asana, ClickUp, Notion, Google Calendar, Google Sheets. Their triggers exist in
+the catalog, but nothing is exposed until an adapter is built and tested.

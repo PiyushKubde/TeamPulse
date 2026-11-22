@@ -3,16 +3,13 @@
   "appId": "cmw8w6mdt0uga7cvpw6kwb1h7",
   "schedules": [
     {
-      "cron": "*/15 * * * *",
-      "path": "/tasks/alerts",
+      "cron": "*/5 * * * *",
+      "path": "/api/internal/cron/tick",
       "timezone": "Asia/Kolkata",
-      "name": "TeamPulse alerts, M91 delivery and automation retries"
+      "name": "KONVO tick: phone answers, M91 invitations, sync retries"
     },
-    {
-      "cron": "5 9 * * 1",
-      "path": "/tasks/weekly-report",
-      "timezone": "Asia/Kolkata",
-      "name": "TeamPulse weekly team report"
-    }
+    { "cron": "5 * * * *", "path": "/api/internal/cron/hourly", "timezone": "Asia/Kolkata", "name": "KONVO hourly: reminders, escalations, daily reports" },
+    { "cron": "0 2 * * *", "path": "/api/internal/cron/nightly", "timezone": "Asia/Kolkata", "name": "KONVO nightly: performance snapshots" },
+    { "cron": "0 8 * * 1", "path": "/api/internal/cron/weekly", "timezone": "Asia/Kolkata", "name": "KONVO weekly team reports" }
   ]
 }
