@@ -3,8 +3,12 @@ data/
 .env
 .env.*
 !.env.example
-*.db
-*.db-wal
-*.db-shm
+dist/
+apps/api/src/generated/
+playwright-report/
+test-results/
+coverage/
 .DS_Store
 npm-debug.log*
+data-test/
+data-e2e/

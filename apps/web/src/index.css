@@ -1,0 +1,231 @@
+@import 'tailwindcss';
+
+/* KONVO design system "Ocean Mist": misty white (#F2F7F8) canvas, deep teal (#102830) sidebar, sea green (#5FB3A8) buttons
+   and dark teal (#1E6B66) links and accents. Light is the default; <html data-theme> picks the set (see index.html and
+   lib/theme.ts). Tailwind colour names point at these variables, so every utility follows the theme. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter-latin-wght-normal.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter-latin-ext-wght-normal.woff2') format('woff2');
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f2f7f8;
+  --surface: #ffffff;
+  --surface-2: #f8fbfc;
+  --surface-hover: #e6eff1;
+  --surface-sunken: #e0ebed;
+  --sidebar-bg: #102830;
+  --text: #13262b;
+  --text-2: #33484e;
+  --text-3: #566b70;
+  --border: #d8e5e8;
+  --border-subtle: #e6eff1;
+  --border-strong: #bbcfd3;
+  /* --accent is the text-safe dark teal (links, active states, focus); --brand is the sea green for filled buttons */
+  --accent: #1e6b66;
+  --accent-hover: #175752;
+  --accent-soft: #e1f1ef;
+  --accent-ink: #ffffff;
+  --brand: #5fb3a8;
+  --brand-hover: #4fa498;
+  --brand-ink: #0e2427;
+  --secondary: #a7ddd5;
+  --logo-bg: #5fb3a8;
+  --logo-fg: #0e2427;
+  --teal: #33484e;
+  --teal-soft: #e0ebed;
+  --ok: #1f7a3e;
+  --ok-soft: #e6f3ea;
+  --warn: #a5560b;
+  --warn-ink: #8a4709;
+  --warn-soft: #f8efe2;
+  --bad: #c42b2b;
+  --bad-soft: #fbeaea;
+  --bad-solid: #c42b2b;
+  --on-bad: #ffffff;
+  --violet: #6b4fc8;
+  --violet-soft: #eee9fb;
+  --overlay: rgba(19, 38, 43, 0.45);
+  --shadow-xs: 0 1px 2px rgba(19, 38, 43, 0.05);
+  --shadow-sm: 0 1px 3px rgba(19, 38, 43, 0.08);
+  /* Chart series in fixed order, validated on #FFFFFF (lightness, chroma, CVD, contrast) */
+  --c1: #2563eb;
+  --c2: #0d9488;
+  --c3: #7c3aed;
+  --c4: #d97706;
+  --c5: #db2777;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0f1e23;
+  --surface: #16292f;
+  --surface-2: #132429;
+  --surface-hover: #1d343b;
+  --surface-sunken: #0b181c;
+  --sidebar-bg: #0d2128;
+  --text: #eef5f6;
+  --text-2: #c9d8db;
+  --text-3: #93a9ae;
+  --border: #24393f;
+  --border-subtle: #1c3036;
+  --border-strong: #334d54;
+  --accent: #7ed0c5;
+  --accent-hover: #9adbd2;
+  --accent-soft: rgba(126, 208, 197, 0.13);
+  --accent-ink: #0e2427;
+  --brand: #5fb3a8;
+  --brand-hover: #72c1b6;
+  --brand-ink: #0e2427;
+  --secondary: #a7ddd5;
+  --logo-bg: #5fb3a8;
+  --logo-fg: #0e2427;
+  --teal: #c9d8db;
+  --teal-soft: #1d343b;
+  --ok: #4cc17a;
+  --ok-soft: rgba(76, 193, 122, 0.12);
+  --warn: #e0a93a;
+  --warn-ink: #edc169;
+  --warn-soft: rgba(224, 169, 58, 0.12);
+  --bad: #f0716f;
+  --bad-soft: rgba(240, 113, 111, 0.13);
+  --bad-solid: #c42b2b;
+  --on-bad: #0e2427;
+  --violet: #c4b2ff;
+  --violet-soft: rgba(196, 178, 255, 0.14);
+  --overlay: rgba(5, 14, 17, 0.62);
+  --shadow-xs: 0 1px 1px rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+  /* Validated on a dark card surface */
+  --c1: #4f8ef0;
+  --c2: #1a9e8f;
+  --c3: #9a72e8;
+  --c4: #c98419;
+  --c5: #d45a92;
+}
+
+@theme inline {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --color-canvas: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-hover: var(--surface-hover);
+  --color-sidebar: var(--sidebar-bg);
+  --color-ink: var(--text);
+  --color-ink-soft: var(--text-2);
+  --color-muted: var(--text-3);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-primary: var(--accent);
+  --color-primary-soft: var(--accent-soft);
+  --color-on-primary: var(--accent-ink);
+  --color-teal: var(--teal);
+  --color-teal-soft: var(--teal-soft);
+  --color-success: var(--ok);
+  --color-success-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--bad);
+  --color-danger-soft: var(--bad-soft);
+  --color-on-danger: var(--on-bad);
+  --color-danger-solid: var(--bad-solid);
+  --color-primary-hover: var(--accent-hover);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-on-brand: var(--brand-ink);
+  --color-secondary: var(--secondary);
+  --shadow-xs: var(--shadow-xs);
+  --color-violet: var(--violet);
+  --color-violet-soft: var(--violet-soft);
+  --color-overlay: var(--overlay);
+  --color-logo-bg: var(--logo-bg);
+  --color-logo-fg: var(--logo-fg);
+  --color-c1: var(--c1);
+  --color-c2: var(--c2);
+  --color-c3: var(--c3);
+  --color-c4: var(--c4);
+  --color-c5: var(--c5);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+::selection {
+  background: var(--text);
+  color: var(--bg);
+}
+body {
+  @apply bg-canvas text-ink antialiased;
+  font-feature-settings: 'cv11', 'ss01';
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* The sidebar is always deep teal, so inside it the text, line and accent tokens switch to their light-on-dark values. */
+.sidebar-dark {
+  color-scheme: dark;
+  --surface: #17323b;
+  --surface-2: #143039;
+  --surface-hover: #183740;
+  --text: #eef5f6;
+  --text-2: #c9d8db;
+  --text-3: #93aeb4;
+  --border: #1f3c45;
+  --border-subtle: #1a353e;
+  --border-strong: #2b4b55;
+  --accent: #a7ddd5;
+  --accent-hover: #c0e8e2;
+  --accent-soft: rgba(167, 221, 213, 0.14);
+}
+
+/* KONVO tables: quiet header band, hairline rows. Classes on a cell still win (utilities beat base). */
+@layer base {
+  th {
+    background: var(--surface-2);
+    color: var(--text-3);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+  td {
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--accent);
+  }
+}
