@@ -15,6 +15,7 @@
     "postinstall": "prisma generate",
     "start:e2e": "tsx --env-file-if-exists=../../.env src/server.ts",
     "viasocket:selftest": "tsx --env-file-if-exists=../../.env scripts/viasocket-selftest.ts",
+    "db:seed:company": "tsx --env-file-if-exists=../../.env prisma/seed-company.ts",
     "db:seed:showcase": "tsx --env-file-if-exists=../../.env prisma/seed-showcase.ts",
     "m91:test": "tsx --env-file-if-exists=../../.env scripts/m91-test.ts"
   },

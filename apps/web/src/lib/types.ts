@@ -50,6 +50,8 @@ export interface Member {
   email: string | null
   role: Role
   title: string | null
+  /** Reporting line: user id of the person they report to (null = top of the company). */
+  reportsToId?: string | null
   status: 'ACTIVE' | 'SUSPENDED'
   teams: { id: string; name: string }[]
   managed: boolean

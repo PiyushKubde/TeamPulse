@@ -21,6 +21,23 @@ Bugs found by tests and fixed during the build: the auth rate limit covered `/au
 date-only range end excluded today's work; org-wide roles could address user ids of other orgs (data stayed filtered,
 now 404); reliability ignored work finished early; Zod 4 records required every status key; `runHistory` read the wrong field.
 
+## Company transparency (added 2026-11-22)
+
+Built to the call's brief: visibility and measurability for everyone, CEO to intern, comparable by peers, mentors and
+leadership, with objectives, key results and KPIs at every level. See [architecture.md](architecture.md#company-transparency-srcmodulescompanyts).
+
+| Area | Status | Evidence |
+|---|---|---|
+| Reporting lines and department tree, loop-proof | COMPLETED | `api-company.test.ts` |
+| Open / private visibility (read-only company views) | COMPLETED | `api-company.test.ts`; e2e step 3 |
+| KPIs for everyone, readings, attainment (higher or lower is better) | COMPLETED | `api-company.test.ts`; e2e step 4 |
+| Org chart with roll-ups, compare (peers, team, mentors, managers, leadership, departments, everyone), goal cascade, scorecard | COMPLETED | `e2e/company.spec.ts`; web tests; reviewed in a real browser on desktop and phone width |
+| Scale | VERIFIED at 146 people / 42 teams (~0.4 s) | `db:seed:company` |
+
+Checks after this change: ESLint and Prettier clean, TypeScript clean, API tests 148 passed, web tests pass, Playwright
+`company.spec.ts` 5 passed. Not done: reporting lines do not yet change who a *manager* may edit (that still follows team
+membership), and KPIs are entered by hand (no integration feeds them).
+
 ## Milestones
 
 | # | Milestone | Status |

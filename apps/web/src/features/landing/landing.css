@@ -118,12 +118,12 @@
     border-color var(--dur-fast) var(--ease);
 }
 .lp-btn-primary {
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--brand);
+  color: var(--brand-ink);
 }
 .lp-btn-primary:hover {
-  background: var(--accent-hover);
-  color: var(--accent-ink);
+  background: var(--brand-hover);
+  color: var(--brand-ink);
 }
 .lp-btn-ghost {
   background: transparent;
@@ -137,6 +137,9 @@
   height: 44px;
   padding: 0 22px;
   font-size: 15px;
+}
+.lp-theme-toggle {
+  margin-left: 6px;
 }
 .lp-menu-btn {
   display: none;
@@ -366,9 +369,9 @@
   background: var(--surface);
 }
 .lp-pv-btn.primary {
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-color: var(--accent);
+  background: var(--brand);
+  color: var(--brand-ink);
+  border-color: var(--brand);
 }
 .lp-pv-ladder {
   display: grid;
@@ -670,6 +673,10 @@
   }
   .lp-menu-btn {
     display: inline-flex;
+    margin-left: 2px;
+  }
+  .lp-theme-toggle {
+    margin-left: auto;
   }
   .lp-mobile-nav:not([hidden]) {
     display: flex;

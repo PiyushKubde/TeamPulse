@@ -86,6 +86,8 @@ export const updateOrgSchema = z.object({
     .object({
       retentionDays: z.number().int().min(30).max(3650).optional(),
       requireReportApproval: z.boolean().optional(),
+      /** OPEN (default): everyone in the company can read everyone's scorecard, goals and KPIs. PRIVATE: only your own line (managers, mentors, admins). */
+      transparency: z.enum(['OPEN', 'PRIVATE']).optional(),
     })
     .optional(),
 })
@@ -104,9 +106,31 @@ export const acceptInviteSchema = z.object({
 export const updateMemberSchema = z.object({
   role: z.enum(ROLES).optional(),
   title: text(100).nullable().optional(),
+  /** Reporting line: the person this member reports to (null = top of the hierarchy). */
+  reportsToId: id.nullable().optional(),
   status: z.enum(['ACTIVE', 'SUSPENDED']).optional(),
 })
-export const teamSchema = z.object({ name, managerId: id.nullable().optional() })
+/** `parentId` places a team under a department (or another team). */
+export const teamSchema = z.object({ name, managerId: id.nullable().optional(), parentId: id.nullable().optional() })
+
+// ───────────── KPIs ─────────────
+
+export const KPI_DIRECTIONS = ['HIGHER', 'LOWER'] as const
+export const KPI_CADENCES = ['WEEKLY', 'MONTHLY', 'QUARTERLY'] as const
+export const kpiSchema = z.object({
+  name,
+  unit: text(30).nullable().optional(),
+  direction: z.enum(KPI_DIRECTIONS).default('HIGHER'),
+  baseline: z.number().finite().default(0),
+  target: z.number().finite(),
+  current: z.number().finite().optional(),
+  cadence: z.enum(KPI_CADENCES).default('MONTHLY'),
+  ownerId: id.optional(),
+  teamId: id.nullable().optional(),
+  goalId: id.nullable().optional(),
+})
+export const kpiUpdateSchema = kpiSchema.partial()
+export const kpiReadingSchema = z.object({ value: z.number().finite(), note: text(500).nullable().optional() })
 export const teamMembersSchema = z.object({ userIds: z.array(id).max(500) })
 export const mentorSchema = z.object({ mentorId: id, menteeId: id })
 

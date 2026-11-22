@@ -25,9 +25,8 @@ async function withRetry<T>(what: string, fn: () => Promise<T>) {
 export async function migrate(url: string) {
   const dir = MIGRATIONS
   if (!existsSync(dir)) return
-  const db = createClient({ url })
+  const db = createClient({ url, concurrency: 1, timeout: 30000 })
   try {
-    await db.execute('PRAGMA busy_timeout = 30000')
     await withRetry('prepare', () => db.execute('PRAGMA journal_mode = WAL'))
     await withRetry('prepare', () =>
       db.execute(`CREATE TABLE IF NOT EXISTS "_prisma_migrations" (

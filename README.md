@@ -5,6 +5,10 @@
 KONVO brings tasks from Linear, Jira and GitHub together with native tasks, then measures the *value* of the work:
 impact, execution quality, delivery reliability, goal alignment and evidence. It never counts raw task volume or hours.
 
+It does this in the open, for everyone from the CEO to an intern: reporting lines, departments, objectives and key results that
+cascade down from the company, and KPIs for every person. The **Company** page shows the org chart with roll-ups, compares
+peers, mentors, managers and departments, and opens any person's scorecard.
+
 | | |
 |---|---|
 | `apps/api` | Node.js, TypeScript, Express 5, Prisma 7 (PostgreSQL), BullMQ (Redis), viaSocket (`viasocket-apps`) |
@@ -34,6 +38,7 @@ For integrations and AI, add the three `VIASOCKET_*` values (see [Integrations](
 npm install
 npm run db:deploy        # apply migrations
 npm run db:seed          # optional: demo organization "Northwind Labs (demo)"
+npm run db:seed:company -w @workpulse/api   # optional: "Helios Corp", ~150 people with a CEO, departments, goals and KPIs
 npm run dev              # API :4000 (with jobs and schedules), web :5173
 ```
 

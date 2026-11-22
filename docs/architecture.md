@@ -77,6 +77,26 @@ Out-of-scope records answer **404**; actions a role can never take answer **403*
 `taskScope(ctx)`; analytics intersect the requested people with `visibleUserIds`. Tests cover cross-tenant, cross-team,
 mentor read-only and AI-tool scope.
 
+## Company transparency (src/modules/company.ts)
+
+The brief: everyone, from intern to CEO, is measurable in the open, so peers, mentors and managers can compare and leadership
+can see how the company moves.
+
+- **Structure.** `OrganizationMember.reportsToId` is the reporting line (a tree; the top reports to no one). `Team.parentId`
+  nests teams under departments. Both are validated to stay trees (`assertValidReportingLine`, `assertValidTeamParent`).
+- **What is measured.** Per person: the value score (the performance engine below), goal progress (mean of active goals) and
+  KPI attainment (mean of KPIs, baseline → target, either direction). *Overall* is the plain average of those that exist.
+  Task counts and hours are never ranked. Leaders and departments get a roll-up over everyone below them.
+- **KPIs.** `Kpi` + `KpiReading`: a number someone is accountable for, with history. Everyone can own them, the CEO included.
+- **Cascade.** `Goal.parentId` already existed; the cascade view shows company objectives → executives → departments → teams →
+  people, with KPIs under the objective they serve.
+- **Visibility.** `settings.transparency`: **OPEN** (default) lets every member *read* everyone's scorecard, goals and KPIs in
+  the company views; **PRIVATE** limits the views to the lines the caller could already see (self, managed, mentees);
+  owners/admins always see everyone. This is read-only: `taskScope`, evidence and edit rights are unchanged, and the company
+  endpoints never return tasks, evidence or comments.
+- **Scale.** One batched query scores everybody (`loadScoreInputsByUser`); results are cached for 45 s. About 150 people
+  answer in roughly 0.4 s. `npm run db:seed:company -w @workpulse/api` builds a 146-person demo company ("Helios Corp") to try it.
+
 ## Performance engine (src/services/performance.ts)
 
 Five weighted dimensions (default 30/25/20/15/10, configurable per org and role, versioned):

@@ -35,6 +35,7 @@ const AssistantPage = lazy(() => import('@/features/ai/AssistantPage').then((m) 
 const ReportView = lazy(() => import('@/features/reports/ReportsPage').then((m) => ({ default: m.ReportView })))
 const ReportsPage = lazy(() => import('@/features/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const AlertsPage = lazy(() => import('@/features/alerts/AlertsPage').then((m) => ({ default: m.AlertsPage })))
+const CompanyPage = lazy(() => import('@/features/company/CompanyPage').then((m) => ({ default: m.CompanyPage })))
 const SettingsPage = lazy(() => import('@/features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 
 function RequireAuth({ children, needsOrg = true }: { children: ReactNode; needsOrg?: boolean }) {
@@ -133,6 +134,7 @@ export function App() {
           }
         />
         <Route path="team/members/:userId" element={<MemberProfile />} />
+        <Route path="company" element={<CompanyPage />} />
         <Route path="reviews" element={<ReviewsPage />} />
         <Route path="integrations" element={<IntegrationsPage />} />
         <Route path="automations" element={<AutomationCenter />} />

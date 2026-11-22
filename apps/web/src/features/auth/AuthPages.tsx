@@ -9,10 +9,12 @@ import { api, errorMessage } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { Button, Card, Field, Input, Spinner } from '@/components/ui'
 import { BRAND, Logo } from '@/components/brand'
+import { ThemeToggle } from '@/components/ThemeToggle'
 
 function AuthLayout({ title, subtitle, children, footer }: { title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode }) {
   return (
-    <div className="flex min-h-full items-center justify-center bg-canvas px-4 py-12">
+    <div className="relative flex min-h-full items-center justify-center bg-canvas px-4 py-12">
+      <ThemeToggle className="absolute right-4 top-4" />
       <div className="w-full max-w-sm">
         <Link to="/" className="mb-7 flex justify-center" aria-label="KONVO home">
           <Logo size={32} />

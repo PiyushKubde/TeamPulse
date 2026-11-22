@@ -12,12 +12,12 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 10_000 },
   reporter: [['list'], ['html', { open: 'never' }]],
-  globalSetup: './e2e/global-setup.ts',
   use: { baseURL: 'http://localhost:5180', trace: 'retain-on-failure', screenshot: 'only-on-failure' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
-      command: 'npm run start:e2e -w @workpulse/api',
+      // Fresh database first, then the server (which applies the migrations). Never reset under a running server.
+      command: 'node e2e/reset-db.mjs && npm run start:e2e -w @workpulse/api',
       url: 'http://localhost:4100/health',
       reuseExistingServer: false,
       env: {

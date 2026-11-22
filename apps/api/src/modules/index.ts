@@ -11,8 +11,9 @@ import { people } from './people.js'
 import { reports } from './reports.js'
 import { ai } from './ai.js'
 import { integrations } from './integrations.js'
+import { company } from './company.js'
 
 /** Every route here requires an active organization membership; scope is built per request. */
 export const routes = Router()
 routes.use(requireOrg)
-routes.use(tasks, projects, goals, planner, evidence, analytics, people, reports, ai, integrations)
+routes.use(tasks, projects, goals, planner, evidence, analytics, people, reports, ai, integrations, company)

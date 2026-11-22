@@ -311,3 +311,72 @@ export async function snapshot(orgId: string, subject: string, periodStart: Date
   })
   return { ...result, model: { id: model.id, name: model.name, version: model.version } }
 }
+
+/**
+ * Score inputs for many people at once (one query for the tasks, one for the assessments), grouped by assignee.
+ * The company views score every person, so this avoids two queries per person. Same task filter as loadScoreInput.
+ */
+export async function loadScoreInputsByUser(orgId: string, userIds: string[], periodStart: Date, periodEnd: Date) {
+  const out = new Map<string, Omit<ScoreInput, 'impactTargetPerWeek'>>()
+  for (const id of userIds) out.set(id, { periodStart, periodEnd, tasks: [], qualityScores: [] })
+  if (!userIds.length) return out
+  const tasks = await prisma.task.findMany({
+    where: {
+      orgId,
+      deletedAt: null,
+      assigneeId: { in: userIds },
+      parentId: null,
+      OR: [
+        { completedAt: { gte: periodStart, lt: periodEnd } },
+        { dueAt: { gte: periodStart, lt: periodEnd } },
+        { status: { notIn: ['COMPLETED', 'CANCELLED'] }, dueAt: { lt: periodEnd } },
+        { status: { in: ['IN_PROGRESS', 'IN_REVIEW'] } },
+      ],
+    },
+    select: {
+      id: true,
+      assigneeId: true,
+      impactLevel: true,
+      complexity: true,
+      status: true,
+      dueAt: true,
+      completedAt: true,
+      startedAt: true,
+      estimateMins: true,
+      actualMins: true,
+      reopenCount: true,
+      _count: { select: { goals: true, evidence: { where: { status: 'VERIFIED', deletedAt: null } } } },
+      evidence: { where: { deletedAt: null }, select: { id: true } },
+      blockers: { where: { kind: { in: ['EXTERNAL', 'DEPENDENCY'] } }, select: { id: true } },
+    },
+  })
+  const completed = tasks.filter((t) => t.status === 'COMPLETED')
+  const assessments = await prisma.qualityAssessment.findMany({
+    where: { orgId, taskId: { in: completed.map((t) => t.id) } },
+    select: { taskId: true, quality: true },
+  })
+  const assigneeOf = new Map(completed.map((t) => [t.id, t.assigneeId!]))
+  for (const t of tasks) {
+    out.get(t.assigneeId!)!.tasks.push({
+      id: t.id,
+      impactLevel: t.impactLevel,
+      complexity: t.complexity,
+      status: t.status,
+      dueAt: t.dueAt,
+      completedAt: t.completedAt,
+      startedAt: t.startedAt,
+      estimateMins: t.estimateMins,
+      actualMins: t.actualMins,
+      reopenCount: t.reopenCount,
+      goalLinked: t._count.goals > 0,
+      verifiedEvidence: t._count.evidence,
+      anyEvidence: t.evidence.length,
+      externallyBlocked: t.blockers.length > 0,
+    })
+  }
+  for (const a of assessments) {
+    const who = assigneeOf.get(a.taskId)
+    if (who) out.get(who)!.qualityScores.push(a.quality)
+  }
+  return out
+}

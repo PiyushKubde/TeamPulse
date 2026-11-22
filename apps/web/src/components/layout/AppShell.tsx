@@ -7,6 +7,7 @@ import {
   BarChart3,
   Bell,
   Bot,
+  Building2,
   Check,
   CalendarCheck,
   ChevronDown,
@@ -39,6 +40,7 @@ import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } fr
 import type { Task } from '@/lib/types'
 import { Logo } from '@/components/brand'
 import { useTheme } from '@/lib/theme'
+import { ThemeToggle } from '@/components/ThemeToggle'
 
 interface NavItem {
   to: string
@@ -62,6 +64,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
   {
     section: 'Team',
     items: [
+      { to: '/company', label: 'Company', icon: <Building2 /> },
       { to: '/team', label: 'Team Overview', icon: <Gauge />, managerOnly: true },
       { to: '/team/analytics', label: 'Team Analytics', icon: <Activity />, managerOnly: true },
       { to: '/team/members', label: 'Member Performance', icon: <Users />, managerOnly: true },
@@ -89,6 +92,7 @@ const CRUMBS: Record<string, string> = {
   analytics: 'Analytics',
   reports: 'Reports',
   team: 'Team',
+  company: 'Company',
   members: 'Member Performance',
   reviews: 'Reviews & Feedback',
   integrations: 'Integrations',
@@ -310,7 +314,7 @@ export function AppShell() {
   const nav = useMemo(() => NAV.map((s) => ({ ...s, items: s.items.filter((i) => !i.managerOnly || isManager) })).filter((s) => s.items.length), [isManager])
 
   const sidebar = (
-    <div className="flex h-full flex-col border-r border-line bg-sidebar text-ink-soft">
+    <div className="sidebar-dark flex h-full flex-col border-r border-line bg-sidebar text-ink-soft">
       <Link to="/" className="flex items-center px-4 pb-3 pt-4" aria-label="KONVO home">
         <Logo />
       </Link>
@@ -364,6 +368,7 @@ export function AppShell() {
           </div>
           <div className="flex flex-1 justify-end gap-2 md:flex-none">
             <GlobalSearch />
+            <ThemeToggle />
             <Notifications />
             <Menu>
               <MenuTrigger className="flex items-center gap-2 rounded-lg p-1 hover:bg-hover" aria-label="Account menu">

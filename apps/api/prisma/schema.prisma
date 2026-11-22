@@ -1,9 +1,9 @@
 // KONVO data model. Every tenant-owned row carries orgId; queries go through scoped helpers (src/lib/scope.ts).
 generator client {
-  provider               = "prisma-client"
-  output                 = "../src/generated/prisma"
-  moduleFormat           = "esm"
-  importFileExtension    = "js"
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
 }
 
 datasource db {
@@ -43,21 +43,22 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  sessions        Session[]
-  authTokens      AuthToken[]
-  memberships     OrganizationMember[]
-  teamMembers     TeamMember[]
-  managedTeams    Team[]               @relation("TeamManager")
-  mentorOf        MentorAssignment[]   @relation("Mentor")
-  menteeOf        MentorAssignment[]   @relation("Mentee")
-  assignedTasks   Task[]               @relation("TaskAssignee")
-  createdTasks    Task[]               @relation("TaskCreator")
-  ownedProjects   Project[]
-  ownedGoals      Goal[]
-  workSessions    WorkSession[]
-  dailyPlans      DailyPlan[]
-  notifications   Notification[]
-  connections     IntegrationConnection[]
+  sessions      Session[]
+  authTokens    AuthToken[]
+  memberships   OrganizationMember[]
+  teamMembers   TeamMember[]
+  managedTeams  Team[]                  @relation("TeamManager")
+  mentorOf      MentorAssignment[]      @relation("Mentor")
+  menteeOf      MentorAssignment[]      @relation("Mentee")
+  assignedTasks Task[]                  @relation("TaskAssignee")
+  createdTasks  Task[]                  @relation("TaskCreator")
+  ownedProjects Project[]
+  ownedGoals    Goal[]
+  ownedKpis     Kpi[]
+  workSessions  WorkSession[]
+  dailyPlans    DailyPlan[]
+  notifications Notification[]
+  connections   IntegrationConnection[]
 }
 
 model Session {
@@ -103,6 +104,7 @@ model Organization {
   mentorships   MentorAssignment[]
   projects      Project[]
   goals         Goal[]
+  kpis          Kpi[]
   tasks         Task[]
   taskSources   TaskSource[]
   templates     TaskTemplate[]
@@ -125,19 +127,22 @@ model Organization {
 }
 
 model OrganizationMember {
-  id        String       @id @default(uuid())
-  orgId     String
-  userId    String
-  role      Role         @default(MEMBER)
-  title     String?
-  status    MemberStatus @default(ACTIVE)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
-  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String       @id @default(uuid())
+  orgId       String
+  userId      String
+  role        Role         @default(MEMBER)
+  title       String?
+  /// Who this person reports to (a user id in the same organization). null = top of the hierarchy (e.g. the CEO).
+  reportsToId String?
+  status      MemberStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([orgId, userId])
   @@index([userId])
+  @@index([orgId, reportsToId])
 }
 
 model Invitation {
@@ -163,11 +168,15 @@ model Team {
   id        String       @id @default(uuid())
   orgId     String
   name      String
+  /// Department hierarchy: a team may sit under another team (department > team > sub-team).
+  parentId  String?
   managerId String?
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
   org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   manager   User?        @relation("TeamManager", fields: [managerId], references: [id], onDelete: SetNull)
+  parent    Team?        @relation("TeamTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Team[]       @relation("TeamTree")
   members   TeamMember[]
   projects  Project[]
   goals     Goal[]
@@ -293,14 +302,14 @@ model KeyResult {
 }
 
 model GoalUpdate {
-  id        String   @id @default(uuid())
+  id        String     @id @default(uuid())
   goalId    String
   authorId  String
   progress  Int
   status    GoalStatus
   note      String?
-  createdAt DateTime @default(now())
-  goal      Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+  goal      Goal       @relation(fields: [goalId], references: [id], onDelete: Cascade)
 
   @@index([goalId, createdAt])
 }
@@ -336,48 +345,48 @@ enum TaskOrigin {
 }
 
 model Task {
-  id             String       @id @default(uuid())
+  id             String              @id @default(uuid())
   orgId          String
   projectId      String?
   parentId       String?
   title          String
   description    String?
-  status         TaskStatus   @default(TODO)
-  priority       Priority     @default(MEDIUM)
+  status         TaskStatus          @default(TODO)
+  priority       Priority            @default(MEDIUM)
   category       String?
   /// string[] (SQLite has no list columns)
-  labels         Json         @default("[]")
+  labels         Json                @default("[]")
   assigneeId     String?
   creatorId      String
   dueAt          DateTime?
   startedAt      DateTime?
   completedAt    DateTime?
   estimateMins   Int?
-  actualMins     Int          @default(0)
+  actualMins     Int                 @default(0)
   /// Internal-only. Never written by external sync.
-  impactLevel    ImpactLevel  @default(NONE)
+  impactLevel    ImpactLevel         @default(NONE)
   /// 1-5. Internal-only.
-  complexity     Int          @default(2)
+  complexity     Int                 @default(2)
   recurrenceRule String?
-  reopenCount    Int          @default(0)
-  origin         TaskOrigin   @default(NATIVE)
+  reopenCount    Int                 @default(0)
+  origin         TaskOrigin          @default(NATIVE)
   /// Set when sync could not map a value and a person should look.
-  needsReview    Boolean      @default(false)
-  sortOrder      Float        @default(0)
+  needsReview    Boolean             @default(false)
+  sortOrder      Float               @default(0)
   archivedAt     DateTime?
   deletedAt      DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  org            Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  project        Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  parent         Task?        @relation("Subtasks", fields: [parentId], references: [id], onDelete: Cascade)
-  subtasks       Task[]       @relation("Subtasks")
-  assignee       User?        @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  creator        User         @relation("TaskCreator", fields: [creatorId], references: [id])
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  org            Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project        Project?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  parent         Task?               @relation("Subtasks", fields: [parentId], references: [id], onDelete: Cascade)
+  subtasks       Task[]              @relation("Subtasks")
+  assignee       User?               @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  creator        User                @relation("TaskCreator", fields: [creatorId], references: [id])
   source         TaskSource?
   goals          TaskGoal[]
-  dependsOn      TaskDependency[] @relation("DependentTask")
-  blocking       TaskDependency[] @relation("BlockingTask")
+  dependsOn      TaskDependency[]    @relation("DependentTask")
+  blocking       TaskDependency[]    @relation("BlockingTask")
   comments       TaskComment[]
   activity       TaskActivity[]
   attachments    Attachment[]
@@ -454,16 +463,16 @@ model TaskActivity {
 }
 
 model Attachment {
-  id          String   @id @default(uuid())
-  orgId       String
-  taskId      String
-  uploadedBy  String
-  fileName    String
-  mimeType    String
-  sizeBytes   Int
-  storageKey  String   @unique
-  createdAt   DateTime @default(now())
-  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  id         String   @id @default(uuid())
+  orgId      String
+  taskId     String
+  uploadedBy String
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  storageKey String   @unique
+  createdAt  DateTime @default(now())
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
 }
 
 model TaskTemplate {
@@ -480,9 +489,9 @@ model TaskTemplate {
 }
 
 model TaskSource {
-  id                String       @id @default(uuid())
+  id                String                 @id @default(uuid())
   orgId             String
-  taskId            String       @unique
+  taskId            String                 @unique
   provider          String
   externalId        String
   externalKey       String?
@@ -490,12 +499,12 @@ model TaskSource {
   connectionId      String?
   externalUpdatedAt DateTime?
   externalRevision  String?
-  lastSyncedAt      DateTime     @default(now())
+  lastSyncedAt      DateTime               @default(now())
   /// Last normalized external values, used for two-way conflict detection.
-  lastExternal      Json         @default("{}")
-  rawSnapshot       Json         @default("{}")
-  org               Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  task              Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  lastExternal      Json                   @default("{}")
+  rawSnapshot       Json                   @default("{}")
+  org               Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  task              Task                   @relation(fields: [taskId], references: [id], onDelete: Cascade)
   connection        IntegrationConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
 
   @@unique([orgId, provider, externalId])
@@ -523,25 +532,25 @@ model WorkSession {
 }
 
 model DailyPlan {
-  id           String       @id @default(uuid())
-  orgId        String
-  userId       String
+  id             String       @id @default(uuid())
+  orgId          String
+  userId         String
   /// The user's calendar date, YYYY-MM-DD.
-  date         String
+  date           String
   /// [{ text, taskId? , done }] max 3
-  topOutcomes  Json         @default("[]")
+  topOutcomes    Json         @default("[]")
   /// string[] of task ids
-  plannedTaskIds Json       @default("[]")
-  checkIn      String?
-  energy       Int?
-  review       String?
+  plannedTaskIds Json         @default("[]")
+  checkIn        String?
+  energy         Int?
+  review         String?
   /// [{ taskId, reason }]
-  carryForward Json         @default("[]")
-  reviewedAt   DateTime?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  carryForward   Json         @default("[]")
+  reviewedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  org            Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([orgId, userId, date])
 }
@@ -600,31 +609,31 @@ enum VerificationStatus {
 }
 
 model Evidence {
-  id           String             @id @default(uuid())
-  orgId        String
+  id              String                 @id @default(uuid())
+  orgId           String
   /// Null while a GitHub item waits to be matched to a task.
-  taskId       String?
-  kind         EvidenceKind
-  source       EvidenceSource     @default(MANUAL)
-  title        String
-  url          String?
-  storageKey   String?
-  mimeType     String?
-  sizeBytes    Int?
-  externalId   String?
-  sourceMeta   Json               @default("{}")
-  aiSummary    String?
+  taskId          String?
+  kind            EvidenceKind
+  source          EvidenceSource         @default(MANUAL)
+  title           String
+  url             String?
+  storageKey      String?
+  mimeType        String?
+  sizeBytes       Int?
+  externalId      String?
+  sourceMeta      Json                   @default("{}")
+  aiSummary       String?
   /// Suggested task match for unmatched provider evidence (AI or rule), never applied automatically.
   suggestedTaskId String?
   matchConfidence Float?
-  status       VerificationStatus @default(RECEIVED)
-  addedById    String?
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
-  deletedAt    DateTime?
-  org          Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  task         Task?              @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  verifications EvidenceVerification[]
+  status          VerificationStatus     @default(RECEIVED)
+  addedById       String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  deletedAt       DateTime?
+  org             Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  task            Task?                  @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  verifications   EvidenceVerification[]
 
   @@unique([orgId, source, externalId])
   @@index([orgId, taskId])
@@ -662,29 +671,29 @@ enum SyncMode {
 }
 
 model IntegrationConnection {
-  id          String           @id @default(uuid())
-  orgId       String
-  userId      String
-  provider    String
+  id                 String                    @id @default(uuid())
+  orgId              String
+  userId             String
+  provider           String
   /// AES-256-GCM ciphertext of the viaSocket auth_id.
-  authIdEnc   String
-  authIdHash  String
-  label       String?
-  status      ConnectionStatus @default(ACTIVE)
-  syncMode    SyncMode         @default(ONE_WAY)
+  authIdEnc          String
+  authIdHash         String
+  label              String?
+  status             ConnectionStatus          @default(ACTIVE)
+  syncMode           SyncMode                  @default(ONE_WAY)
   /// Choices made once after Connect: { teamId, teamName, projectKey, repos[], channel, statusMap, userMap }
-  settings    Json             @default("{}")
+  settings           Json                      @default("{}")
   /// AES-256-GCM ciphertext of the enabled-app script_id, when the app is enabled for actions.
   enabledScriptIdEnc String?
-  lastError   String?
-  lastSyncAt  DateTime?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  org         Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  subscriptions IntegrationSubscription[]
-  checkpoints SyncCheckpoint[]
-  taskSources TaskSource[]
+  lastError          String?
+  lastSyncAt         DateTime?
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  org                Organization              @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user               User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptions      IntegrationSubscription[]
+  checkpoints        SyncCheckpoint[]
+  taskSources        TaskSource[]
 
   /// The same app account may be connected in several organizations; one connection per organization.
   @@unique([orgId, userId, provider, authIdHash])
@@ -692,27 +701,27 @@ model IntegrationConnection {
 }
 
 model IntegrationSubscription {
-  id            String                @id @default(uuid())
-  connectionId  String
-  triggerKey    String
+  id           String                @id @default(uuid())
+  connectionId String
+  triggerKey   String
   /// The repo / team / project this subscription watches.
-  resource      String                @default("")
-  version       String
+  resource     String                @default("")
+  version      String
   /// AES-256-GCM ciphertext of the subscription script_id.
-  scriptIdEnc   String?
-  inputData     Json
+  scriptIdEnc  String?
+  inputData    Json
   /// sha256 of the handler string sent to viaSocket (the handler embeds a secret, so it is not stored).
-  handlerHash   String?
+  handlerHash  String?
   /// The PUBLIC_API_URL the handler posts to; when it changes (a new tunnel), handlers are re-pointed on start-up.
-  handlerBase   String?
+  handlerBase  String?
   /// sha256 of the bearer token the handler presents to /api/integrations/events.
-  tokenHash     String                @unique
-  status        String                @default("ACTIVE")
-  lastEventAt   DateTime?
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
-  connection    IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  events        SyncEvent[]
+  tokenHash    String                @unique
+  status       String                @default("ACTIVE")
+  lastEventAt  DateTime?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  connection   IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  events       SyncEvent[]
 
   @@unique([connectionId, triggerKey, resource])
 }
@@ -729,7 +738,7 @@ enum SyncEventStatus {
 }
 
 model SyncEvent {
-  id             String          @id @default(uuid())
+  id             String                   @id @default(uuid())
   orgId          String
   subscriptionId String?
   connectionId   String?
@@ -737,13 +746,13 @@ model SyncEvent {
   eventType      String
   idempotencyKey String
   payload        Json
-  status         SyncEventStatus @default(RECEIVED)
-  attempts       Int             @default(0)
+  status         SyncEventStatus          @default(RECEIVED)
+  attempts       Int                      @default(0)
   error          String?
   taskId         String?
-  receivedAt     DateTime        @default(now())
+  receivedAt     DateTime                 @default(now())
   processedAt    DateTime?
-  org            Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  org            Organization             @relation(fields: [orgId], references: [id], onDelete: Cascade)
   subscription   IntegrationSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
 
   @@unique([orgId, provider, idempotencyKey])
@@ -812,18 +821,18 @@ model SyncConflict {
 // ───────────── Performance ─────────────
 
 model ScoringModel {
-  id        String       @id @default(uuid())
+  id        String                @id @default(uuid())
   orgId     String
   name      String
   /// Applies to members with this role; null = default model.
   role      Role?
-  version   Int          @default(1)
+  version   Int                   @default(1)
   /// { impact, quality, alignment, reliability, evidence } summing to 100
   weights   Json
-  active    Boolean      @default(true)
+  active    Boolean               @default(true)
   createdBy String?
-  createdAt DateTime     @default(now())
-  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdAt DateTime              @default(now())
+  org       Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
   snapshots PerformanceSnapshot[]
 
   @@unique([orgId, name, version])
@@ -882,7 +891,7 @@ enum ReportKind {
 }
 
 model Report {
-  id            String       @id @default(uuid())
+  id            String           @id @default(uuid())
   orgId         String
   kind          ReportKind
   /// "user:<id>" or "team:<id>"
@@ -892,8 +901,8 @@ model Report {
   content       Json
   aiSummary     String?
   generatedById String?
-  createdAt     DateTime     @default(now())
-  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdAt     DateTime         @default(now())
+  org           Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
   deliveries    ReportDelivery[]
 
   @@unique([orgId, kind, subject, periodStart])
@@ -1040,4 +1049,45 @@ model PhoneAlert {
   @@index([status, kind])
   @@index([userId, createdAt])
   @@index([customId, status])
+}
+
+// ───────────── KPIs ─────────────
+// A KPI is a number someone is accountable for that moves over time (unlike a key result, it is not tied to one goal).
+// Everybody can own KPIs, from the CEO down. Every reading is kept, so the trend is visible.
+
+model Kpi {
+  id        String       @id @default(uuid())
+  orgId     String
+  ownerId   String
+  teamId    String?
+  /// Optional goal this KPI serves, so the cascade shows it under that objective.
+  goalId    String?
+  name      String
+  unit      String?
+  /// HIGHER = bigger is better (revenue); LOWER = smaller is better (churn, latency).
+  direction String       @default("HIGHER")
+  baseline  Float        @default(0)
+  target    Float
+  current   Float        @default(0)
+  cadence   String       @default("MONTHLY")
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  deletedAt DateTime?
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  owner     User         @relation(fields: [ownerId], references: [id])
+  readings  KpiReading[]
+
+  @@index([orgId, ownerId])
+}
+
+model KpiReading {
+  id       String   @id @default(uuid())
+  kpiId    String
+  value    Float
+  note     String?
+  authorId String
+  at       DateTime @default(now())
+  kpi      Kpi      @relation(fields: [kpiId], references: [id], onDelete: Cascade)
+
+  @@index([kpiId, at])
 }

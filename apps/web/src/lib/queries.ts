@@ -22,9 +22,16 @@ export const useTeams = () =>
   useQuery({
     queryKey: ['teams'],
     queryFn: () =>
-      api<{ teams: { id: string; name: string; manager: { id: string; name: string } | null; members: { id: string; name: string }[]; canManage: boolean }[] }>(
-        '/teams',
-      ),
+      api<{
+        teams: {
+          id: string
+          name: string
+          parentId?: string | null
+          manager: { id: string; name: string } | null
+          members: { id: string; name: string }[]
+          canManage: boolean
+        }[]
+      }>('/teams'),
     staleTime: 60_000,
     select: (d) => d.teams,
   })

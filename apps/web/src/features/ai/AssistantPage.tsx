@@ -111,7 +111,7 @@ export function AssistantPage() {
             messages.map((m, i) => (
               <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
                 <div
-                  className={`max-w-[85%] rounded-lg px-4 py-2.5 text-sm ${m.role === 'user' ? 'bg-primary text-on-primary' : m.error ? 'bg-danger-soft text-danger' : 'border border-line bg-surface text-ink'}`}
+                  className={`max-w-[85%] rounded-lg px-4 py-2.5 text-sm ${m.role === 'user' ? 'bg-brand text-on-brand' : m.error ? 'bg-danger-soft text-danger' : 'border border-line bg-surface text-ink'}`}
                 >
                   {m.role === 'assistant' ? <Markdown text={m.content} /> : m.content}
                   {m.tools && m.tools.length > 0 && (

@@ -71,6 +71,22 @@ Records outside the caller's scope answer **404**; actions the role can never ta
 | GET | /reports/:id/export.csv · /reports/:id/export.pdf | |
 | POST | /reports/:id/deliver | `{ channel: EMAIL \| SLACK }` to the caller's own destination |
 
+## Company transparency, hierarchy and KPIs
+
+Read-only company views (any member; see "Company transparency" in architecture.md for who sees whom). They never include tasks, evidence or comments.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | /company/overview?days=7..180 | every visible person (value score, goal progress, KPI attainment, overall, health), the reporting tree (`depth`, `directReports`, `subtreeSize`, `rollupOverall`), teams/departments with roll-ups, summary, `transparency` (OPEN·PRIVATE) |
+| GET | /company/people/:userId?days= | one scorecard: score dimensions with their inputs, chain of command, reports, peers, goals with key results, KPIs with readings, `canAddKpi` |
+| GET | /company/cascade | goals (`parentId` tree, company objectives down to individuals) and KPIs (`goalId` links a KPI to an objective) |
+| GET | /kpis?ownerId= | KPIs the caller may read |
+| POST | /kpis | `name, unit, direction (HIGHER·LOWER), baseline, target, current, cadence, ownerId, teamId, goalId`. Own KPIs, or those of people you manage; owners/admins anyone |
+| PATCH/DELETE | /kpis/:id · POST /kpis/:id/readings | same permission; a reading sets `current` and keeps the history |
+| PATCH | /members/:userId | admins: `reportsToId` (null = top of the company). Loops and self-reporting answer 400 |
+| POST/PATCH | /teams · /teams/:id | admins: `parentId` nests a team under a department. Loops answer 400 |
+| PATCH | /organization | admins: `settings.transparency` = OPEN (default) or PRIVATE |
+
 ## AI
 
 All answer `503 ai_not_configured` until AI is configured and `AI_DATA_POLICY_CONFIRMED=true`.

@@ -18,6 +18,7 @@ import {
   BarChart3,
 } from 'lucide-react'
 import { BRAND, LogoMark } from '@/components/brand'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import './landing.css'
 
 const LINKS = [
@@ -67,6 +68,7 @@ function Nav() {
             Get started
           </Link>
         </div>
+        <ThemeToggle className="lp-theme-toggle" />
         <button
           className="lp-menu-btn"
           aria-label={open ? 'Close menu' : 'Open menu'}

@@ -119,7 +119,7 @@ export function Confirm({
             <button
               className={cn(
                 'h-9 rounded-md px-3.5 text-sm font-semibold disabled:opacity-55',
-                danger ? 'bg-danger-solid text-white' : 'bg-primary text-on-primary',
+                danger ? 'bg-danger-solid text-white' : 'bg-brand text-on-brand hover:bg-brand-hover',
               )}
               disabled={busy}
               onClick={async () => {

@@ -6,13 +6,14 @@ import { env } from '../config/env.js'
 
 // One SQLite file (under DATA_DIR on Embarko, which keeps it across redeploys and replicates it).
 if (env.DATABASE_URL.startsWith('file:')) mkdirSync(dirname(env.DATABASE_URL.slice('file:'.length)), { recursive: true })
-export const prisma = new PrismaClient({ adapter: new PrismaLibSql({ url: env.DATABASE_URL }) })
+// One connection: SQLite has one writer anyway and this driver runs statements synchronously, so a pool adds lock
+// contention and nothing else. The timeout makes a write wait for another process (seed, replication) instead of failing.
+// Never call the global client inside prisma.$transaction(async (tx) => …): with one connection that would wait forever.
+export const prisma = new PrismaClient({ adapter: new PrismaLibSql({ url: env.DATABASE_URL, concurrency: 1, timeout: 15000 }) })
 
-/** WAL lets reads run during a write; the busy timeout makes a second writer wait instead of failing. */
+/** WAL lets other processes read during a write. (Foreign keys are on by default in libSQL.) */
 export async function tuneDatabase() {
-  await prisma.$queryRawUnsafe('PRAGMA busy_timeout = 15000')
   await prisma.$queryRawUnsafe('PRAGMA journal_mode = WAL')
-  await prisma.$queryRawUnsafe('PRAGMA foreign_keys = ON')
 }
 /** A JSON column that holds a list of strings (SQLite has no list columns). */
 export const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])

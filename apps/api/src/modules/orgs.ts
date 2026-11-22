@@ -24,6 +24,7 @@ import { hashPassword, startSession } from './auth.js'
 import { connectPhone } from '../services/phone-alerts.js'
 import * as m91 from '../lib/m91.js'
 import { logger } from '../config/logger.js'
+import { assertValidReportingLine, assertValidTeamParent } from './company.js'
 
 export const orgs = Router()
 
@@ -97,6 +98,7 @@ orgs.get('/members', requireOrg, async (req, res) => {
       email: showEmail || m.userId === ctx.userId ? m.user.email : null,
       role: m.role,
       title: m.title,
+      reportsToId: m.reportsToId,
       status: m.status,
       teams: m.user.teamMembers
         .map((t) => t.team)
@@ -120,8 +122,15 @@ orgs.patch('/members/:userId', requireOrg, async (req, res) => {
     const owners = await prisma.organizationMember.count({ where: { orgId: ctx.orgId, role: 'OWNER', status: 'ACTIVE' } })
     if (owners <= 1) throw conflict('An organization needs at least one active owner.')
   }
+  if (input.reportsToId !== undefined) await assertValidReportingLine(ctx.orgId, userId, input.reportsToId)
   const updated = await prisma.organizationMember.update({ where: { id: member.id }, data: input })
-  await audit(req, ctx.orgId, 'member.update', { type: 'User', id: userId }, { from: { role: member.role, status: member.status }, to: input })
+  await audit(
+    req,
+    ctx.orgId,
+    'member.update',
+    { type: 'User', id: userId },
+    { from: { role: member.role, status: member.status, reportsToId: member.reportsToId }, to: input },
+  )
   res.json({ member: updated })
 })
 
@@ -268,6 +277,7 @@ orgs.get('/teams', requireOrg, async (req, res) => {
     teams: teams.map((t) => ({
       id: t.id,
       name: t.name,
+      parentId: t.parentId,
       manager: t.manager,
       members: t.members.map((m) => m.user),
       canManage: ctx.orgWide || ctx.managedTeamIds.includes(t.id),
@@ -287,7 +297,8 @@ orgs.post('/teams', requireOrg, async (req, res) => {
   const input = body(req, teamSchema)
   if (input.managerId) await assertMemberWithRole(ctx.orgId, input.managerId, ['OWNER', 'ADMIN', 'MANAGER'])
   if (await prisma.team.findFirst({ where: { orgId: ctx.orgId, name: input.name } })) throw conflict('A team with this name exists.')
-  const team = await prisma.team.create({ data: { orgId: ctx.orgId, name: input.name, managerId: input.managerId ?? null } })
+  await assertValidTeamParent(ctx.orgId, null, input.parentId)
+  const team = await prisma.team.create({ data: { orgId: ctx.orgId, name: input.name, managerId: input.managerId ?? null, parentId: input.parentId ?? null } })
   await audit(req, ctx.orgId, 'team.create', { type: 'Team', id: team.id }, { name: input.name })
   res.status(201).json({ team })
 })
@@ -299,6 +310,7 @@ orgs.patch('/teams/:id', requireOrg, async (req, res) => {
   const input = body(req, teamSchema.partial())
   if (!(await prisma.team.findFirst({ where: { id, orgId: ctx.orgId } }))) throw notFound('Team')
   if (input.managerId) await assertMemberWithRole(ctx.orgId, input.managerId, ['OWNER', 'ADMIN', 'MANAGER'])
+  if (input.parentId !== undefined) await assertValidTeamParent(ctx.orgId, id, input.parentId)
   const team = await prisma.team.update({ where: { id }, data: input })
   await audit(req, ctx.orgId, 'team.update', { type: 'Team', id }, input as Prisma.InputJsonValue)
   res.json({ team })
