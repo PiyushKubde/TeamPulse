@@ -10,6 +10,7 @@ import { pendingJobs } from '../jobs/queues.js'
 import * as m91 from '../lib/m91.js'
 import { notify } from './notify.js'
 import { chooseAssignee, recordAssignment } from './assignment.js'
+import { isSampleTask } from './sample-data.js'
 
 // ───────────── Failure counters (one process, so plain memory) ─────────────
 
@@ -264,6 +265,8 @@ export async function phoneAlertFromNotification(n: {
 }) {
   if (!m91.platformConfigured()) return
   const taskId = taskIdFrom(n.link)
+  // Sample data never rings anyone: it is there to look at, not to act on.
+  if (taskId && (await isSampleTask(n.orgId, taskId))) return
   if ((n.kind === 'task_assigned' || n.kind === 'external_task') && taskId) {
     const t = await prisma.task.findUnique({
       where: { id: taskId },

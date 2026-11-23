@@ -79,7 +79,8 @@ export const forgotPasswordSchema = z.object({ email: z.string().trim().toLowerC
 export const resetPasswordSchema = z.object({ token: z.string().min(20).max(200), password: passwordSchema })
 export const verifyEmailSchema = z.object({ token: z.string().min(20).max(200) })
 
-export const createOrgSchema = z.object({ name })
+/** sampleData: start with a sample team and its work (removed when real work arrives). Defaults to the server setting. */
+export const createOrgSchema = z.object({ name, sampleData: z.boolean().optional() })
 export const updateOrgSchema = z.object({
   name: name.optional(),
   settings: z

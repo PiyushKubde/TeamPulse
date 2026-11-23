@@ -64,6 +64,12 @@ const schema = z.object({
   M91_SEND_LINK: optional.transform((v) => (v ? v.split('?')[0]!.replace(/\/$/, '') : undefined)),
   /** M91 API key (m91sk_…) to invite users by phone and alert them directly. */
   M91_API_KEY: optional,
+  /** New workspaces start with a sample team and its work, removed when real work arrives (services/sample-data.ts). */
+  SAMPLE_DATA: bool(true),
+  /** "helios" adds the Helios Corp demo company once, at startup, if it is not there yet (see src/demo/helios.ts). */
+  DEMO_SEED: optional,
+  /** Password for every demo account the startup seed creates. Required with DEMO_SEED (at least 12 characters). */
+  DEMO_PASSWORD: optional,
 })
 
 export type Env = z.infer<typeof schema>

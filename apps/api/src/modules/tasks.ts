@@ -24,6 +24,7 @@ import { notify } from '../services/notify.js'
 import { deleteFile, putFile, readLocal, signedUrl } from '../lib/storage.js'
 import { queueOutbound } from '../integrations/outbound.js'
 import { chooseAssignee, recordAssignment, type AssignmentDecision } from '../services/assignment.js'
+import { realWorkArrived, sampleState, withoutSampleRefs } from '../services/sample-data.js'
 
 export const tasks = Router()
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: env.UPLOAD_MAX_BYTES, files: 1 } })
@@ -109,6 +110,12 @@ async function assertRefs(
 }
 
 export async function createTask(ctx: Ctx, input: z.infer<typeof taskCreateSchema>, actor: 'USER' | 'AI' = 'USER', opts: { namedPerson?: string | null } = {}) {
+  // The first real task ends the workspace's sample data, before assignment so nothing lands on a sample teammate.
+  const sample = await sampleState(ctx.orgId)
+  if (sample.active) {
+    input = withoutSampleRefs(input, sample, ctx.userId)
+    await realWorkArrived(ctx.orgId, 'first_task')
+  }
   let decision: AssignmentDecision | null = null
   if (input.assigneeId === 'auto') {
     decision = await chooseAssignee(ctx.orgId, ctx.userId, {

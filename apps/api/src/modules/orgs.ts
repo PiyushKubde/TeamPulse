@@ -25,6 +25,7 @@ import { connectPhone } from '../services/phone-alerts.js'
 import * as m91 from '../lib/m91.js'
 import { logger } from '../config/logger.js'
 import { assertValidReportingLine, assertValidTeamParent } from './company.js'
+import { clearSampleData, createSampleData } from '../services/sample-data.js'
 
 export const orgs = Router()
 
@@ -42,7 +43,7 @@ const slugify = (name: string) =>
 /** Create an organization; the creator becomes its owner and it gets the default scoring model. */
 orgs.post('/organizations', requireAuth, async (req, res) => {
   const user = userOf(req)
-  const { name } = body(req, createOrgSchema)
+  const { name, sampleData } = body(req, createOrgSchema)
   const org = await prisma.$transaction(async (tx) => {
     const org = await tx.organization.create({ data: { name, slug: slugify(name), settings: { retentionDays: 730, requireReportApproval: false } } })
     await tx.organizationMember.create({ data: { orgId: org.id, userId: user.id, role: 'OWNER' } })
@@ -51,7 +52,18 @@ orgs.post('/organizations', requireAuth, async (req, res) => {
     return org
   })
   await audit(req, org.id, 'org.create', { type: 'Organization', id: org.id }, { name })
+  // A sample team and its work, so every page has something to show until real work arrives.
+  if (sampleData ?? env.SAMPLE_DATA) await createSampleData(org.id, user.id)
   res.status(201).json({ organization: org })
+})
+
+/** Removes the sample data now, instead of waiting for the first real task. Admins only. */
+orgs.delete('/organization/sample-data', requireOrg, async (req, res) => {
+  const ctx = ctxOf(req)
+  assertAdmin(ctx)
+  const removed = await clearSampleData(ctx.orgId, 'removed')
+  if (removed) await audit(req, ctx.orgId, 'org.sample_data.remove', { type: 'Organization', id: ctx.orgId }, {})
+  res.json({ removed })
 })
 
 orgs.post('/organizations/:id/switch', requireAuth, async (req, res) => {

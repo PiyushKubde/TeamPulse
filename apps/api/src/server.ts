@@ -13,8 +13,27 @@ await migrate(env.DATABASE_URL)
 await tuneDatabase()
 const server = createApp().listen(env.PORT, '0.0.0.0', () => logger.info(`KONVO on http://localhost:${env.PORT}`))
 startClock()
+void seedDemoCompany()
 // Point viaSocket handlers at the current public URL (a dev tunnel or the app's address).
 void reconcileSubscriptions().catch((e) => logger.warn({ err: e instanceof Error ? e.message : e }, 'reconcile failed'))
+
+/**
+ * DEMO_SEED=helios adds the Helios Corp demo company once, after the server is up (it takes a few seconds), so a
+ * live app has something to show. It skips itself when the company exists, so restarts and redeploys add nothing.
+ */
+async function seedDemoCompany() {
+  if (env.DEMO_SEED !== 'helios') return
+  if (!env.DEMO_PASSWORD || env.DEMO_PASSWORD.length < 12) {
+    logger.error('DEMO_SEED=helios needs DEMO_PASSWORD (at least 12 characters): demo company not created.')
+    return
+  }
+  try {
+    const { seedHelios } = await import('./demo/helios.js')
+    await seedHelios({ password: env.DEMO_PASSWORD, log: (m) => logger.info({ demo: 'helios' }, m) })
+  } catch (e) {
+    logger.error({ err: e instanceof Error ? e.message : e }, 'demo company seed failed')
+  }
+}
 
 async function shutdown() {
   server.close()

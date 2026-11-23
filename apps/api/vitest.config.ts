@@ -14,6 +14,8 @@ export default defineConfig({
     testTimeout: 30000,
     hookTimeout: 60000,
     env: {
+      // Existing suites expect empty workspaces; the sample-data suite asks for it explicitly.
+      SAMPLE_DATA: 'false',
       NODE_ENV: 'test',
       DATABASE_URL: testDb,
       APP_ENCRYPTION_KEY: process.env.APP_ENCRYPTION_KEY ?? Buffer.alloc(32, 7).toString('base64'),
