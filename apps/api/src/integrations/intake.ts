@@ -12,6 +12,7 @@ import type { ApplyResult } from './normalization/normalizer.js'
 import type { NormalizedMessage } from './normalization/types.js'
 import type { ConnectionSettings } from './catalog.js'
 import { chooseAssignee, recordAssignment } from '../services/assignment.js'
+import { realWorkArrived } from '../services/sample-data.js'
 
 const draftSchema = z.object({
   isTask: z.boolean(),
@@ -70,6 +71,8 @@ export async function applyIntake(conn: IntegrationConnection, m: NormalizedMess
   if (draft && !draft.isTask) return { outcome: 'skipped', taskId: null, reason: `Not a task request (AI): ${draft.reason}`, flagged: [] }
 
   const title = draft?.title ?? firstLine(m.text)
+  // Real work arriving ends the workspace's sample data (before assignment, so it never lands on a sample teammate).
+  await realWorkArrived(conn.orgId, 'import')
   const decision = await chooseAssignee(conn.orgId, conn.userId, { title, description: draft?.description ?? m.text, namedPerson: draft?.assigneeName })
   const assigneeId = decision.userId
   const description = [draft?.description, `From Slack:\n> ${m.text.slice(0, 3000)}`].filter(Boolean).join('\n\n')

@@ -41,6 +41,7 @@ import type { Task } from '@/lib/types'
 import { Logo } from '@/components/brand'
 import { useTheme } from '@/lib/theme'
 import { ThemeToggle } from '@/components/ThemeToggle'
+import { SampleDataBanner } from './SampleDataBanner'
 
 interface NavItem {
   to: string
@@ -394,6 +395,7 @@ export function AppShell() {
         </header>
         {me && !me.user.emailVerified && <VerifyBanner />}
         {me?.phoneAlerts?.available && me.phoneAlerts.hasPhone && me.phoneAlerts.state === 'pending' && <PhoneBanner />}
+        <SampleDataBanner />
         <main className="min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
             <Suspense fallback={<Spinner />}>

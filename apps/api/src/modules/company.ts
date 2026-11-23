@@ -19,6 +19,7 @@ import { canManageUser, type Ctx } from '../lib/scope.js'
 import { audit } from '../lib/audit.js'
 import { ctxOf } from '../middleware/auth.js'
 import { computeScore, impactTarget, loadScoreInputsByUser, modelFor, type ScoreResult } from '../services/performance.js'
+import { onSampleCleared } from '../services/sample-data.js'
 
 export const company = Router()
 
@@ -46,6 +47,10 @@ interface Scored {
 }
 const CACHE_MS = 45_000
 const scoreCache = new Map<string, { at: number; byUser: Map<string, Scored> }>()
+// Sample people vanish when real work arrives: forget their scores at once instead of serving them for 45 s.
+onSampleCleared((orgId) => {
+  for (const key of scoreCache.keys()) if (key.startsWith(`${orgId}|`)) scoreCache.delete(key)
+})
 
 async function scoreEveryone(orgId: string, days: number, roles: Map<string, string>) {
   const key = `${orgId}|${days}`

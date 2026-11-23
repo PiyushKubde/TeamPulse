@@ -33,6 +33,8 @@ export default defineConfig({
         // Never reach real phones from tests: the journey signs up with made-up numbers.
         M91_API_KEY: '',
         M91_SEND_LINK: '',
+        // The journey expects an empty workspace after onboarding.
+        SAMPLE_DATA: 'false',
       },
       timeout: 60_000,
     },

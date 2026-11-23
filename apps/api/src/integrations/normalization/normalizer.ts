@@ -6,6 +6,7 @@ import { prisma, type IntegrationConnection, type Prisma, type TaskStatus } from
 import { statusEffects } from '../../modules/tasks.js'
 import { notify } from '../../services/notify.js'
 import { chooseAssignee, recordAssignment, type AssignmentDecision } from '../../services/assignment.js'
+import { realWorkArrived } from '../../services/sample-data.js'
 import type { ConnectionSettings } from '../catalog.js'
 import { mapPriority, mapStatus, normKey } from './status-mapping.js'
 import type { NormalizedComment, NormalizedEvidence, NormalizedTask } from './types.js'
@@ -96,6 +97,8 @@ export async function applyTask(conn: IntegrationConnection, n: NormalizedTask, 
     if (n.deleted) return { outcome: 'skipped', taskId: null, reason: 'Deleted before it was imported.', flagged }
     if (conn.syncMode === 'IMPORT_ONLY' && !opts.backfill)
       return { outcome: 'skipped', taskId: null, reason: 'Import-only connection: live events do not create tasks.', flagged }
+    // Real work arriving ends the workspace's sample data (before assignment, so it never lands on a sample teammate).
+    await realWorkArrived(conn.orgId, 'import')
     const now = new Date()
     // No recognised assignee on open work: pick one automatically (the external name first, else best fit).
     // Work that is already finished stays unassigned: guessing who did past work would hand out false credit.
